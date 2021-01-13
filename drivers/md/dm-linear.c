@@ -28,12 +28,13 @@ struct linear_c {
  */
 static int linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
+	fmode_t mode;
 	struct linear_c *lc;
 	unsigned long long tmp;
 	char dummy;
 	int ret;
 
-	if (argc != 2) {
+	if ((argc < 2) || (argc > 3)) {
 		ti->error = "Invalid argument count";
 		return -EINVAL;
 	}
@@ -51,7 +52,19 @@ static int linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 	lc->start = tmp;
 
-	ret = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table), &lc->dev);
+	mode = dm_table_get_mode(ti->table) | FMODE_EXCL;
+	if (argc > 2) {
+		if (strcmp("noexcl", argv[2]) == 0)
+			mode &= ~FMODE_EXCL;
+		else if (strcmp("excl", argv[2]) == 0)
+			mode |= FMODE_EXCL;
+		else {
+			ti->error = "Invalid exclusive option";
+			return -EINVAL;
+		}
+	}
+
+	ret = dm_get_device(ti, argv[0], mode, &lc->dev);
 	if (ret) {
 		ti->error = "Device lookup failed";
 		goto bad;

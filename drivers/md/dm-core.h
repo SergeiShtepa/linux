@@ -13,10 +13,12 @@
 #include <linux/ktime.h>
 #include <linux/genhd.h>
 #include <linux/blk-mq.h>
+#include <linux/rbtree.h>
 
 #include <trace/events/block.h>
 
 #include "dm.h"
+#include "md-interval-tree.h"
 
 #define DM_RESERVED_MAX_IOS		1024
 
@@ -109,6 +111,9 @@ struct mapped_device {
 	bool init_tio_pdu:1;
 
 	struct srcu_struct io_barrier;
+
+	/* interposer device for remap */
+	struct dm_interposed_dev *ip_dev;
 };
 
 void disable_discard(struct mapped_device *md);
@@ -163,6 +168,31 @@ struct dm_table {
 
 	struct dm_md_mempools *mempools;
 };
+
+/*
+ * For connecting blk_interposer and dm-targets devices.
+ */
+typedef void (*dm_interpose_bio_t) (void *context, struct serial_info *node,  struct bio *bio);
+
+struct dm_interposed_dev {
+	struct gendisk *disk;
+	struct serial_info node;
+	void *context;
+	dm_interpose_bio_t dm_interpose_bio;
+
+	atomic64_t ip_cnt; /*for debug purpose*/
+};
+
+struct dm_interposed_dev *dm_interposer_new_dev(struct gendisk *disk,
+						sector_t ofs, sector_t len,
+						void *context,
+						dm_interpose_bio_t dm_interpose_bio_t);
+void dm_interposer_free_dev(struct dm_interposed_dev *ip_dev);
+int dm_interposer_attach_dev(struct dm_interposed_dev *ip_dev);
+int dm_interposer_detach_dev(struct dm_interposed_dev *ip_dev);
+
+int dm_remap_install(struct mapped_device *md, const char *donor_device_name);
+int dm_remap_uninstall(struct mapped_device *md);
 
 static inline struct completion *dm_get_completion_from_kobject(struct kobject *kobj)
 {

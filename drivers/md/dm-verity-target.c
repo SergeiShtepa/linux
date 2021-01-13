@@ -1023,13 +1023,13 @@ static int verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	}
 	v->version = num;
 
-	r = dm_get_device(ti, argv[1], FMODE_READ, &v->data_dev);
+	r = dm_get_device(ti, argv[1], FMODE_READ | FMODE_EXCL, &v->data_dev);
 	if (r) {
 		ti->error = "Data device lookup failed";
 		goto bad;
 	}
 
-	r = dm_get_device(ti, argv[2], FMODE_READ, &v->hash_dev);
+	r = dm_get_device(ti, argv[2], FMODE_READ | FMODE_EXCL, &v->hash_dev);
 	if (r) {
 		ti->error = "Hash device lookup failed";
 		goto bad;

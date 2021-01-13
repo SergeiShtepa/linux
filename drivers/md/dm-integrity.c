@@ -3840,7 +3840,7 @@ static int dm_integrity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	atomic64_set(&ic->number_of_mismatches, 0);
 	ic->bitmap_flush_interval = BITMAP_FLUSH_INTERVAL;
 
-	r = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table), &ic->dev);
+	r = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table) | FMODE_EXCL, &ic->dev);
 	if (r) {
 		ti->error = "Device lookup failed";
 		goto bad;
@@ -3909,7 +3909,7 @@ static int dm_integrity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 				ic->meta_dev = NULL;
 			}
 			r = dm_get_device(ti, strchr(opt_string, ':') + 1,
-					  dm_table_get_mode(ti->table), &ic->meta_dev);
+					  dm_table_get_mode(ti->table) | FMODE_EXCL, &ic->meta_dev);
 			if (r) {
 				ti->error = "Device lookup failed";
 				goto bad;

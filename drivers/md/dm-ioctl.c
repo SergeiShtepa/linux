@@ -1649,6 +1649,44 @@ static int target_message(struct file *filp, struct dm_ioctl *param, size_t para
 	return r;
 }
 
+static inline int dev_remap_start(struct mapped_device *md, uint8_t *params)
+{
+	char *donor_device_name = (char *)params;
+
+	return dm_remap_install(md, donor_device_name);
+}
+static int dev_remap_finish(struct mapped_device *md)
+{
+	return dm_remap_uninstall(md);
+}
+
+static int dev_remap(struct file *filp, struct dm_ioctl *param, size_t param_size)
+{
+	int ret = 0;
+	struct mapped_device *md;
+	void *bin_data;
+	struct dm_remap_param *remap_param;
+
+	md = find_device(param);
+	if (!md)
+		return -ENXIO;
+
+	bin_data = (void *)(param) + param->data_start;
+	remap_param = bin_data;
+
+	if (remap_param->cmd == REMAP_START_CMD)
+		ret = dev_remap_start(md, remap_param->params);
+	else if (remap_param->cmd == REMAP_FINISH_CMD)
+		ret = dev_remap_finish(md);
+	else {
+		DMWARN("Invalid remap command, %d", remap_param->cmd);
+		ret = -EINVAL;
+	}
+
+	dm_put(md);
+	return ret;
+}
+
 /*
  * The ioctl parameter block consists of two parts, a dm_ioctl struct
  * followed by a data buffer.  This flag is set if the second part,
@@ -1691,6 +1729,7 @@ static ioctl_fn lookup_ioctl(unsigned int cmd, int *ioctl_flags)
 		{DM_DEV_SET_GEOMETRY_CMD, 0, dev_set_geometry},
 		{DM_DEV_ARM_POLL, IOCTL_FLAGS_NO_PARAMS, dev_arm_poll},
 		{DM_GET_TARGET_VERSION, 0, get_target_version},
+		{DM_DEV_REMAP_CMD, 0, dev_remap},
 	};
 
 	if (unlikely(cmd >= ARRAY_SIZE(_ioctls)))

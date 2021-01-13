@@ -29,13 +29,13 @@
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/ratelimit.h>
-#include <linux/interval_tree_generic.h>
 
 #include <trace/events/block.h>
 
 #include "md.h"
 #include "raid1.h"
 #include "md-bitmap.h"
+#include "md-interval-tree.h"
 
 #define UNSUPPORTED_MDDEV_FLAGS		\
 	((1L << MD_HAS_JOURNAL) |	\
@@ -51,11 +51,6 @@ static void lower_barrier(struct r1conf *conf, sector_t sector_nr);
 
 #include "raid1-10.c"
 
-#define START(node) ((node)->start)
-#define LAST(node) ((node)->last)
-INTERVAL_TREE_DEFINE(struct serial_info, node, sector_t, _subtree_last,
-		     START, LAST, static inline, raid1_rb);
-
 static int check_and_add_serial(struct md_rdev *rdev, struct r1bio *r1_bio,
 				struct serial_info *si, int idx)
 {
@@ -67,12 +62,12 @@ static int check_and_add_serial(struct md_rdev *rdev, struct r1bio *r1_bio,
 
 	spin_lock_irqsave(&serial->serial_lock, flags);
 	/* collision happened */
-	if (raid1_rb_iter_first(&serial->serial_rb, lo, hi))
+	if (md_rb_iter_first(&serial->serial_rb, lo, hi))
 		ret = -EBUSY;
 	else {
 		si->start = lo;
 		si->last = hi;
-		raid1_rb_insert(si, &serial->serial_rb);
+		md_rb_insert(si, &serial->serial_rb);
 	}
 	spin_unlock_irqrestore(&serial->serial_lock, flags);
 
@@ -103,10 +98,10 @@ static void remove_serial(struct md_rdev *rdev, sector_t lo, sector_t hi)
 	struct serial_in_rdev *serial = &rdev->serial[idx];
 
 	spin_lock_irqsave(&serial->serial_lock, flags);
-	for (si = raid1_rb_iter_first(&serial->serial_rb, lo, hi);
-	     si; si = raid1_rb_iter_next(si, lo, hi)) {
+	for (si = md_rb_iter_first(&serial->serial_rb, lo, hi);
+	     si; si = md_rb_iter_next(si, lo, hi)) {
 		if (si->start == lo && si->last == hi) {
-			raid1_rb_remove(si, &serial->serial_rb);
+			md_rb_remove(si, &serial->serial_rb);
 			mempool_free(si, mddev->serial_info_pool);
 			found = 1;
 			break;

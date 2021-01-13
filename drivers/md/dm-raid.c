@@ -848,7 +848,8 @@ static int parse_dev_params(struct raid_set *rs, struct dm_arg_set *as)
 			return -EINVAL;
 
 		if (strcmp(arg, "-")) {
-			r = dm_get_device(rs->ti, arg, dm_table_get_mode(rs->ti->table),
+			r = dm_get_device(rs->ti, arg,
+					  dm_table_get_mode(rs->ti->table) | FMODE_EXCL,
 					  &rs->dev[i].meta_dev);
 			if (r) {
 				rs->ti->error = "RAID metadata device lookup failure";
@@ -881,7 +882,7 @@ static int parse_dev_params(struct raid_set *rs, struct dm_arg_set *as)
 			continue;
 		}
 
-		r = dm_get_device(rs->ti, arg, dm_table_get_mode(rs->ti->table),
+		r = dm_get_device(rs->ti, arg, dm_table_get_mode(rs->ti->table) | FMODE_EXCL,
 				  &rs->dev[i].data_dev);
 		if (r) {
 			rs->ti->error = "RAID device lookup failure";
@@ -1251,7 +1252,8 @@ static int parse_raid_params(struct raid_set *rs, struct dm_arg_set *as,
 				rs->ti->error = "'journal_dev' is an invalid parameter for this RAID type";
 				return -EINVAL;
 			}
-			r = dm_get_device(rs->ti, arg, dm_table_get_mode(rs->ti->table),
+			r = dm_get_device(rs->ti, arg,
+					  dm_table_get_mode(rs->ti->table) | FMODE_EXCL,
 					  &rs->journal_dev.dev);
 			if (r) {
 				rs->ti->error = "raid4/5/6 journal device lookup failure";

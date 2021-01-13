@@ -8,6 +8,7 @@
 #include "dm-core.h"
 #include "dm-rq.h"
 #include "dm-uevent.h"
+#include "md-interval-tree.h"
 
 #include <linux/init.h>
 #include <linux/module.h>
@@ -55,6 +56,8 @@ static struct workqueue_struct *deferred_remove_workqueue;
 
 atomic_t dm_global_event_nr = ATOMIC_INIT(0);
 DECLARE_WAIT_QUEUE_HEAD(dm_global_eventq);
+
+static DEFINE_MUTEX(interposer_mutex); /* synchronizing access to blk_interposer */
 
 void dm_issue_global_event(void)
 {
@@ -160,6 +163,19 @@ struct table_device {
 	struct list_head list;
 	refcount_t count;
 	struct dm_dev dm_dev;
+};
+
+/*
+ * Device mapper`s interposer.
+ */
+struct dm_interposer {
+	struct blk_interposer blk_ip;
+	struct gendisk *disk;
+	struct mapped_device *md;
+
+	struct kref kref;
+	struct rw_semaphore ip_devs_lock;
+	struct rb_root_cached ip_devs_root; /* dm_interposed_dev tree */
 };
 
 /*
@@ -733,6 +749,305 @@ static void dm_put_live_table_fast(struct mapped_device *md) __releases(RCU)
 	rcu_read_unlock();
 }
 
+static void dm_submit_bio_interposer_fn(struct blk_interposer *interposer, struct bio *bio)
+{
+	struct dm_interposer *ip = container_of(interposer, struct dm_interposer, blk_ip);
+	unsigned int noio_flag = 0;
+	sector_t start;
+	sector_t last;
+	struct serial_info *node;
+
+	start = bio->bi_iter.bi_sector;
+	last = start + dm_sector_div_up(bio->bi_iter.bi_size, SECTOR_SIZE);
+
+	noio_flag = memalloc_noio_save();
+	down_read(&ip->ip_devs_lock);
+	node = md_rb_iter_first(&ip->ip_devs_root, start, last);
+	while (node) {
+		struct dm_interposed_dev *ip_dev =
+			container_of(node, struct dm_interposed_dev, node);
+
+		atomic64_inc(&ip_dev->ip_cnt);
+		ip_dev->dm_interpose_bio(ip_dev->context, node, bio);
+
+		node = md_rb_iter_next(node, start, last);
+	}
+	up_read(&ip->ip_devs_lock);
+	memalloc_noio_restore(noio_flag);
+}
+
+static void free_interposer(struct kref *kref)
+{
+	struct dm_interposer *ip = container_of(kref, struct dm_interposer, kref);
+
+	if (ip->disk)
+		blk_interposer_detach(ip->disk, dm_submit_bio_interposer_fn);
+
+	kfree(ip);
+}
+
+static struct dm_interposer *new_interposer(struct gendisk *disk)
+{
+	int ret = 0;
+	struct dm_interposer *ip;
+
+	ip = kzalloc(sizeof(struct dm_interposer), GFP_NOIO);
+	if (!ip)
+		return ERR_PTR(-ENOMEM);
+
+	kref_init(&ip->kref);
+	ip->disk = NULL;
+
+	ret = blk_interposer_attach(disk, &ip->blk_ip, dm_submit_bio_interposer_fn,
+				    "device-mapper");
+	if (ret) {
+		DMERR("Failed to attack blk_interposer");
+		kref_put(&ip->kref, free_interposer);
+		return ERR_PTR(ret);
+	}
+
+	ip->disk = disk;
+	init_rwsem(&ip->ip_devs_lock);
+	ip->ip_devs_root = RB_ROOT_CACHED;
+
+	return ip;
+}
+
+static struct dm_interposer *get_interposer(struct gendisk *disk)
+{
+	struct dm_interposer *ip;
+
+	if (!blk_has_interposer(disk))
+		return NULL;
+
+	if (disk->interposer->ip_submit_bio != dm_submit_bio_interposer_fn) {
+		DMERR("Disks interposer slot already occupied by [%s]",
+		      disk->interposer->ip_holder);
+		return ERR_PTR(-EBUSY);
+
+	}
+
+	ip = container_of(disk->interposer, struct dm_interposer, blk_ip);
+
+	/* increment ip reference counter */
+	kref_get(&ip->kref);
+	return ip;
+}
+
+struct dm_interposed_dev *dm_interposer_new_dev(struct gendisk *disk, sector_t ofs, sector_t len,
+						void *context, dm_interpose_bio_t dm_interpose_bio)
+{
+	sector_t start = ofs;
+	sector_t last =  ofs + len - 1;
+	struct dm_interposed_dev *ip_dev = NULL;
+
+	/* Allocate new ip_dev */
+	ip_dev = kzalloc(sizeof(struct dm_interposed_dev), GFP_KERNEL);
+	if (!ip_dev)
+		return NULL;
+
+	ip_dev->disk = disk;
+	ip_dev->node.start = start;
+	ip_dev->node.last = last;
+
+	ip_dev->context = context;
+	ip_dev->dm_interpose_bio = dm_interpose_bio;
+
+	atomic64_set(&ip_dev->ip_cnt, 0);
+
+	return ip_dev;
+}
+
+void dm_interposer_free_dev(struct dm_interposed_dev *ip_dev)
+{
+	kfree(ip_dev);
+}
+
+int dm_interposer_attach_dev(struct dm_interposed_dev *ip_dev)
+{
+	int ret = 0;
+	struct dm_interposer *ip = NULL;
+	unsigned int noio_flag = 0;
+
+	if (!ip_dev)
+		return -EINVAL;
+
+	blk_disk_freeze(ip_dev->disk);
+	mutex_lock(&interposer_mutex);
+	noio_flag = memalloc_noio_save();
+
+	ip = get_interposer(ip_dev->disk);
+	if (ip == NULL)
+		ip = new_interposer(ip_dev->disk);
+	if (IS_ERR(ip)) {
+		ret = PTR_ERR(ip);
+		goto out;
+	}
+
+	/* Attach dm_interposed_dev to dm_interposer */
+	down_write(&ip->ip_devs_lock);
+	do {
+		struct serial_info *node;
+
+		/* checking that ip_dev already exists for this region */
+		node = md_rb_iter_first(&ip->ip_devs_root, ip_dev->node.start, ip_dev->node.last);
+		if (node) {
+			DMERR("Disk part form [%llu] to [%llu] already have interposer",
+			      node->start, node->last);
+
+			ret = -EBUSY;
+			break;
+		}
+
+		/* insert ip_dev to ip tree */
+		md_rb_insert(&ip_dev->node, &ip->ip_devs_root);
+		/* increment ip reference counter */
+		kref_get(&ip->kref);
+	} while (false);
+	up_write(&ip->ip_devs_lock);
+
+	kref_put(&ip->kref, free_interposer);
+
+out:
+	memalloc_noio_restore(noio_flag);
+	mutex_unlock(&interposer_mutex);
+	blk_disk_unfreeze(ip_dev->disk);
+
+	return ret;
+}
+
+int dm_interposer_detach_dev(struct dm_interposed_dev *ip_dev)
+{
+	int ret = 0;
+	struct dm_interposer *ip = NULL;
+	unsigned int noio_flag = 0;
+
+	if (!ip_dev)
+		return -EINVAL;
+
+	blk_disk_freeze(ip_dev->disk);
+	mutex_lock(&interposer_mutex);
+	noio_flag = memalloc_noio_save();
+
+	ip = get_interposer(ip_dev->disk);
+	if (IS_ERR(ip)) {
+		ret = PTR_ERR(ip);
+		DMERR("Interposer not found");
+		goto out;
+	}
+	if (unlikely(ip == NULL)) {
+		ret = -ENXIO;
+		DMERR("Interposer not found");
+		goto out;
+	}
+
+	down_write(&ip->ip_devs_lock);
+	do {
+		md_rb_remove(&ip_dev->node, &ip->ip_devs_root);
+		/* the reference counter here cannot be zero */
+		kref_put(&ip->kref, free_interposer);
+
+	} while (false);
+	up_write(&ip->ip_devs_lock);
+
+	/* detach and free interposer if it`s not needed */
+	kref_put(&ip->kref, free_interposer);
+out:
+	memalloc_noio_restore(noio_flag);
+	mutex_unlock(&interposer_mutex);
+	blk_disk_unfreeze(ip_dev->disk);
+
+	return ret;
+}
+
+static void dm_remap_fn(void *context, struct serial_info *node, struct bio *bio)
+{
+	struct mapped_device *md = context;
+
+	/* Set acceptor device. */
+	bio->bi_disk = md->disk;
+
+	/* Remap disks offset */
+	bio->bi_iter.bi_sector -= node->start;
+
+	/*
+	 * bio should be resubmitted.
+	 * We can just add bio to bio_list of the current process.
+	 * current->bio_list must be initialized when this function is called.
+	 * If call submit_bio_noacct(), the bio will be checked twice.
+	 */
+	BUG_ON(!current->bio_list);
+	bio_list_add(&current->bio_list[0], bio);
+}
+
+int dm_remap_install(struct mapped_device *md, const char *donor_device_name)
+{
+	int ret = 0;
+	struct block_device *donor_bdev;
+	fmode_t mode = FMODE_READ | FMODE_WRITE;
+
+	DMDEBUG("Dm remap install for mapped device %s and donor device %s",
+		md->name, donor_device_name);
+
+	donor_bdev = blkdev_get_by_path(donor_device_name, mode, "device-mapper remap");
+	if (IS_ERR(donor_bdev)) {
+		DMERR("Cannot open device [%s]", donor_device_name);
+		return PTR_ERR(donor_bdev);
+	}
+
+	do {
+		sector_t ofs = get_start_sect(donor_bdev);
+		sector_t len = get_nr_sects(donor_bdev);
+
+		md->ip_dev = dm_interposer_new_dev(donor_bdev->bd_disk, ofs, len, md, dm_remap_fn);
+		if (!md->ip_dev) {
+			ret = -ENOMEM;
+			break;
+		}
+
+		DMDEBUG("New interposed device 0x%p", md->ip_dev);
+		ret = dm_interposer_attach_dev(md->ip_dev);
+		if (ret) {
+			dm_interposer_free_dev(md->ip_dev);
+
+			md->ip_dev = NULL;
+			DMERR("Failed to attach dm interposer");
+			break;
+		}
+
+		DMDEBUG("Attached successfully.");
+	} while (false);
+
+	blkdev_put(donor_bdev, mode);
+
+	return ret;
+}
+
+int dm_remap_uninstall(struct mapped_device *md)
+{
+	int ret = 0;
+
+	DMDEBUG("Dm remap uninstall for mapped device %s ip_dev=0x%p", md->name, md->ip_dev);
+
+	if (!md->ip_dev) {
+		DMERR("Cannot detach dm interposer");
+		return -EINVAL;
+	}
+
+	ret = dm_interposer_detach_dev(md->ip_dev);
+	if (ret) {
+		DMERR("Failed to detach dm interposer");
+		return ret;
+	}
+
+	DMDEBUG("Detached successfully. %llu bios was interposed",
+		atomic64_read(&md->ip_dev->ip_cnt));
+	dm_interposer_free_dev(md->ip_dev);
+	md->ip_dev = NULL;
+
+	return 0;
+}
+
 static char *_dm_claim_ptr = "I belong to device-mapper";
 
 /*
@@ -742,19 +1057,27 @@ static int open_table_device(struct table_device *td, dev_t dev,
 			     struct mapped_device *md)
 {
 	struct block_device *bdev;
-
-	int r;
+	bool is_excl = false;
+	int ret;
 
 	BUG_ON(td->dm_dev.bdev);
 
-	bdev = blkdev_get_by_dev(dev, td->dm_dev.mode | FMODE_EXCL, _dm_claim_ptr);
-	if (IS_ERR(bdev))
-		return PTR_ERR(bdev);
+	if (td->dm_dev.mode & FMODE_EXCL)
+		is_excl = true;
 
-	r = bd_link_disk_holder(bdev, dm_disk(md));
-	if (r) {
-		blkdev_put(bdev, td->dm_dev.mode | FMODE_EXCL);
-		return r;
+	bdev = blkdev_get_by_dev(dev, td->dm_dev.mode, is_excl ? _dm_claim_ptr : NULL);
+	if (IS_ERR(bdev)) {
+		ret = PTR_ERR(bdev);
+		if (ret != -EBUSY)
+			return ret;
+	}
+
+	if (is_excl) {
+		ret = bd_link_disk_holder(bdev, dm_disk(md));
+		if (ret) {
+			blkdev_put(bdev, td->dm_dev.mode);
+			return ret;
+		}
 	}
 
 	td->dm_dev.bdev = bdev;
@@ -770,8 +1093,11 @@ static void close_table_device(struct table_device *td, struct mapped_device *md
 	if (!td->dm_dev.bdev)
 		return;
 
-	bd_unlink_disk_holder(td->dm_dev.bdev, dm_disk(md));
-	blkdev_put(td->dm_dev.bdev, td->dm_dev.mode | FMODE_EXCL);
+	if (td->dm_dev.mode & FMODE_EXCL)
+		bd_unlink_disk_holder(td->dm_dev.bdev, dm_disk(md));
+
+	blkdev_put(td->dm_dev.bdev, td->dm_dev.mode);
+
 	put_dax(td->dm_dev.dax_dev);
 	td->dm_dev.bdev = NULL;
 	td->dm_dev.dax_dev = NULL;
@@ -1992,8 +2318,11 @@ static struct dm_table *__bind(struct mapped_device *md, struct dm_table *t,
 	md->immutable_target_type = dm_table_get_immutable_target_type(t);
 
 	dm_table_set_restrictions(t, q, limits);
-	if (old_map)
+	if (old_map) {
+		//dm_table_deactivate_interposer(old_map);
 		dm_sync_table(md);
+	}
+	//dm_table_activate_interposer(t, md);
 
 out:
 	return old_map;
@@ -2181,6 +2510,14 @@ static void __dm_destroy(struct mapped_device *md, bool wait)
 	int srcu_idx;
 
 	might_sleep();
+
+	if (md->ip_dev) {
+		if (dm_interposer_detach_dev(md->ip_dev))
+			DMERR("Failed to detach dm interposer");
+
+		dm_interposer_free_dev(md->ip_dev);
+		md->ip_dev = NULL;
+	}
 
 	spin_lock(&_minor_lock);
 	idr_replace(&_minor_idr, MINOR_ALLOCED, MINOR(disk_devt(dm_disk(md))));
