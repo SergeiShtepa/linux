@@ -288,7 +288,7 @@ static int ebs_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	} else
 		ec->u_bs_set = false;
 
-	r = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table), &ec->dev);
+	r = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table) | FMODE_EXCL, &ec->dev);
 	if (r) {
 		ti->error = "Device lookup failed";
 		ec->dev = NULL;

@@ -942,7 +942,7 @@ static struct pgpath *parse_path(struct dm_arg_set *as, struct path_selector *ps
 	if (!p)
 		return ERR_PTR(-ENOMEM);
 
-	r = dm_get_device(ti, dm_shift_arg(as), dm_table_get_mode(ti->table),
+	r = dm_get_device(ti, dm_shift_arg(as), dm_table_get_mode(ti->table) | FMODE_EXCL,
 			  &p->path.dev);
 	if (r) {
 		ti->error = "error getting device";
@@ -1962,7 +1962,7 @@ static int multipath_message(struct dm_target *ti, unsigned argc, char **argv,
 		goto out;
 	}
 
-	r = dm_get_device(ti, argv[1], dm_table_get_mode(ti->table), &dev);
+	r = dm_get_device(ti, argv[1], dm_table_get_mode(ti->table) | FMODE_EXCL, &dev);
 	if (r) {
 		DMWARN("message: error getting device %s",
 		       argv[1]);

@@ -3318,7 +3318,7 @@ static int pool_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	if (r)
 		goto out_unlock;
 
-	metadata_mode = FMODE_READ | ((pf.mode == PM_READ_ONLY) ? 0 : FMODE_WRITE);
+	metadata_mode = FMODE_READ | ((pf.mode == PM_READ_ONLY) ? 0 : FMODE_WRITE) | FMODE_EXCL;
 	r = dm_get_device(ti, argv[0], metadata_mode, &metadata_dev);
 	if (r) {
 		ti->error = "Error opening metadata block device";
@@ -3326,7 +3326,7 @@ static int pool_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	}
 	warn_if_metadata_device_too_big(metadata_dev->bdev);
 
-	r = dm_get_device(ti, argv[1], FMODE_READ | FMODE_WRITE, &data_dev);
+	r = dm_get_device(ti, argv[1], FMODE_READ | FMODE_WRITE | FMODE_EXCL, &data_dev);
 	if (r) {
 		ti->error = "Error getting data device";
 		goto out_metadata;
@@ -4192,7 +4192,7 @@ static int thin_ctr(struct dm_target *ti, unsigned argc, char **argv)
 			goto bad_origin_dev;
 		}
 
-		r = dm_get_device(ti, argv[2], FMODE_READ, &origin_dev);
+		r = dm_get_device(ti, argv[2], FMODE_READ | FMODE_EXCL, &origin_dev);
 		if (r) {
 			ti->error = "Error opening origin device";
 			goto bad_origin_dev;
@@ -4200,7 +4200,7 @@ static int thin_ctr(struct dm_target *ti, unsigned argc, char **argv)
 		tc->origin_dev = origin_dev;
 	}
 
-	r = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table), &pool_dev);
+	r = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table) | FMODE_EXCL, &pool_dev);
 	if (r) {
 		ti->error = "Error opening pool device";
 		goto bad_pool_dev;

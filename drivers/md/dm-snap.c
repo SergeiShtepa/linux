@@ -1257,7 +1257,7 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	char *origin_path, *cow_path;
 	dev_t origin_dev, cow_dev;
 	unsigned args_used, num_flush_bios = 1;
-	fmode_t origin_mode = FMODE_READ;
+	fmode_t origin_mode = FMODE_READ | FMODE_EXCL;
 
 	if (argc < 4) {
 		ti->error = "requires 4 or more arguments";
@@ -1267,7 +1267,7 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 
 	if (dm_target_is_snapshot_merge(ti)) {
 		num_flush_bios = 2;
-		origin_mode = FMODE_WRITE;
+		origin_mode = FMODE_WRITE | FMODE_EXCL;
 	}
 
 	s = kzalloc(sizeof(*s), GFP_KERNEL);
@@ -1306,7 +1306,7 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto bad_cow;
 	}
 
-	r = dm_get_device(ti, cow_path, dm_table_get_mode(ti->table), &s->cow);
+	r = dm_get_device(ti, cow_path, dm_table_get_mode(ti->table) | FMODE_EXCL, &s->cow);
 	if (r) {
 		ti->error = "Cannot get COW device";
 		goto bad_cow;
@@ -2646,7 +2646,7 @@ static int origin_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto bad_alloc;
 	}
 
-	r = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table), &o->dev);
+	r = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table) | FMODE_EXCL, &o->dev);
 	if (r) {
 		ti->error = "Cannot get target device";
 		goto bad_open;
