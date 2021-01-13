@@ -997,7 +997,7 @@ int dm_remap_install(struct mapped_device *md, const char *donor_device_name)
 
 	do {
 		sector_t ofs = get_start_sect(donor_bdev);
-		sector_t len = get_nr_sects(donor_bdev);
+		sector_t len = bdev_nr_sectors(donor_bdev);
 
 		md->ip_dev = dm_interposer_new_dev(donor_bdev->bd_disk, ofs, len, md, dm_remap_fn);
 		if (!md->ip_dev) {
