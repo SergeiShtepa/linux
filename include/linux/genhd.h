@@ -135,11 +135,11 @@ struct blk_integrity {
 };
 
 struct blk_interposer;
-typedef void (*ip_submit_bio_t) (struct blk_interposer *ip, struct bio *bio);
+typedef void (*ip_submit_bio_t) (struct bio *bio);
 
 struct blk_interposer {
 	ip_submit_bio_t ip_submit_bio;
-	char ip_holder[32];
+	struct gendisk *disk;
 };
 
 struct gendisk {
@@ -360,12 +360,9 @@ static inline void printk_all_partitions(void)
  */
 #define blk_has_interposer(d) ((d)->interposer != NULL)
 
-void blk_disk_freeze(struct gendisk *disk);
-void blk_disk_unfreeze(struct gendisk *disk);
-
 int blk_interposer_attach(struct gendisk *disk, struct blk_interposer *interposer,
-			  const ip_submit_bio_t ip_submit_bio, const char *ip_holder);
-struct blk_interposer *blk_interposer_detach(struct gendisk *disk,
-					     const ip_submit_bio_t ip_submit_bio);
+			  const ip_submit_bio_t ip_submit_bio);
+void blk_interposer_detach(struct blk_interposer *interposer,
+			   const ip_submit_bio_t ip_submit_bio);
 
 #endif /* _LINUX_GENHD_H */

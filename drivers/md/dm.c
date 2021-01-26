@@ -170,7 +170,6 @@ struct table_device {
  */
 struct dm_interposer {
 	struct blk_interposer blk_ip;
-	struct gendisk *disk;
 	struct mapped_device *md;
 
 	struct kref kref;
@@ -749,14 +748,15 @@ static void dm_put_live_table_fast(struct mapped_device *md) __releases(RCU)
 	rcu_read_unlock();
 }
 
-static void dm_submit_bio_interposer_fn(struct blk_interposer *interposer, struct bio *bio)
+static void dm_submit_bio_interposer_fn(struct bio *bio)
 {
-	struct dm_interposer *ip = container_of(interposer, struct dm_interposer, blk_ip);
+	struct dm_interposer *ip;
 	unsigned int noio_flag = 0;
 	sector_t start;
 	sector_t last;
 	struct serial_info *node;
 
+	ip = container_of(bio->bi_disk->interposer, struct dm_interposer, blk_ip);
 	start = bio->bi_iter.bi_sector;
 	last = start + dm_sector_div_up(bio->bi_iter.bi_size, SECTOR_SIZE);
 
@@ -780,8 +780,7 @@ static void free_interposer(struct kref *kref)
 {
 	struct dm_interposer *ip = container_of(kref, struct dm_interposer, kref);
 
-	if (ip->disk)
-		blk_interposer_detach(ip->disk, dm_submit_bio_interposer_fn);
+	blk_interposer_detach(&ip->blk_ip, dm_submit_bio_interposer_fn);
 
 	kfree(ip);
 }
@@ -796,19 +795,15 @@ static struct dm_interposer *new_interposer(struct gendisk *disk)
 		return ERR_PTR(-ENOMEM);
 
 	kref_init(&ip->kref);
-	ip->disk = NULL;
+	init_rwsem(&ip->ip_devs_lock);
+	ip->ip_devs_root = RB_ROOT_CACHED;
 
-	ret = blk_interposer_attach(disk, &ip->blk_ip, dm_submit_bio_interposer_fn,
-				    "device-mapper");
+	ret = blk_interposer_attach(disk, &ip->blk_ip, dm_submit_bio_interposer_fn);
 	if (ret) {
 		DMERR("Failed to attack blk_interposer");
 		kref_put(&ip->kref, free_interposer);
 		return ERR_PTR(ret);
 	}
-
-	ip->disk = disk;
-	init_rwsem(&ip->ip_devs_lock);
-	ip->ip_devs_root = RB_ROOT_CACHED;
 
 	return ip;
 }
@@ -821,15 +816,12 @@ static struct dm_interposer *get_interposer(struct gendisk *disk)
 		return NULL;
 
 	if (disk->interposer->ip_submit_bio != dm_submit_bio_interposer_fn) {
-		DMERR("Disks interposer slot already occupied by [%s]",
-		      disk->interposer->ip_holder);
+		DMERR("Disks interposer slot already occupied.");
 		return ERR_PTR(-EBUSY);
-
 	}
 
 	ip = container_of(disk->interposer, struct dm_interposer, blk_ip);
 
-	/* increment ip reference counter */
 	kref_get(&ip->kref);
 	return ip;
 }
@@ -863,6 +855,18 @@ void dm_interposer_free_dev(struct dm_interposed_dev *ip_dev)
 	kfree(ip_dev);
 }
 
+static inline void dm_disk_freeze(struct gendisk *disk)
+{
+	blk_mq_freeze_queue(disk->queue);
+	blk_mq_quiesce_queue(disk->queue);
+}
+
+static inline void dm_disk_unfreeze(struct gendisk *disk)
+{
+	blk_mq_unquiesce_queue(disk->queue);
+	blk_mq_unfreeze_queue(disk->queue);
+}
+
 int dm_interposer_attach_dev(struct dm_interposed_dev *ip_dev)
 {
 	int ret = 0;
@@ -872,7 +876,7 @@ int dm_interposer_attach_dev(struct dm_interposed_dev *ip_dev)
 	if (!ip_dev)
 		return -EINVAL;
 
-	blk_disk_freeze(ip_dev->disk);
+	dm_disk_freeze(ip_dev->disk);
 	mutex_lock(&interposer_mutex);
 	noio_flag = memalloc_noio_save();
 
@@ -911,7 +915,7 @@ int dm_interposer_attach_dev(struct dm_interposed_dev *ip_dev)
 out:
 	memalloc_noio_restore(noio_flag);
 	mutex_unlock(&interposer_mutex);
-	blk_disk_unfreeze(ip_dev->disk);
+	dm_disk_unfreeze(ip_dev->disk);
 
 	return ret;
 }
@@ -925,7 +929,7 @@ int dm_interposer_detach_dev(struct dm_interposed_dev *ip_dev)
 	if (!ip_dev)
 		return -EINVAL;
 
-	blk_disk_freeze(ip_dev->disk);
+	dm_disk_freeze(ip_dev->disk);
 	mutex_lock(&interposer_mutex);
 	noio_flag = memalloc_noio_save();
 
@@ -955,7 +959,7 @@ int dm_interposer_detach_dev(struct dm_interposed_dev *ip_dev)
 out:
 	memalloc_noio_restore(noio_flag);
 	mutex_unlock(&interposer_mutex);
-	blk_disk_unfreeze(ip_dev->disk);
+	dm_disk_unfreeze(ip_dev->disk);
 
 	return ret;
 }

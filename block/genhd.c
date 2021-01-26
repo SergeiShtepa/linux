@@ -30,6 +30,7 @@
 static struct kobject *block_depr;
 
 DECLARE_RWSEM(bdev_lookup_sem);
+DEFINE_MUTEX(bdev_interposer_mutex);
 
 /* for extended dynamic devt allocation, currently only one major is used */
 #define NR_EXT_DEVT		(1 << MINORBITS)
@@ -2151,28 +2152,6 @@ static void disk_release_events(struct gendisk *disk)
 }
 
 /**
- * blk_disk_freeze - Freeze block devices disk
- * @disk: disk to freeze
- */
-void blk_disk_freeze(struct gendisk *disk)
-{
-	blk_mq_freeze_queue(disk->queue);
-	blk_mq_quiesce_queue(disk->queue);
-}
-EXPORT_SYMBOL_GPL(blk_disk_freeze);
-
-/**
- * blk_disk_unfreeze - Unfreeze block devices disk
- * @disk: disk to freeze
- */
-void blk_disk_unfreeze(struct gendisk *disk)
-{
-	blk_mq_unquiesce_queue(disk->queue);
-	blk_mq_unfreeze_queue(disk->queue);
-}
-EXPORT_SYMBOL_GPL(blk_disk_unfreeze);
-
-/**
  * blk_interposer_attach - Attach interposer to disk
  * @disk: target disk
  * @interposer: block device interposer
@@ -2180,64 +2159,75 @@ EXPORT_SYMBOL_GPL(blk_disk_unfreeze);
  *
  * Returns:
  *     -EINVAL if @interposer is NULL.
- *     -EBUSY if the block device already has interposer.
+ *     -EPERM if queue is not frozen.
+ *     -EBUSY if the block device already has @interposer.
+ *     -EALREADY if the block device already has @interposer with same callback.
  *
- * Disk must be frozen by blk_disk_freeze() and unfrozen blk_disk_unfreeze().
+ * Disk must be frozen by blk_mq_freeze_queue().
  */
 int blk_interposer_attach(struct gendisk *disk, struct blk_interposer *interposer,
-			  const ip_submit_bio_t ip_submit_bio, const char *ip_holder)
+			  const ip_submit_bio_t ip_submit_bio)
 {
+	int ret = 0;
+
 	if (!interposer)
 		return -EINVAL;
 
-	if (blk_has_interposer(disk))
-		return -EBUSY;
+	if (!blk_mq_is_queue_frozen(disk->queue))
+		return -EPERM;
+
+	mutex_lock(&bdev_interposer_mutex);
+	if (blk_has_interposer(disk)) {
+		if (disk->interposer->ip_submit_bio == ip_submit_bio)
+			ret = -EALREADY;
+		else
+			ret = -EBUSY;
+		goto out;
+	}
 
 	interposer->ip_submit_bio = ip_submit_bio;
-
-	strncpy(interposer->ip_holder, ip_holder, sizeof(interposer->ip_holder));
-	interposer->ip_holder[sizeof(interposer->ip_holder)-1] = '\0';
+	interposer->disk = disk;
 
 	disk->interposer = interposer;
+out:
+	mutex_unlock(&bdev_interposer_mutex);
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL_GPL(blk_interposer_attach);
 
 /**
  * blk_interposer_detach - Detach interposer from disk
- * @disk: target disk
+ * @interposer: block device interposer
  * @ip_submit_bio: hook for submit_bio()
  *
- * Returns the attached interposer or error number if it was not attached,
- * or a foreign interposer was attached.
- *
- * Return errors:
- *     -EINVAL if @disk is NULL.
- *     -ENOENT if the block device already has not interposer.
- *     -EPERM if found strange interposer.
- *
- * Disk must be frozen by blk_disk_freeze() and unfrozen blk_disk_unfreeze().
+ * Disk must be frozen by blk_mq_freeze_queue().
  */
-struct blk_interposer *blk_interposer_detach(struct gendisk *disk,
-					     const ip_submit_bio_t ip_submit_bio)
+void blk_interposer_detach(struct blk_interposer *interposer,
+			  const ip_submit_bio_t ip_submit_bio)
 {
-	struct blk_interposer *interposer;
+	struct gendisk *disk;
 
+	if (WARN_ON(!interposer))
+		return;
+
+	mutex_lock(&bdev_interposer_mutex);
+
+	/* Check if the interposer is still active. */
+	disk = interposer->disk;
 	if (WARN_ON(!disk))
-		return ERR_PTR(-EINVAL);
+		goto out;
 
-	/* Check if the interposer is still available. */
-	if (!disk->interposer)
-		return ERR_PTR(-ENOENT);
+	if (WARN_ON(!blk_mq_is_queue_frozen(disk->queue)))
+		goto out;
 
 	/* Check if it is really our interposer. */
-	if (disk->interposer->ip_submit_bio != ip_submit_bio)
-		return ERR_PTR(-EPERM);
+	if (WARN_ON(disk->interposer->ip_submit_bio != ip_submit_bio))
+		goto out;
 
-	interposer = disk->interposer;
 	disk->interposer = NULL;
-
-	return interposer;
+	interposer->disk = NULL;
+out:
+	mutex_unlock(&bdev_interposer_mutex);
 }
 EXPORT_SYMBOL_GPL(blk_interposer_detach);

@@ -1042,12 +1042,9 @@ static blk_qc_t __submit_bio_interposed(struct bio *bio)
 		struct gendisk *disk = bio->bi_disk;
 
 		bio_set_flag(bio, BIO_INTERPOSED);
-		if (likely(blk_has_interposer(disk))) {
-			struct blk_interposer *ip = disk->interposer;
-
-			ip->ip_submit_bio(ip, bio);
-		} else
-			/* interposer was removed */
+		if (likely(blk_has_interposer(disk)))
+			disk->interposer->ip_submit_bio(bio);
+		else /* interposer was removed */
 			bio_list_add(&current->bio_list[0], bio);
 
 		blk_queue_exit(disk->queue);
