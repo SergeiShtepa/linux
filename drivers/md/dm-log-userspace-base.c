@@ -291,7 +291,7 @@ static int userspace_ctr(struct dm_dirty_log *log, struct dm_target *ti,
 			goto out;
 		}
 		r = dm_get_device(ti, devices_rdata,
-				  dm_table_get_mode(ti->table) | FMODE_EXCL, &lc->log_dev);
+				  dm_table_get_mode(ti->table), &lc->log_dev);
 		if (r)
 			DMERR("Failed to register %s with device-mapper",
 			      devices_rdata);

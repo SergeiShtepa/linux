@@ -68,7 +68,7 @@ static int get_stripe(struct dm_target *ti, struct stripe_c *sc,
 	if (sscanf(argv[1], "%llu%c", &start, &dummy) != 1)
 		return -EINVAL;
 
-	ret = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table) | FMODE_EXCL,
+	ret = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table),
 			    &sc->stripe[stripe].dev);
 	if (ret)
 		return ret;

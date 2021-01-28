@@ -207,7 +207,7 @@ static int parse_path(struct dm_arg_set *as, struct dm_target *ti)
 	unsigned long long start;
 	int r;
 
-	r = dm_get_device(ti, dm_shift_arg(as), dm_table_get_mode(ti->table) | FMODE_EXCL,
+	r = dm_get_device(ti, dm_shift_arg(as), dm_table_get_mode(ti->table),
 			  &sctx->path_list[sctx->nr_paths].dmdev);
 	if (r) {
 		ti->error = "Device lookup failed";

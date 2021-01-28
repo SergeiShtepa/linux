@@ -73,7 +73,7 @@ static int unstripe_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto err;
 	}
 
-	if (dm_get_device(ti, argv[3], dm_table_get_mode(ti->table) | FMODE_EXCL, &uc->dev)) {
+	if (dm_get_device(ti, argv[3], dm_table_get_mode(ti->table), &uc->dev)) {
 		ti->error = "Couldn't get striped device";
 		goto err;
 	}

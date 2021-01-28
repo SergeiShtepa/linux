@@ -946,7 +946,7 @@ static int get_mirror(struct mirror_set *ms, struct dm_target *ti,
 		return -EINVAL;
 	}
 
-	ret = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table) | FMODE_EXCL,
+	ret = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table),
 			    &ms->mirror[mirror].dev);
 	if (ret) {
 		ti->error = "Device lookup failure";

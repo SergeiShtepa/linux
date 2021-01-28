@@ -2098,7 +2098,7 @@ static int parse_metadata_dev(struct cache_args *ca, struct dm_arg_set *as,
 	if (!at_least_one_arg(as, error))
 		return -EINVAL;
 
-	r = dm_get_device(ca->ti, dm_shift_arg(as), FMODE_READ | FMODE_WRITE | FMODE_EXCL,
+	r = dm_get_device(ca->ti, dm_shift_arg(as), FMODE_READ | FMODE_WRITE,
 			  &ca->metadata_dev);
 	if (r) {
 		*error = "Error opening metadata device";
@@ -2121,7 +2121,7 @@ static int parse_cache_dev(struct cache_args *ca, struct dm_arg_set *as,
 	if (!at_least_one_arg(as, error))
 		return -EINVAL;
 
-	r = dm_get_device(ca->ti, dm_shift_arg(as), FMODE_READ | FMODE_WRITE | FMODE_EXCL,
+	r = dm_get_device(ca->ti, dm_shift_arg(as), FMODE_READ | FMODE_WRITE,
 			  &ca->cache_dev);
 	if (r) {
 		*error = "Error opening cache device";
@@ -2140,7 +2140,7 @@ static int parse_origin_dev(struct cache_args *ca, struct dm_arg_set *as,
 	if (!at_least_one_arg(as, error))
 		return -EINVAL;
 
-	r = dm_get_device(ca->ti, dm_shift_arg(as), FMODE_READ | FMODE_WRITE | FMODE_EXCL,
+	r = dm_get_device(ca->ti, dm_shift_arg(as), FMODE_READ | FMODE_WRITE,
 			  &ca->origin_dev);
 	if (r) {
 		*error = "Error opening origin device";
