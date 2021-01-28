@@ -1147,7 +1147,8 @@ int dm_get_table_device(struct mapped_device *md, dev_t dev, fmode_t mode, bool 
 		td->dm_dev.mode = mode;
 		td->dm_dev.bdev = NULL;
 
-		if ((r = open_table_device(td, dev, md, non_exclusive))) {
+		r = open_table_device(td, dev, md, non_exclusive);
+		if (r) {
 			mutex_unlock(&md->table_devices_lock);
 			kfree(td);
 			return r;
