@@ -52,12 +52,12 @@ static int linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 	lc->start = tmp;
 
-	mode = dm_table_get_mode(ti->table) | FMODE_EXCL;
+	ti->non_exclusive = false;
 	if (argc > 2) {
 		if (strcmp("noexcl", argv[2]) == 0)
-			mode &= ~FMODE_EXCL;
+			ti->non_exclusive = true;
 		else if (strcmp("excl", argv[2]) == 0)
-			mode |= FMODE_EXCL;
+			ti->non_exclusive = false;
 		else {
 			ti->error = "Invalid exclusive option";
 			return -EINVAL;

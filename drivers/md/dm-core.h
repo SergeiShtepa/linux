@@ -14,11 +14,9 @@
 #include <linux/genhd.h>
 #include <linux/blk-mq.h>
 #include <linux/rbtree.h>
-
 #include <trace/events/block.h>
 
 #include "dm.h"
-#include "md-interval-tree.h"
 
 #define DM_RESERVED_MAX_IOS		1024
 
@@ -170,13 +168,29 @@ struct dm_table {
 };
 
 /*
+ * Interval tree for device mapper
+ */
+struct dm_rb_range {
+	struct rb_node node;
+	sector_t start;		/* start sector of rb node */
+	sector_t last;		/* end sector of rb node */
+	sector_t _subtree_last; /* highest sector in subtree of rb node */
+};
+
+void dm_rb_insert(struct dm_rb_range *node, struct rb_root_cached *root);
+void dm_rb_remove(struct dm_rb_range *node, struct rb_root_cached *root);
+
+struct dm_rb_range *dm_rb_iter_first(struct rb_root_cached *root, sector_t start, sector_t last);
+struct dm_rb_range *dm_rb_iter_next(struct dm_rb_range *node, sector_t start, sector_t last);
+
+/*
  * For connecting blk_interposer and dm-targets devices.
  */
-typedef void (*dm_interpose_bio_t) (void *context, struct serial_info *node,  struct bio *bio);
+typedef void (*dm_interpose_bio_t) (void *context, struct dm_rb_range *node,  struct bio *bio);
 
 struct dm_interposed_dev {
 	struct gendisk *disk;
-	struct serial_info node;
+	struct dm_rb_range node;
 	void *context;
 	dm_interpose_bio_t dm_interpose_bio;
 

@@ -696,7 +696,7 @@ static int dmz_get_zoned_device(struct dm_target *ti, char *path,
 	struct block_device *bdev;
 
 	/* Get the target device */
-	ret = dm_get_device(ti, path, dm_table_get_mode(ti->table) | FMODE_EXCL, &ddev);
+	ret = dm_get_device(ti, path, dm_table_get_mode(ti->table), &ddev);
 	if (ret) {
 		ti->error = "Get target device failed";
 		return ret;

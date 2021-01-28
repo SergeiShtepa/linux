@@ -8,7 +8,6 @@
 #include "dm-core.h"
 #include "dm-rq.h"
 #include "dm-uevent.h"
-#include "md-interval-tree.h"
 
 #include <linux/init.h>
 #include <linux/module.h>
@@ -29,6 +28,7 @@
 #include <linux/refcount.h>
 #include <linux/part_stat.h>
 #include <linux/blk-crypto.h>
+#include <linux/interval_tree_generic.h>
 
 #define DM_MSG_PREFIX "core"
 
@@ -176,6 +176,14 @@ struct dm_interposer {
 	struct rw_semaphore ip_devs_lock;
 	struct rb_root_cached ip_devs_root; /* dm_interposed_dev tree */
 };
+
+/*
+ * Interval tree for device mapper
+ */
+#define START(node) ((node)->start)
+#define LAST(node) ((node)->last)
+INTERVAL_TREE_DEFINE(struct dm_rb_range, node, sector_t, _subtree_last,
+		     START, LAST,, dm_rb);
 
 /*
  * Bio-based DM's mempools' reserved IOs set by the user.
@@ -754,7 +762,7 @@ static void dm_submit_bio_interposer_fn(struct bio *bio)
 	unsigned int noio_flag = 0;
 	sector_t start;
 	sector_t last;
-	struct serial_info *node;
+	struct dm_rb_range *node;
 
 	ip = container_of(bio->bi_disk->interposer, struct dm_interposer, blk_ip);
 	start = bio->bi_iter.bi_sector;
@@ -762,7 +770,7 @@ static void dm_submit_bio_interposer_fn(struct bio *bio)
 
 	noio_flag = memalloc_noio_save();
 	down_read(&ip->ip_devs_lock);
-	node = md_rb_iter_first(&ip->ip_devs_root, start, last);
+	node = dm_rb_iter_first(&ip->ip_devs_root, start, last);
 	while (node) {
 		struct dm_interposed_dev *ip_dev =
 			container_of(node, struct dm_interposed_dev, node);
@@ -770,7 +778,7 @@ static void dm_submit_bio_interposer_fn(struct bio *bio)
 		atomic64_inc(&ip_dev->ip_cnt);
 		ip_dev->dm_interpose_bio(ip_dev->context, node, bio);
 
-		node = md_rb_iter_next(node, start, last);
+		node = dm_rb_iter_next(node, start, last);
 	}
 	up_read(&ip->ip_devs_lock);
 	memalloc_noio_restore(noio_flag);
@@ -891,10 +899,10 @@ int dm_interposer_attach_dev(struct dm_interposed_dev *ip_dev)
 	/* Attach dm_interposed_dev to dm_interposer */
 	down_write(&ip->ip_devs_lock);
 	do {
-		struct serial_info *node;
+		struct dm_rb_range *node;
 
 		/* checking that ip_dev already exists for this region */
-		node = md_rb_iter_first(&ip->ip_devs_root, ip_dev->node.start, ip_dev->node.last);
+		node = dm_rb_iter_first(&ip->ip_devs_root, ip_dev->node.start, ip_dev->node.last);
 		if (node) {
 			DMERR("Disk part form [%llu] to [%llu] already have interposer",
 			      node->start, node->last);
@@ -904,7 +912,7 @@ int dm_interposer_attach_dev(struct dm_interposed_dev *ip_dev)
 		}
 
 		/* insert ip_dev to ip tree */
-		md_rb_insert(&ip_dev->node, &ip->ip_devs_root);
+		dm_rb_insert(&ip_dev->node, &ip->ip_devs_root);
 		/* increment ip reference counter */
 		kref_get(&ip->kref);
 	} while (false);
@@ -947,7 +955,7 @@ int dm_interposer_detach_dev(struct dm_interposed_dev *ip_dev)
 
 	down_write(&ip->ip_devs_lock);
 	do {
-		md_rb_remove(&ip_dev->node, &ip->ip_devs_root);
+		dm_rb_remove(&ip_dev->node, &ip->ip_devs_root);
 		/* the reference counter here cannot be zero */
 		kref_put(&ip->kref, free_interposer);
 
@@ -964,7 +972,7 @@ out:
 	return ret;
 }
 
-static void dm_remap_fn(void *context, struct serial_info *node, struct bio *bio)
+static void dm_remap_fn(void *context, struct dm_rb_range *node, struct bio *bio)
 {
 	struct mapped_device *md = context;
 
@@ -1058,25 +1066,25 @@ static char *_dm_claim_ptr = "I belong to device-mapper";
  * Open a table device so we can use it as a map destination.
  */
 static int open_table_device(struct table_device *td, dev_t dev,
-			     struct mapped_device *md)
+			     struct mapped_device *md, bool non_exclusive)
 {
 	struct block_device *bdev;
-	bool is_excl = false;
 	int ret;
 
 	BUG_ON(td->dm_dev.bdev);
 
-	if (td->dm_dev.mode & FMODE_EXCL)
-		is_excl = true;
+	if (non_exclusive)
+		bdev = blkdev_get_by_dev(dev, td->dm_dev.mode, NULL);
+	else
+		bdev = blkdev_get_by_dev(dev, td->dm_dev.mode | FMODE_EXCL, _dm_claim_ptr);
 
-	bdev = blkdev_get_by_dev(dev, td->dm_dev.mode, is_excl ? _dm_claim_ptr : NULL);
 	if (IS_ERR(bdev)) {
 		ret = PTR_ERR(bdev);
 		if (ret != -EBUSY)
 			return ret;
 	}
 
-	if (is_excl) {
+	if (!non_exclusive) {
 		ret = bd_link_disk_holder(bdev, dm_disk(md));
 		if (ret) {
 			blkdev_put(bdev, td->dm_dev.mode);
@@ -1108,25 +1116,27 @@ static void close_table_device(struct table_device *td, struct mapped_device *md
 }
 
 static struct table_device *find_table_device(struct list_head *l, dev_t dev,
-					      fmode_t mode)
+					      fmode_t mode, bool non_exclusive)
 {
 	struct table_device *td;
 
 	list_for_each_entry(td, l, list)
-		if (td->dm_dev.bdev->bd_dev == dev && td->dm_dev.mode == mode)
+		if (td->dm_dev.bdev->bd_dev == dev &&
+		    td->dm_dev.mode == mode &&
+		    td->dm_dev.non_exclusive == non_exclusive)
 			return td;
 
 	return NULL;
 }
 
-int dm_get_table_device(struct mapped_device *md, dev_t dev, fmode_t mode,
+int dm_get_table_device(struct mapped_device *md, dev_t dev, fmode_t mode, bool non_exclusive,
 			struct dm_dev **result)
 {
 	int r;
 	struct table_device *td;
 
 	mutex_lock(&md->table_devices_lock);
-	td = find_table_device(&md->table_devices, dev, mode);
+	td = find_table_device(&md->table_devices, dev, mode, non_exclusive);
 	if (!td) {
 		td = kmalloc_node(sizeof(*td), GFP_KERNEL, md->numa_node_id);
 		if (!td) {
@@ -1137,7 +1147,7 @@ int dm_get_table_device(struct mapped_device *md, dev_t dev, fmode_t mode,
 		td->dm_dev.mode = mode;
 		td->dm_dev.bdev = NULL;
 
-		if ((r = open_table_device(td, dev, md))) {
+		if ((r = open_table_device(td, dev, md, non_exclusive))) {
 			mutex_unlock(&md->table_devices_lock);
 			kfree(td);
 			return r;
@@ -2322,11 +2332,8 @@ static struct dm_table *__bind(struct mapped_device *md, struct dm_table *t,
 	md->immutable_target_type = dm_table_get_immutable_target_type(t);
 
 	dm_table_set_restrictions(t, q, limits);
-	if (old_map) {
-		//dm_table_deactivate_interposer(old_map);
+	if (old_map)
 		dm_sync_table(md);
-	}
-	//dm_table_activate_interposer(t, md);
 
 out:
 	return old_map;

@@ -2145,7 +2145,7 @@ static int writecache_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	string = dm_shift_arg(&as);
 	if (!string)
 		goto bad_arguments;
-	r = dm_get_device(ti, string, dm_table_get_mode(ti->table) | FMODE_EXCL, &wc->dev);
+	r = dm_get_device(ti, string, dm_table_get_mode(ti->table), &wc->dev);
 	if (r) {
 		ti->error = "Origin data device lookup failed";
 		goto bad;
@@ -2158,7 +2158,7 @@ static int writecache_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	if (!string)
 		goto bad_arguments;
 
-	r = dm_get_device(ti, string, dm_table_get_mode(ti->table) | FMODE_EXCL, &wc->ssd_dev);
+	r = dm_get_device(ti, string, dm_table_get_mode(ti->table), &wc->ssd_dev);
 	if (r) {
 		ti->error = "Cache data device lookup failed";
 		goto bad;

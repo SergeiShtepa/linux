@@ -153,7 +153,7 @@ static int delay_class_ctr(struct dm_target *ti, struct delay_class *c, char **a
 		return -EINVAL;
 	}
 
-	ret = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table) | FMODE_EXCL, &c->dev);
+	ret = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table), &c->dev);
 	if (ret) {
 		ti->error = "Device lookup failed";
 		return ret;

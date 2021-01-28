@@ -19,7 +19,6 @@
 #include <linux/wait.h>
 #include <linux/workqueue.h>
 #include "md-cluster.h"
-#include "md-interval-tree.h"
 
 #define MaxSector (~(sector_t)0)
 
@@ -273,6 +272,13 @@ enum mddev_sb_flags {
 };
 
 #define NR_SERIAL_INFOS		8
+/* record current range of serialize IOs */
+struct serial_info {
+	struct rb_node node;
+	sector_t start;		/* start sector of rb node */
+	sector_t last;		/* end sector of rb node */
+	sector_t _subtree_last; /* highest sector in subtree of rb node */
+};
 
 struct mddev {
 	void				*private;
