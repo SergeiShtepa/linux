@@ -1041,9 +1041,10 @@ static blk_qc_t __submit_bio_interposed(struct bio *bio)
 	if (likely(bio_queue_enter(bio) == 0)) {
 		struct gendisk *disk = bio->bi_disk;
 
-		bio_set_flag(bio, BIO_INTERPOSED);
-		if (likely(blk_has_interposer(disk)))
+		if (likely(blk_has_interposer(disk))){
+			bio_set_flag(bio, BIO_INTERPOSED);
 			disk->interposer->ip_submit_bio(bio);
+		}
 		else /* interposer was removed */
 			bio_list_add(&current->bio_list[0], bio);
 
@@ -1083,6 +1084,10 @@ blk_qc_t submit_bio_noacct(struct bio *bio)
 		return BLK_QC_T_NONE;
 	}
 
+	/*
+	 * Checking the BIO_INTERPOSED flag is necessary so that the bio
+	 * created by the blk_interposer do not get to it for processing.
+	 */
 	if (blk_has_interposer(bio->bi_disk) &&
 	    !bio_flagged(bio, BIO_INTERPOSED))
 		return __submit_bio_interposed(bio);

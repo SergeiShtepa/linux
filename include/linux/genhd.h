@@ -134,7 +134,6 @@ struct blk_integrity {
 	unsigned char				tag_size;
 };
 
-struct blk_interposer;
 typedef void (*ip_submit_bio_t) (struct bio *bio);
 
 struct blk_interposer {

@@ -14,6 +14,7 @@
 #include <linux/genhd.h>
 #include <linux/blk-mq.h>
 #include <linux/rbtree.h>
+
 #include <trace/events/block.h>
 
 #include "dm.h"
@@ -167,9 +168,6 @@ struct dm_table {
 	struct dm_md_mempools *mempools;
 };
 
-/*
- * Interval tree for device mapper
- */
 struct dm_rb_range {
 	struct rb_node node;
 	sector_t start;		/* start sector of rb node */
@@ -182,28 +180,6 @@ void dm_rb_remove(struct dm_rb_range *node, struct rb_root_cached *root);
 
 struct dm_rb_range *dm_rb_iter_first(struct rb_root_cached *root, sector_t start, sector_t last);
 struct dm_rb_range *dm_rb_iter_next(struct dm_rb_range *node, sector_t start, sector_t last);
-
-/*
- * For connecting blk_interposer and dm-targets devices.
- */
-typedef void (*dm_interpose_bio_t) (void *context, struct dm_rb_range *node,  struct bio *bio);
-
-struct dm_interposed_dev {
-	struct gendisk *disk;
-	struct dm_rb_range node;
-	void *context;
-	dm_interpose_bio_t dm_interpose_bio;
-
-	atomic64_t ip_cnt; /*for debug purpose*/
-};
-
-struct dm_interposed_dev *dm_interposer_new_dev(struct gendisk *disk,
-						sector_t ofs, sector_t len,
-						void *context,
-						dm_interpose_bio_t dm_interpose_bio_t);
-void dm_interposer_free_dev(struct dm_interposed_dev *ip_dev);
-int dm_interposer_attach_dev(struct dm_interposed_dev *ip_dev);
-int dm_interposer_detach_dev(struct dm_interposed_dev *ip_dev);
 
 int dm_remap_install(struct mapped_device *md, const char *donor_device_name);
 int dm_remap_uninstall(struct mapped_device *md);

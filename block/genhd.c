@@ -2170,7 +2170,7 @@ int blk_interposer_attach(struct gendisk *disk, struct blk_interposer *interpose
 {
 	int ret = 0;
 
-	if (!interposer)
+	if (WARN_ON(!interposer))
 		return -EINVAL;
 
 	if (!blk_mq_is_queue_frozen(disk->queue))

@@ -57,7 +57,7 @@ static struct workqueue_struct *deferred_remove_workqueue;
 atomic_t dm_global_event_nr = ATOMIC_INIT(0);
 DECLARE_WAIT_QUEUE_HEAD(dm_global_eventq);
 
-static DEFINE_MUTEX(interposer_mutex); /* synchronizing access to blk_interposer */
+static DEFINE_MUTEX(dm_interposer_attach_lock);
 
 void dm_issue_global_event(void)
 {
@@ -166,7 +166,7 @@ struct table_device {
 };
 
 /*
- * Device mapper`s interposer.
+ * Device mapper's interposer.
  */
 struct dm_interposer {
 	struct blk_interposer blk_ip;
@@ -175,6 +175,17 @@ struct dm_interposer {
 	struct kref kref;
 	struct rw_semaphore ip_devs_lock;
 	struct rb_root_cached ip_devs_root; /* dm_interposed_dev tree */
+};
+
+typedef void (*dm_interpose_bio_t) (void *context, struct dm_rb_range *node,  struct bio *bio);
+
+struct dm_interposed_dev {
+	struct gendisk *disk;
+	struct dm_rb_range node;
+	void *context;
+	dm_interpose_bio_t dm_interpose_bio;
+
+	atomic64_t ip_cnt; /*for debug purpose*/
 };
 
 /*
@@ -784,7 +795,7 @@ static void dm_submit_bio_interposer_fn(struct bio *bio)
 	memalloc_noio_restore(noio_flag);
 }
 
-static void free_interposer(struct kref *kref)
+static void dm_interposer_free(struct kref *kref)
 {
 	struct dm_interposer *ip = container_of(kref, struct dm_interposer, kref);
 
@@ -793,7 +804,7 @@ static void free_interposer(struct kref *kref)
 	kfree(ip);
 }
 
-static struct dm_interposer *new_interposer(struct gendisk *disk)
+static struct dm_interposer *dm_interposer_new(struct gendisk *disk)
 {
 	int ret = 0;
 	struct dm_interposer *ip;
@@ -809,14 +820,14 @@ static struct dm_interposer *new_interposer(struct gendisk *disk)
 	ret = blk_interposer_attach(disk, &ip->blk_ip, dm_submit_bio_interposer_fn);
 	if (ret) {
 		DMERR("Failed to attack blk_interposer");
-		kref_put(&ip->kref, free_interposer);
+		kref_put(&ip->kref, dm_interposer_free);
 		return ERR_PTR(ret);
 	}
 
 	return ip;
 }
 
-static struct dm_interposer *get_interposer(struct gendisk *disk)
+static struct dm_interposer *dm_interposer_get(struct gendisk *disk)
 {
 	struct dm_interposer *ip;
 
@@ -834,7 +845,7 @@ static struct dm_interposer *get_interposer(struct gendisk *disk)
 	return ip;
 }
 
-struct dm_interposed_dev *dm_interposer_new_dev(struct gendisk *disk, sector_t ofs, sector_t len,
+static struct dm_interposed_dev *dm_interposer_new_dev(struct gendisk *disk, sector_t ofs, sector_t len,
 						void *context, dm_interpose_bio_t dm_interpose_bio)
 {
 	sector_t start = ofs;
@@ -858,7 +869,7 @@ struct dm_interposed_dev *dm_interposer_new_dev(struct gendisk *disk, sector_t o
 	return ip_dev;
 }
 
-void dm_interposer_free_dev(struct dm_interposed_dev *ip_dev)
+static inline void dm_interposer_free_dev(struct dm_interposed_dev *ip_dev)
 {
 	kfree(ip_dev);
 }
@@ -875,7 +886,7 @@ static inline void dm_disk_unfreeze(struct gendisk *disk)
 	blk_mq_unfreeze_queue(disk->queue);
 }
 
-int dm_interposer_attach_dev(struct dm_interposed_dev *ip_dev)
+static int dm_interposer_attach_dev(struct dm_interposed_dev *ip_dev)
 {
 	int ret = 0;
 	struct dm_interposer *ip = NULL;
@@ -885,12 +896,12 @@ int dm_interposer_attach_dev(struct dm_interposed_dev *ip_dev)
 		return -EINVAL;
 
 	dm_disk_freeze(ip_dev->disk);
-	mutex_lock(&interposer_mutex);
+	mutex_lock(&dm_interposer_attach_lock);
 	noio_flag = memalloc_noio_save();
 
-	ip = get_interposer(ip_dev->disk);
+	ip = dm_interposer_get(ip_dev->disk);
 	if (ip == NULL)
-		ip = new_interposer(ip_dev->disk);
+		ip = dm_interposer_new(ip_dev->disk);
 	if (IS_ERR(ip)) {
 		ret = PTR_ERR(ip);
 		goto out;
@@ -918,17 +929,17 @@ int dm_interposer_attach_dev(struct dm_interposed_dev *ip_dev)
 	} while (false);
 	up_write(&ip->ip_devs_lock);
 
-	kref_put(&ip->kref, free_interposer);
+	kref_put(&ip->kref, dm_interposer_free);
 
 out:
 	memalloc_noio_restore(noio_flag);
-	mutex_unlock(&interposer_mutex);
+	mutex_unlock(&dm_interposer_attach_lock);
 	dm_disk_unfreeze(ip_dev->disk);
 
 	return ret;
 }
 
-int dm_interposer_detach_dev(struct dm_interposed_dev *ip_dev)
+static int dm_interposer_detach_dev(struct dm_interposed_dev *ip_dev)
 {
 	int ret = 0;
 	struct dm_interposer *ip = NULL;
@@ -938,10 +949,10 @@ int dm_interposer_detach_dev(struct dm_interposed_dev *ip_dev)
 		return -EINVAL;
 
 	dm_disk_freeze(ip_dev->disk);
-	mutex_lock(&interposer_mutex);
+	mutex_lock(&dm_interposer_attach_lock);
 	noio_flag = memalloc_noio_save();
 
-	ip = get_interposer(ip_dev->disk);
+	ip = dm_interposer_get(ip_dev->disk);
 	if (IS_ERR(ip)) {
 		ret = PTR_ERR(ip);
 		DMERR("Interposer not found");
@@ -957,16 +968,16 @@ int dm_interposer_detach_dev(struct dm_interposed_dev *ip_dev)
 	do {
 		dm_rb_remove(&ip_dev->node, &ip->ip_devs_root);
 		/* the reference counter here cannot be zero */
-		kref_put(&ip->kref, free_interposer);
+		kref_put(&ip->kref, dm_interposer_free);
 
 	} while (false);
 	up_write(&ip->ip_devs_lock);
 
-	/* detach and free interposer if it`s not needed */
-	kref_put(&ip->kref, free_interposer);
+	/* detach and free interposer if it's not needed */
+	kref_put(&ip->kref, dm_interposer_free);
 out:
 	memalloc_noio_restore(noio_flag);
-	mutex_unlock(&interposer_mutex);
+	mutex_unlock(&dm_interposer_attach_lock);
 	dm_disk_unfreeze(ip_dev->disk);
 
 	return ret;
