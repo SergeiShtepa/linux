@@ -27,6 +27,7 @@ Device Mapper
     linear
     log-writes
     persistent-data
+    remap_and_filter
     snapshot
     statistics
     striped
