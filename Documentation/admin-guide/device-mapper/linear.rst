@@ -6,12 +6,22 @@ Device-Mapper's "linear" target maps a linear range of the Device-Mapper
 device onto a linear range of another device.  This is the basic building
 block of logical volume managers.
 
-Parameters: <dev path> <offset>
+Parameters: <dev path> <offset> [<options>]
     <dev path>:
-	Full pathname to the underlying block-device, or a
+        Full pathname to the underlying block-device, or a
         "major:minor" device-number.
     <offset>:
-	Starting sector within the device.
+        Starting sector within the device.
+    <options>:
+        Options allow to set the exclusivity mode. The exclusivity mode
+        can be 'excl' and 'noexcl'. By default, then options is not set,
+        the 'excl' mode is used. 'noexcl' mode allow to open device
+        without FMODE_EXCL flag. This allow to create liner device with
+        underlying block-device that are already used by the system. For
+        example, the file system on this device is already mounted.
+        The 'noexcl' option should be used when creating dm devices that
+        will be used as acceptor when connecting the device mapper to an
+        existing block device with the 'dmsetup remap' command.
 
 
 Example scripts
@@ -61,3 +71,13 @@ Example scripts
   }
 
   `echo \"$table\" | dmsetup create $name`;
+
+::
+
+  #!/bin/sh
+  # Create linear device and remap all requests from the original device
+  # to new linear.
+  DEV=$1
+
+  echo "0 `blockdev --getsz $DEV` linear $DEV 0 noexcl" | dmsetup create dm-noexcl
+  dmsetup remap start dm-noexcl $DEV
