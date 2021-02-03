@@ -845,8 +845,10 @@ static struct dm_interposer *dm_interposer_get(struct gendisk *disk)
 	return ip;
 }
 
-static struct dm_interposed_dev *dm_interposer_new_dev(struct gendisk *disk, sector_t ofs, sector_t len,
-						void *context, dm_interpose_bio_t dm_interpose_bio)
+static struct dm_interposed_dev *dm_interposer_new_dev(struct gendisk *disk,
+						       sector_t ofs, sector_t len,
+						       void *context,
+						       dm_interpose_bio_t dm_interpose_bio)
 {
 	sector_t start = ofs;
 	sector_t last =  ofs + len - 1;
