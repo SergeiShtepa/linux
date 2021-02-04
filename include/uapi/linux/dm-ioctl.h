@@ -220,8 +220,8 @@ enum {
 };
 
 struct dm_remap_param {
-	uint8_t cmd;
-	uint8_t params[0];
+	__u8 cmd;
+	__u8 params[0];
 };
 /*
  * If you change this make sure you make the corresponding change

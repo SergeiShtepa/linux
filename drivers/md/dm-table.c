@@ -330,8 +330,8 @@ static int upgrade_mode(struct dm_dev_internal *dd, fmode_t new_mode, bool non_e
 
 	old_dev = dd->dm_dev;
 
-	r = dm_get_table_device(md, dd->dm_dev->bdev->bd_dev, non_exclusive,
-				dd->dm_dev->mode | new_mode, &new_dev);
+	r = dm_get_table_device(md, dd->dm_dev->bdev->bd_dev, dd->dm_dev->mode | new_mode,
+				non_exclusive, &new_dev);
 	if (r)
 		return r;
 

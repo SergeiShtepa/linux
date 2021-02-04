@@ -1107,6 +1107,7 @@ static int open_table_device(struct table_device *td, dev_t dev,
 
 	td->dm_dev.bdev = bdev;
 	td->dm_dev.dax_dev = dax_get_by_host(bdev->bd_disk->disk_name);
+	td->dm_dev.non_exclusive = non_exclusive;
 	return 0;
 }
 
@@ -1118,14 +1119,20 @@ static void close_table_device(struct table_device *td, struct mapped_device *md
 	if (!td->dm_dev.bdev)
 		return;
 
-	if (td->dm_dev.mode & FMODE_EXCL)
+	if (td->dm_dev.non_exclusive)
+		blkdev_put(td->dm_dev.bdev, td->dm_dev.mode);
+	else {
 		bd_unlink_disk_holder(td->dm_dev.bdev, dm_disk(md));
+		blkdev_put(td->dm_dev.bdev, td->dm_dev.mode | FMODE_EXCL);
+	}
+
 
 	blkdev_put(td->dm_dev.bdev, td->dm_dev.mode);
 
 	put_dax(td->dm_dev.dax_dev);
 	td->dm_dev.bdev = NULL;
 	td->dm_dev.dax_dev = NULL;
+	td->dm_dev.non_exclusive = false;
 }
 
 static struct table_device *find_table_device(struct list_head *l, dev_t dev,

@@ -30,7 +30,11 @@
 static struct kobject *block_depr;
 
 DECLARE_RWSEM(bdev_lookup_sem);
-DEFINE_MUTEX(bdev_interposer_mutex);
+/*
+ * Prevents different block-layer interposers from attaching or detaching
+ * to the disk at the same time.
+ */
+DEFINE_MUTEX(blk_interposer_attach_lock);
 
 /* for extended dynamic devt allocation, currently only one major is used */
 #define NR_EXT_DEVT		(1 << MINORBITS)
@@ -2176,7 +2180,7 @@ int blk_interposer_attach(struct gendisk *disk, struct blk_interposer *interpose
 	if (!blk_mq_is_queue_frozen(disk->queue))
 		return -EPERM;
 
-	mutex_lock(&bdev_interposer_mutex);
+	mutex_lock(&blk_interposer_attach_lock);
 	if (blk_has_interposer(disk)) {
 		if (disk->interposer->ip_submit_bio == ip_submit_bio)
 			ret = -EALREADY;
@@ -2190,7 +2194,7 @@ int blk_interposer_attach(struct gendisk *disk, struct blk_interposer *interpose
 
 	disk->interposer = interposer;
 out:
-	mutex_unlock(&bdev_interposer_mutex);
+	mutex_unlock(&blk_interposer_attach_lock);
 
 	return ret;
 }
@@ -2211,7 +2215,7 @@ void blk_interposer_detach(struct blk_interposer *interposer,
 	if (WARN_ON(!interposer))
 		return;
 
-	mutex_lock(&bdev_interposer_mutex);
+	mutex_lock(&blk_interposer_attach_lock);
 
 	/* Check if the interposer is still active. */
 	disk = interposer->disk;
@@ -2228,6 +2232,6 @@ void blk_interposer_detach(struct blk_interposer *interposer,
 	disk->interposer = NULL;
 	interposer->disk = NULL;
 out:
-	mutex_unlock(&bdev_interposer_mutex);
+	mutex_unlock(&blk_interposer_attach_lock);
 }
 EXPORT_SYMBOL_GPL(blk_interposer_detach);

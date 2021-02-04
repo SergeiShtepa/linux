@@ -28,7 +28,6 @@ struct linear_c {
  */
 static int linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
-	fmode_t mode;
 	struct linear_c *lc;
 	unsigned long long tmp;
 	char dummy;
