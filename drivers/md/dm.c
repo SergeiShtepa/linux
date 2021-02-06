@@ -170,7 +170,6 @@ struct table_device {
  */
 struct dm_interposer {
 	struct blk_interposer blk_ip;
-	struct mapped_device *md;
 
 	struct kref kref;
 	struct rw_semaphore ip_devs_lock;
