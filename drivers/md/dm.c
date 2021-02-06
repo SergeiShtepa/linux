@@ -1008,12 +1008,11 @@ int dm_remap_install(struct mapped_device *md, const char *donor_device_name)
 {
 	int ret = 0;
 	struct block_device *donor_bdev;
-	fmode_t mode = FMODE_READ | FMODE_WRITE;
 
 	DMDEBUG("Dm remap install for mapped device %s and donor device %s",
 		md->name, donor_device_name);
 
-	donor_bdev = blkdev_get_by_path(donor_device_name, mode, "device-mapper remap");
+	donor_bdev = blkdev_get_by_path(donor_device_name, FMODE_READ | FMODE_WRITE, NULL);
 	if (IS_ERR(donor_bdev)) {
 		DMERR("Cannot open device [%s]", donor_device_name);
 		return PTR_ERR(donor_bdev);
@@ -1042,7 +1041,7 @@ int dm_remap_install(struct mapped_device *md, const char *donor_device_name)
 		DMDEBUG("Attached successfully.");
 	} while (false);
 
-	blkdev_put(donor_bdev, mode);
+	blkdev_put(donor_bdev, FMODE_READ | FMODE_WRITE);
 
 	return ret;
 }
