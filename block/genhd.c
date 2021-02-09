@@ -30,6 +30,11 @@
 static struct kobject *block_depr;
 
 DECLARE_RWSEM(bdev_lookup_sem);
+/*
+ * Prevents different block-layer interposers from attaching or detaching
+ * to the disk at the same time.
+ */
+DEFINE_MUTEX(blk_interposer_attach_lock);
 
 /* for extended dynamic devt allocation, currently only one major is used */
 #define NR_EXT_DEVT		(1 << MINORBITS)
@@ -2149,3 +2154,84 @@ static void disk_release_events(struct gendisk *disk)
 	WARN_ON_ONCE(disk->ev && disk->ev->block != 1);
 	kfree(disk->ev);
 }
+
+/**
+ * blk_interposer_attach - Attach interposer to disk
+ * @disk: target disk
+ * @interposer: block device interposer
+ * @ip_submit_bio: hook for submit_bio()
+ *
+ * Returns:
+ *     -EINVAL if @interposer is NULL.
+ *     -EPERM if queue is not frozen.
+ *     -EBUSY if the block device already has @interposer.
+ *     -EALREADY if the block device already has @interposer with same callback.
+ *
+ * Disk must be frozen by blk_mq_freeze_queue().
+ */
+int blk_interposer_attach(struct gendisk *disk, struct blk_interposer *interposer,
+			  const ip_submit_bio_t ip_submit_bio)
+{
+	int ret = 0;
+
+	if (WARN_ON(!interposer))
+		return -EINVAL;
+
+	if (!blk_mq_is_queue_frozen(disk->queue))
+		return -EPERM;
+
+	mutex_lock(&blk_interposer_attach_lock);
+	if (blk_has_interposer(disk)) {
+		if (disk->interposer->ip_submit_bio == ip_submit_bio)
+			ret = -EALREADY;
+		else
+			ret = -EBUSY;
+		goto out;
+	}
+
+	interposer->ip_submit_bio = ip_submit_bio;
+	interposer->disk = disk;
+
+	disk->interposer = interposer;
+out:
+	mutex_unlock(&blk_interposer_attach_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(blk_interposer_attach);
+
+/**
+ * blk_interposer_detach - Detach interposer from disk
+ * @interposer: block device interposer
+ * @ip_submit_bio: hook for submit_bio()
+ *
+ * Disk must be frozen by blk_mq_freeze_queue().
+ */
+void blk_interposer_detach(struct blk_interposer *interposer,
+			  const ip_submit_bio_t ip_submit_bio)
+{
+	struct gendisk *disk;
+
+	if (WARN_ON(!interposer))
+		return;
+
+	mutex_lock(&blk_interposer_attach_lock);
+
+	/* Check if the interposer is still active. */
+	disk = interposer->disk;
+	if (WARN_ON(!disk))
+		goto out;
+
+	if (WARN_ON(!blk_mq_is_queue_frozen(disk->queue)))
+		goto out;
+
+	/* Check if it is really our interposer. */
+	if (WARN_ON(disk->interposer->ip_submit_bio != ip_submit_bio))
+		goto out;
+
+	disk->interposer = NULL;
+	interposer->disk = NULL;
+out:
+	mutex_unlock(&blk_interposer_attach_lock);
+}
+EXPORT_SYMBOL_GPL(blk_interposer_detach);
