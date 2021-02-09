@@ -1664,15 +1664,11 @@ static int dev_remap(struct file *filp, struct dm_ioctl *param, size_t param_siz
 {
 	int ret = 0;
 	struct mapped_device *md;
-	void *bin_data;
-	struct dm_remap_param *remap_param;
+	struct dm_remap_param *remap_param = (void *)(param) + param->data_start;
 
 	md = find_device(param);
 	if (!md)
 		return -ENXIO;
-
-	bin_data = (void *)(param) + param->data_start;
-	remap_param = bin_data;
 
 	if (remap_param->cmd == REMAP_START_CMD)
 		ret = dev_remap_start(md, remap_param->params);
