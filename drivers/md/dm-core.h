@@ -20,6 +20,8 @@
 
 #define DM_RESERVED_MAX_IOS		1024
 
+struct dm_interposed_dev;
+
 struct dm_kobject_holder {
 	struct kobject kobj;
 	struct completion completion;
@@ -109,6 +111,10 @@ struct mapped_device {
 	bool init_tio_pdu:1;
 
 	struct srcu_struct io_barrier;
+
+	/* for interposers logic */
+	bool is_interposed;
+	struct dm_interposed_dev *ip_dev;
 };
 
 void disable_discard(struct mapped_device *md);
