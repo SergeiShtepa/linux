@@ -30,6 +30,11 @@
 static struct kobject *block_depr;
 
 DECLARE_RWSEM(bdev_lookup_sem);
+/*
+ * Prevents different block-layer interposers from attaching or detaching
+ * to the block device at the same time.
+ */
+DEFINE_MUTEX(bdev_interposer_attach_lock);
 
 /* for extended dynamic devt allocation, currently only one major is used */
 #define NR_EXT_DEVT		(1 << MINORBITS)
@@ -1941,3 +1946,91 @@ static void disk_release_events(struct gendisk *disk)
 	WARN_ON_ONCE(disk->ev && disk->ev->block != 1);
 	kfree(disk->ev);
 }
+
+/**
+ * bdev_interposer_attach - Attach interposer to disk
+ * @bdev: target block device
+ * @interposer: block device interposer
+ * @ip_submit_bio: hook for submit_bio()
+ *
+ * Returns:
+ *     -EINVAL if @interposer is NULL.
+ *     -EPERM if queue is not frozen.
+ *     -EBUSY if the block device already has @interposer.
+ *     -EALREADY if the block device already has @interposer with same callback.
+ *     -ENODEV if the block device cannot be referenced.
+ *
+ * Disk must be frozen by blk_mq_freeze_queue().
+ */
+int bdev_interposer_attach(struct block_device *bdev, struct bdev_interposer *interposer,
+			  const ip_submit_bio_t ip_submit_bio)
+{
+	int ret = 0;
+
+	if (WARN_ON(!interposer))
+		return -EINVAL;
+
+	if (!blk_mq_is_queue_frozen(bdev->bd_disk->queue))
+		return -EPERM;
+
+	mutex_lock(&bdev_interposer_attach_lock);
+	if (bdev_has_interposer(bdev)) {
+		if (bdev->bd_interposer->ip_submit_bio == ip_submit_bio)
+			ret = -EALREADY;
+		else
+			ret = -EBUSY;
+		goto out;
+	}
+
+	interposer->ip_submit_bio = ip_submit_bio;
+
+	interposer->bdev = bdgrab(bdev);
+	if (!interposer->bdev) {
+		ret = -ENODEV;
+		goto out;
+	}
+
+	bdev->bd_interposer = interposer;
+out:
+	mutex_unlock(&bdev_interposer_attach_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(bdev_interposer_attach);
+
+/**
+ * bdev_interposer_detach - Detach interposer from block device
+ * @interposer: block device interposer
+ * @ip_submit_bio: hook for submit_bio()
+ *
+ * Disk must be frozen by blk_mq_freeze_queue().
+ */
+void bdev_interposer_detach(struct bdev_interposer *interposer,
+			  const ip_submit_bio_t ip_submit_bio)
+{
+	struct block_device *bdev;
+
+	if (WARN_ON(!interposer))
+		return;
+
+	mutex_lock(&bdev_interposer_attach_lock);
+
+	/* Check if the interposer is still active. */
+	bdev = interposer->bdev;
+	if (WARN_ON(!bdev))
+		goto out;
+
+	if (WARN_ON(!blk_mq_is_queue_frozen(bdev->bd_disk->queue)))
+		goto out;
+
+	/* Check if it is really our interposer. */
+	if (WARN_ON(bdev->bd_interposer->ip_submit_bio != ip_submit_bio))
+		goto out;
+
+	bdev->bd_interposer = NULL;
+	interposer->bdev = NULL;
+	bdput(bdev);
+out:
+	mutex_unlock(&bdev_interposer_attach_lock);
+}
+EXPORT_SYMBOL_GPL(bdev_interposer_detach);
