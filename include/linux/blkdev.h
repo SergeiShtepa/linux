@@ -2033,4 +2033,21 @@ int fsync_bdev(struct block_device *bdev);
 int freeze_bdev(struct block_device *bdev);
 int thaw_bdev(struct block_device *bdev);
 
+/*
+ * block layer interposers structure and functions
+ */
+typedef void (*ip_submit_bio_t) (struct bio *bio);
+
+struct bdev_interposer {
+	ip_submit_bio_t ip_submit_bio;
+	struct block_device *bdev;
+};
+
+#define bdev_has_interposer(bd) ((bd)->bd_interposer != NULL)
+
+int bdev_interposer_attach(struct block_device *bdev, struct bdev_interposer *interposer,
+			   const ip_submit_bio_t ip_submit_bio);
+void bdev_interposer_detach(struct bdev_interposer *interposer,
+			    const ip_submit_bio_t ip_submit_bio);
+
 #endif /* _LINUX_BLKDEV_H */
