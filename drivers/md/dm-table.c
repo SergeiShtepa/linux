@@ -380,7 +380,7 @@ static void dm_interpose_fn(struct dm_interposed_dev *ip_dev, struct bio *bio)
 	/*
 	 * Set acceptor device.
 	 * It is quite convenient that device mapper creates
-	 * one disk for each block device.
+	 * one disk for one block device.
 	 */
 	bio->bi_bdev = md->disk->part0;
 

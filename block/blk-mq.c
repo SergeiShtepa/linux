@@ -161,7 +161,6 @@ int blk_mq_freeze_queue_wait_timeout(struct request_queue *q,
 }
 EXPORT_SYMBOL_GPL(blk_mq_freeze_queue_wait_timeout);
 
-
 bool blk_mq_is_queue_frozen(struct request_queue *q)
 {
 	bool ret;

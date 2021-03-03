@@ -39,7 +39,10 @@ static void dm_submit_bio_interposer_fn(struct bio *bio)
 	struct dm_rb_range *node;
 
 	ip = container_of(bio->bi_bdev->bd_interposer, struct dm_interposer, blk_ip);
+
 	start = bio->bi_iter.bi_sector;
+	if (bio_flagged(bio, BIO_REMAPPED))
+		start -= get_start_sect(bio->bi_bdev);
 	last = start + dm_sector_div_up(bio->bi_iter.bi_size, SECTOR_SIZE);
 
 	noio_flag = memalloc_noio_save();
@@ -82,7 +85,7 @@ struct dm_interposer *dm_interposer_new(struct block_device *bdev)
 
 	ret = bdev_interposer_attach(bdev, &ip->blk_ip, dm_submit_bio_interposer_fn);
 	if (ret) {
-		DMERR("Failed to attack bdev_interposer.");
+		DMERR("Failed to attach bdev_interposer.");
 		kref_put(&ip->kref, dm_interposer_free);
 		return ERR_PTR(ret);
 	}
@@ -123,9 +126,8 @@ static inline void dm_disk_unfreeze(struct gendisk *disk)
 /**
  * dm_interposer_dev_init - initialize interposed device
  * @ip_dev: interposed device
- * @bdev: block device for interposing
- * @ofs: offset from the beginning of the disk
- * @len: the length of the part of the disk to which requests will be interposed
+ * @ofs: offset from the beginning of the block device
+ * @len: the length of the part of the block device to which requests will be interposed
  * @private: user purpose parameter
  * @interpose_fn: interposing callback
  *
@@ -146,7 +148,7 @@ void dm_interposer_dev_init(struct dm_interposed_dev *ip_dev,
 }
 
 /**
- * dm_interposer_dev_attach - attach interposed device to his disk
+ * dm_interposer_dev_attach - attach interposed device to his block device
  * @bdev: block device
  * @ip_dev: interposed device
  *
@@ -181,7 +183,7 @@ int dm_interposer_dev_attach(struct block_device *bdev, struct dm_interposed_dev
 		/* checking that ip_dev already exists for this region */
 		node = dm_rb_iter_first(&ip->ip_devs_root, ip_dev->node.start, ip_dev->node.last);
 		if (node) {
-			DMERR("Disk part form [%llu] to [%llu] already have interposer.",
+			DMERR("Block device in region [%llu,%llu] already have interposer.",
 			      node->start, node->last);
 
 			ret = -EBUSY;
@@ -206,7 +208,7 @@ out:
 }
 
 /**
- * dm_interposer_detach_dev - detach interposed device from his disk
+ * dm_interposer_detach_dev - detach interposed device from his block device
  * @bdev: block device
  * @ip_dev: interposed device
  *

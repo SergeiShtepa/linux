@@ -1948,7 +1948,7 @@ static void disk_release_events(struct gendisk *disk)
 }
 
 /**
- * bdev_interposer_attach - Attach interposer to disk
+ * bdev_interposer_attach - Attach interposer to block device
  * @bdev: target block device
  * @interposer: block device interposer
  * @ip_submit_bio: hook for submit_bio()

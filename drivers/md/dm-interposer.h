@@ -31,10 +31,10 @@ void dm_interposer_dev_init(struct dm_interposed_dev *ip_dev,
 			    sector_t ofs, sector_t len,
 			    void *private, dm_interpose_bio_t interpose_fn);
 /*
- * Attach interposer to his disk.
+ * Attach interposer to his block device.
  */
 int dm_interposer_dev_attach(struct block_device *bdev, struct dm_interposed_dev *ip_dev);
 /*
- * Detach interposer from his disk.
+ * Detach interposer from his block device.
  */
 int dm_interposer_detach_dev(struct block_device *bdev, struct dm_interposed_dev *ip_dev);

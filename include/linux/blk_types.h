@@ -307,7 +307,7 @@ enum {
 	BIO_TRACKED,		/* set if bio goes through the rq_qos path */
 	BIO_REMAPPED,
 	BIO_INTERPOSED,		/* bio has been interposed and can be moved to
-				 * a different disk */
+				 * a different block device */
 	BIO_FLAG_LAST
 };
 
