@@ -1269,7 +1269,7 @@ static inline fmode_t get_mode(struct dm_ioctl *param)
 
 static inline bool get_interposer_flag(struct dm_ioctl *param)
 {
-	return (param->flags & DM_INTERPOSED_DEV_FLAG);
+	return (param->flags & DM_INTERPOSED_FLAG);
 }
 
 static int next_target(struct dm_target_spec *last, uint32_t next, void *end,

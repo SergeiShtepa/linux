@@ -366,6 +366,6 @@ enum {
  * If set, the underlying device should open without FMODE_EXCL
  * and attach mapped device via blk_interposer.
  */
-#define DM_INTERPOSED_DEV_FLAG		(1 << 19) /* In */
+#define DM_INTERPOSED_FLAG		(1 << 19) /* In */
 
 #endif				/* _LINUX_DM_IOCTL_H */
