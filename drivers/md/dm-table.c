@@ -6,6 +6,7 @@
  */
 
 #include "dm-core.h"
+#include "dm-interposer.h"
 
 #include <linux/module.h>
 #include <linux/vmalloc.h>
@@ -225,12 +226,13 @@ void dm_table_destroy(struct dm_table *t)
 /*
  * See if we've already got a device in the list.
  */
-static struct dm_dev_internal *find_device(struct list_head *l, dev_t dev)
+static struct dm_dev_internal *find_device(struct list_head *l, dev_t dev, bool is_interposed)
 {
 	struct dm_dev_internal *dd;
 
 	list_for_each_entry (dd, l, list)
-		if (dd->dm_dev->bdev->bd_dev == dev)
+		if ((dd->dm_dev->bdev->bd_dev == dev) &&
+		    (dd->dm_dev->is_interposed == is_interposed))
 			return dd;
 
 	return NULL;
@@ -359,6 +361,90 @@ dev_t dm_get_dev_t(const char *path)
 EXPORT_SYMBOL_GPL(dm_get_dev_t);
 
 /*
+ * Redirect bio from interposed device to dm device
+ */
+static void dm_interpose_fn(struct dm_interposed_dev *ip_dev, struct bio *bio)
+{
+	struct mapped_device *md = ip_dev->private;
+
+	if (bio_flagged(bio, BIO_REMAPPED)) {
+		/*
+		 * Since bio has already been remapped, we need to subtract
+		 * the block device offset from the beginning of the disk.
+		 */
+		bio->bi_iter.bi_sector -= get_start_sect(bio->bi_bdev);
+
+		bio_clear_flag(bio, BIO_REMAPPED);
+	}
+
+	/*
+	 * Set acceptor device.
+	 * It is quite convenient that device mapper creates
+	 * one disk for one block device.
+	 */
+	bio->bi_bdev = md->disk->part0;
+
+	/*
+	 * Bio should be resubmitted.
+	 * The bio will be checked again and placed in current->bio_list.
+	 */
+	submit_bio_noacct(bio);
+}
+
+static int _interposer_dev_create(struct block_device *bdev, sector_t ofs, sector_t len,
+				  struct mapped_device *md)
+{
+	int ret;
+
+	DMDEBUG("Create dm interposer.");
+
+	if (md->ip_dev) {
+		DMERR("The dm interposer device already in use.");
+		return -EALREADY;
+	}
+
+	if ((ofs + len) > bdev_nr_sectors(bdev)) {
+		DMERR("The specified range of sectors exceeds of the size of the block device.");
+		return -ERANGE;
+	}
+
+	md->ip_dev = kzalloc(sizeof(struct dm_interposed_dev), GFP_KERNEL);
+	if (!md->ip_dev)
+		return -ENOMEM;
+
+	if ((ofs == 0) && (len == 0))
+		DMDEBUG("Whole block device should be interposed.");
+
+	dm_interposer_dev_init(md->ip_dev,
+			       ofs, len,
+			       md, dm_interpose_fn);
+
+	ret = dm_interposer_dev_attach(bdev, md->ip_dev);
+	if (ret) {
+		DMERR("Cannot attach dm interposer device.");
+		kfree(md->ip_dev);
+		md->ip_dev = NULL;
+	}
+
+	return ret;
+}
+
+static void _interposer_dev_remove(struct block_device *bdev, struct mapped_device *md)
+{
+	if (!md->ip_dev)
+		return;
+
+	DMDEBUG("Remove dm interposer. %llu bios was interposed.",
+		atomic64_read(&md->ip_dev->ip_cnt));
+
+	if (dm_interposer_detach_dev(bdev, md->ip_dev))
+		DMERR("Failed to detach dm interposer.");
+
+	kfree(md->ip_dev);
+	md->ip_dev = NULL;
+}
+
+/*
  * Add a device to the list, or just increment the usage count if
  * it's already present.
  */
@@ -385,7 +471,7 @@ int dm_get_device(struct dm_target *ti, const char *path, fmode_t mode,
 			return -ENODEV;
 	}
 
-	dd = find_device(&t->devices, dev);
+	dd = find_device(&t->devices, dev, t->md->is_interposed);
 	if (!dd) {
 		dd = kmalloc(sizeof(*dd), GFP_KERNEL);
 		if (!dd)
@@ -398,15 +484,22 @@ int dm_get_device(struct dm_target *ti, const char *path, fmode_t mode,
 
 		refcount_set(&dd->count, 1);
 		list_add(&dd->list, &t->devices);
-		goto out;
-
 	} else if (dd->dm_dev->mode != (mode | dd->dm_dev->mode)) {
 		r = upgrade_mode(dd, mode, t->md);
 		if (r)
 			return r;
+		refcount_inc(&dd->count);
 	}
-	refcount_inc(&dd->count);
-out:
+
+	if (t->md->is_interposed) {
+		r = _interposer_dev_create(dd->dm_dev->bdev, ti->begin, ti->len, t->md);
+		if (r) {
+			dm_put_device(ti, dd->dm_dev);
+			DMERR("Failed to attach dm interposer.");
+			return r;
+		}
+	}
+
 	*result = dd->dm_dev;
 	return 0;
 }
@@ -446,6 +539,7 @@ void dm_put_device(struct dm_target *ti, struct dm_dev *d)
 {
 	int found = 0;
 	struct list_head *devices = &ti->table->devices;
+	struct mapped_device *md = ti->table->md;
 	struct dm_dev_internal *dd;
 
 	list_for_each_entry(dd, devices, list) {
@@ -456,11 +550,14 @@ void dm_put_device(struct dm_target *ti, struct dm_dev *d)
 	}
 	if (!found) {
 		DMWARN("%s: device %s not in table devices list",
-		       dm_device_name(ti->table->md), d->name);
+		       dm_device_name(md), d->name);
 		return;
 	}
+	if (md->is_interposed)
+		_interposer_dev_remove(d->bdev, md);
+
 	if (refcount_dec_and_test(&dd->count)) {
-		dm_put_table_device(ti->table->md, d);
+		dm_put_table_device(md, d);
 		list_del(&dd->list);
 		kfree(dd);
 	}
