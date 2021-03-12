@@ -1018,6 +1018,55 @@ static blk_qc_t __submit_bio_noacct_mq(struct bio *bio)
 	return ret;
 }
 
+static noinline blk_qc_t submit_bio_interposed(struct bio *bio)
+{
+	blk_qc_t ret = BLK_QC_T_NONE;
+	struct bio_list bio_list[2] = { };
+	struct gendisk *orig_disk;
+
+	if (current->bio_list) {
+		bio_list_add(&current->bio_list[0], bio);
+		return BLK_QC_T_NONE;
+	}
+
+	orig_disk = bio->bi_bdev->bd_disk;
+	if (unlikely(bio_queue_enter(bio)))
+		return BLK_QC_T_NONE;
+
+	current->bio_list = bio_list;
+
+	do {
+		struct block_device *interposer = bio->bi_bdev->bd_interposer;
+
+		if (unlikely(!interposer)) {
+			/* interposer was removed */
+			bio_list_add(&current->bio_list[0], bio);
+			break;
+		}
+		/* assign bio to interposer device */
+		bio_set_dev(bio, interposer);
+		bio_set_flag(bio, BIO_INTERPOSED);
+
+		if (!submit_bio_checks(bio))
+			break;
+		/*
+		 * Because the current->bio_list is initialized,
+		 * the submit_bio callback will always return BLK_QC_T_NONE.
+		 */
+		interposer->bd_disk->fops->submit_bio(bio);
+	} while (false);
+
+	current->bio_list = NULL;
+
+	blk_queue_exit(orig_disk->queue);
+
+	/* Resubmit remaining bios */
+	while ((bio = bio_list_pop(&bio_list[0])))
+		ret = submit_bio_noacct(bio);
+
+	return ret;
+}
+
 /**
  * submit_bio_noacct - re-submit a bio to the block device layer for I/O
  * @bio:  The bio describing the location in memory and on the device.
@@ -1029,6 +1078,14 @@ static blk_qc_t __submit_bio_noacct_mq(struct bio *bio)
  */
 blk_qc_t submit_bio_noacct(struct bio *bio)
 {
+	/*
+	 * Checking the BIO_INTERPOSED flag is necessary so that the bio
+	 * created by the bdev_interposer do not get to it for processing.
+	 */
+	if (bdev_has_interposer(bio->bi_bdev) &&
+	    !bio_flagged(bio, BIO_INTERPOSED))
+		return submit_bio_interposed(bio);
+
 	if (!submit_bio_checks(bio))
 		return BLK_QC_T_NONE;
 

@@ -30,6 +30,11 @@
 static struct kobject *block_depr;
 
 DECLARE_RWSEM(bdev_lookup_sem);
+/*
+ * Prevents different block-layer interposers from attaching or detaching
+ * to the block device at the same time.
+ */
+static DEFINE_MUTEX(bdev_interposer_attach_lock);
 
 /* for extended dynamic devt allocation, currently only one major is used */
 #define NR_EXT_DEVT		(1 << MINORBITS)
@@ -1940,3 +1945,52 @@ static void disk_release_events(struct gendisk *disk)
 	WARN_ON_ONCE(disk->ev && disk->ev->block != 1);
 	kfree(disk->ev);
 }
+
+int bdev_interposer_attach(struct block_device *original,
+			   struct block_device *interposer)
+{
+	int ret = 0;
+
+	if (WARN_ON(((!original) || (!interposer))))
+		return -EINVAL;
+	/*
+	 * interposer should be simple, no a multi-queue device
+	 */
+	if (!interposer->bd_disk->fops->submit_bio)
+		return -EINVAL;
+
+	if (WARN_ON(!blk_mq_is_queue_frozen(original->bd_disk->queue)))
+		return -EPERM;
+
+	mutex_lock(&bdev_interposer_attach_lock);
+
+	if (bdev_has_interposer(original))
+		ret = -EBUSY;
+	else {
+		original->bd_interposer = bdgrab(interposer);
+		if (!original->bd_interposer)
+			ret = -ENODEV;
+	}
+
+	mutex_unlock(&bdev_interposer_attach_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(bdev_interposer_attach);
+
+void bdev_interposer_detach(struct block_device *original)
+{
+	if (WARN_ON(!original))
+		return;
+
+	if (WARN_ON(!blk_mq_is_queue_frozen(original->bd_disk->queue)))
+		return;
+
+	mutex_lock(&bdev_interposer_attach_lock);
+	if (bdev_has_interposer(original)) {
+		bdput(original->bd_interposer);
+		original->bd_interposer = NULL;
+	}
+	mutex_unlock(&bdev_interposer_attach_lock);
+}
+EXPORT_SYMBOL_GPL(bdev_interposer_detach);

@@ -2031,4 +2031,13 @@ int fsync_bdev(struct block_device *bdev);
 int freeze_bdev(struct block_device *bdev);
 int thaw_bdev(struct block_device *bdev);
 
+static inline bool bdev_has_interposer(struct block_device *bdev)
+{
+	return (bdev->bd_interposer != NULL);
+};
+
+int bdev_interposer_attach(struct block_device *original,
+			   struct block_device *interposer);
+void bdev_interposer_detach(struct block_device *original);
+
 #endif /* _LINUX_BLKDEV_H */
