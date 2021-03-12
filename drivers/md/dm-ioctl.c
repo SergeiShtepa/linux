@@ -1267,6 +1267,11 @@ static inline fmode_t get_mode(struct dm_ioctl *param)
 	return mode;
 }
 
+static inline bool get_interposer_flag(struct dm_ioctl *param)
+{
+	return (param->flags & DM_INTERPOSED_FLAG);
+}
+
 static int next_target(struct dm_target_spec *last, uint32_t next, void *end,
 		       struct dm_target_spec **spec, char **target_params)
 {
@@ -1291,6 +1296,10 @@ static int populate_table(struct dm_table *table,
 
 	if (!param->target_count) {
 		DMWARN("populate_table: no targets specified");
+		return -EINVAL;
+	}
+	if (table->md->is_interposed && (param->target_count != 1)) {
+		DMWARN("%s: with interposer should be specified only one target", __func__);
 		return -EINVAL;
 	}
 
@@ -1337,6 +1346,8 @@ static int table_load(struct file *filp, struct dm_ioctl *param, size_t param_si
 	md = find_device(param);
 	if (!md)
 		return -ENXIO;
+
+	md->is_interposed = get_interposer_flag(param);
 
 	r = dm_table_create(&t, get_mode(param), param->target_count, md);
 	if (r)
@@ -2097,6 +2108,8 @@ int __init dm_early_create(struct dm_ioctl *dmi,
 	r = dm_table_create(&t, get_mode(dmi), dmi->target_count, md);
 	if (r)
 		goto err_hash_remove;
+
+	md->is_interposed = get_interposer_flag(dmi);
 
 	/* add targets */
 	for (i = 0; i < dmi->target_count; i++) {
