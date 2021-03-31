@@ -226,6 +226,11 @@ void blk_mq_quiesce_queue(struct request_queue *q)
 	unsigned int i;
 	bool rcu = false;
 
+	mutex_lock(&q->mq_freeze_lock);
+
+	if (++q->mq_quiesce_depth > 1)
+		goto out;
+
 	blk_mq_quiesce_queue_nowait(q);
 
 	queue_for_each_hw_ctx(q, hctx, i) {
@@ -236,6 +241,8 @@ void blk_mq_quiesce_queue(struct request_queue *q)
 	}
 	if (rcu)
 		synchronize_rcu();
+out:
+	mutex_unlock(&q->mq_freeze_lock);
 }
 EXPORT_SYMBOL_GPL(blk_mq_quiesce_queue);
 
@@ -248,10 +255,19 @@ EXPORT_SYMBOL_GPL(blk_mq_quiesce_queue);
  */
 void blk_mq_unquiesce_queue(struct request_queue *q)
 {
+	mutex_lock(&q->mq_freeze_lock);
+
+	q->mq_quiesce_depth--;
+	WARN_ON_ONCE(q->mq_quiesce_depth < 0);
+	if (q->mq_quiesce_depth)
+		goto out;
+
 	blk_queue_flag_clear(QUEUE_FLAG_QUIESCED, q);
 
 	/* dispatch requests which are inserted during quiescing */
 	blk_mq_run_hw_queues(q, true);
+out:
+	mutex_unlock(&q->mq_freeze_lock);
 }
 EXPORT_SYMBOL_GPL(blk_mq_unquiesce_queue);
 

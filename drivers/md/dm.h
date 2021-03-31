@@ -28,6 +28,7 @@
  */
 #define DM_SUSPEND_LOCKFS_FLAG		(1 << 0)
 #define DM_SUSPEND_NOFLUSH_FLAG		(1 << 1)
+#define DM_SUSPEND_DETACH_IP_FLAG	(1 << 2)
 
 /*
  * Status feature flags
@@ -121,6 +122,11 @@ int dm_deleting_md(struct mapped_device *md);
  * Is this mapped_device suspended?
  */
 int dm_suspended_md(struct mapped_device *md);
+
+/*
+ * Is the interposer of this mapped_device is attached?
+ */
+int dm_interposer_attached_md(struct mapped_device *md);
 
 /*
  * Internal suspend and resume methods.

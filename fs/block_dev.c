@@ -905,6 +905,9 @@ struct block_device *bdev_alloc(struct gendisk *disk, u8 partno)
 		iput(inode);
 		return NULL;
 	}
+	bdev->bd_interposer = NULL;
+	init_rwsem(&bdev->bd_interposer_lock);
+	//percpu_init_rwsem /* will be good */
 	return bdev;
 }
 

@@ -552,6 +552,7 @@ struct request_queue {
 	spinlock_t		unused_hctx_lock;
 
 	int			mq_freeze_depth;
+	int			mq_quiesce_depth;
 
 #if defined(CONFIG_BLK_DEV_BSG)
 	struct bsg_class_device bsg_dev;
@@ -2031,4 +2032,49 @@ int fsync_bdev(struct block_device *bdev);
 int freeze_bdev(struct block_device *bdev);
 int thaw_bdev(struct block_device *bdev);
 
+static inline bool bdev_has_interposer(struct block_device *bdev)
+{
+	return bdev->bd_interposer != NULL;
+};
+
+/**
+ * bdev_interposer_lock - Lock bio processing
+ * @bdev: locking block device
+ *
+ * Lock the bio processing in submit_bio_noacct() for the new requests in the
+ * original block device. Requests from interposer will not be locked.
+ *
+ * To unlock, use the function bdev_interposer_unlock().
+ *
+ * This lock should be used to attach/detach interposer to the device.
+ */
+static inline void bdev_interposer_lock(struct block_device *bdev)
+{
+	pr_err("%s ip rwlock counter=%lu", __func__, atomic_long_read(&bdev->bd_interposer_lock.count));
+
+	down_write(&bdev->bd_interposer_lock);
+
+	pr_err("DEBUG! original device was locked");
+}
+
+/**
+ * bdev_interposer_unlock - Unlock bio processing
+ * @bdev: locked block device
+ *
+ * Unlock the bio processing that was locked by function bdev_interposer_lock().
+ *
+ * This lock should be used to attach/detach interposer to the device.
+ */
+static inline void bdev_interposer_unlock(struct block_device *bdev)
+{
+	pr_err("%s ip rwlock counter=%lu", __func__, atomic_long_read(&bdev->bd_interposer_lock.count));
+
+	up_write(&bdev->bd_interposer_lock);
+
+	pr_err("DEBUG! original device was unlocked");
+}
+
+int bdev_interposer_attach(struct block_device *original,
+			   struct block_device *interposer);
+void bdev_interposer_detach(struct block_device *original);
 #endif /* _LINUX_BLKDEV_H */

@@ -407,8 +407,34 @@ int dm_get_device(struct dm_target *ti, const char *path, fmode_t mode,
 	}
 	refcount_inc(&dd->count);
 out:
+	if (t->md->interpose) {
+		struct block_device *original = dd->dm_dev->bdev;
+		/*
+		 * Interposer target should cover all underlying device
+		 */
+		if (ti->begin != 0) {
+			DMERR("%s: target offset should be zero for dm interposer",
+			      dm_device_name(t->md));
+			r = -EINVAL;
+			goto fail;
+		}
+		if (bdev_nr_sectors(original) != ti->len) {
+			DMERR("%s: interposer and original device size should be equal",
+			      dm_device_name(t->md));
+			r = -EINVAL;
+			goto fail;
+		}
+	}
+
 	*result = dd->dm_dev;
 	return 0;
+fail:
+	if (refcount_dec_and_test(&dd->count)) {
+		dm_put_table_device(t->md, dd->dm_dev);
+		list_del(&dd->list);
+		kfree(dd);
+	}
+	return r;
 }
 EXPORT_SYMBOL(dm_get_device);
 

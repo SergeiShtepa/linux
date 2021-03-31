@@ -21,6 +21,7 @@
 struct linear_c {
 	struct dm_dev *dev;
 	sector_t start;
+	int mapped_bio_cnt;
 };
 
 /*
@@ -50,6 +51,7 @@ static int linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto bad;
 	}
 	lc->start = tmp;
+	lc->mapped_bio_cnt = 0;
 
 	ret = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table), &lc->dev);
 	if (ret) {
@@ -74,6 +76,8 @@ static void linear_dtr(struct dm_target *ti)
 {
 	struct linear_c *lc = (struct linear_c *) ti->private;
 
+	pr_err("DEBUG! %s cc=%d", __func__, lc->mapped_bio_cnt++);
+
 	dm_put_device(ti, lc->dev);
 	kfree(lc);
 }
@@ -88,6 +92,8 @@ static sector_t linear_map_sector(struct dm_target *ti, sector_t bi_sector)
 static void linear_map_bio(struct dm_target *ti, struct bio *bio)
 {
 	struct linear_c *lc = ti->private;
+
+	pr_err("DEBUG! %s cc=%d", __func__, lc->mapped_bio_cnt++);
 
 	bio_set_dev(bio, lc->dev->bdev);
 	if (bio_sectors(bio) || op_is_zone_mgmt(bio_op(bio)))
