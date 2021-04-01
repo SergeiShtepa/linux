@@ -46,10 +46,11 @@ struct block_device {
 	spinlock_t		bd_size_lock; /* for bd_inode->i_size updates */
 	struct gendisk *	bd_disk;
 	struct backing_dev_info *bd_bdi;
+	/* The interposer allows to redirect bio to another device */
 	struct block_device	*bd_interposer;
-	struct rw_semaphore	bd_interposer_lock;
-	//struct percpu_ref	bd_interposer_usage_counter;
-	//struct percpu_rw_semaphore bd_interposer_lock /* looks good */
+	/* Lock the queue of block device to attach or detach interposer.
+	 * Allows to safely suspend and flush interposer . */
+	struct percpu_rw_semaphore bd_interposer_lock;
 
 	/* The counter of freeze processes */
 	int			bd_fsfreeze_count;

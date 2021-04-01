@@ -2050,9 +2050,7 @@ static inline bool bdev_has_interposer(struct block_device *bdev)
  */
 static inline void bdev_interposer_lock(struct block_device *bdev)
 {
-	pr_err("%s ip rwlock counter=%lu", __func__, atomic_long_read(&bdev->bd_interposer_lock.count));
-
-	down_write(&bdev->bd_interposer_lock);
+	percpu_down_write(&bdev->bd_interposer_lock);
 
 	pr_err("DEBUG! original device was locked");
 }
@@ -2067,9 +2065,7 @@ static inline void bdev_interposer_lock(struct block_device *bdev)
  */
 static inline void bdev_interposer_unlock(struct block_device *bdev)
 {
-	pr_err("%s ip rwlock counter=%lu", __func__, atomic_long_read(&bdev->bd_interposer_lock.count));
-
-	up_write(&bdev->bd_interposer_lock);
+	percpu_up_write(&bdev->bd_interposer_lock);
 
 	pr_err("DEBUG! original device was unlocked");
 }

@@ -975,26 +975,24 @@ static blk_qc_t __submit_bio_noacct(struct bio *bio)
 
 static inline struct block_device *bio_interposer_lock(struct bio *bio)
 {
+	bool locked;
 	struct block_device *bdev = bio->bi_bdev;
 
 	if (bio->bi_opf & REQ_NOWAIT) {
-		if (unlikely(!down_read_trylock(&bdev->bd_interposer_lock))) {
-			if (blk_queue_dying(bdev->bd_disk->queue))
-				bio_io_error(bio);
-			else
-				bio_wouldblock_error(bio);
-
+		locked = percpu_down_read_trylock(&bdev->bd_interposer_lock);
+		if (unlikely(!locked)) {
+			bio_wouldblock_error(bio);
 			return NULL;
 		}
 	} else
-		down_read(&bdev->bd_interposer_lock);
+		percpu_down_read(&bdev->bd_interposer_lock);
 
 	return bdev;
 }
 
 static inline void bio_interposer_unlock(struct block_device *locked_bdev)
 {
-	up_read(&locked_bdev->bd_interposer_lock);
+	percpu_up_read(&locked_bdev->bd_interposer_lock);
 }
 
 /**
