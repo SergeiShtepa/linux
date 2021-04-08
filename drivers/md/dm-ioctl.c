@@ -297,10 +297,10 @@ retry:
 			if (md->interpose){
 				int r;
 
-				pr_err("DEBUG! %s interposer should be suspended and detached from original", __func__);
+				pr_err("DEBUG! %s interposer should be suspended and detached from interposed block device", __func__);
 				/*
 				 * Interposer should be suspended and detached
-				 * from original.
+				 * from the interposed block device.
 				 */
 				r = dm_suspend(md, DM_SUSPEND_DETACH_IP_FLAG |
 						   DM_SUSPEND_LOCKFS_FLAG);
@@ -919,9 +919,10 @@ static int dev_remove(struct file *filp, struct dm_ioctl *param, size_t param_si
 			return r;
 		}
 	} else {
-		pr_err("DEBUG! %s interposer should be suspended and detached from original", __func__);
+		pr_err("DEBUG! %s interposer should be suspended and detached from interposed block device", __func__);
 		/*
-		 * Interposer should be suspended and detached from original.
+		 * Interposer should be suspended and detached from
+		 * the interposed block device.
 		 */
 		r = dm_suspend(md, DM_SUSPEND_DETACH_IP_FLAG |
 				   DM_SUSPEND_LOCKFS_FLAG);
@@ -1352,15 +1353,6 @@ static int populate_table(struct dm_table *table,
 	uint32_t next = param->data_start;
 	void *end = (void *) param + param_size;
 	char *target_params;
-
-	if (!param->target_count) {
-		DMWARN("populate_table: no targets specified");
-		return -EINVAL;
-	}
-	if (table->md->interpose && (param->target_count != 1)) {
-		DMWARN("interposer requires only a single target be specified");
-		return -EINVAL;
-	}
 
 	for (i = 0; i < param->target_count; i++) {
 

@@ -93,8 +93,6 @@ static void linear_map_bio(struct dm_target *ti, struct bio *bio)
 {
 	struct linear_c *lc = ti->private;
 
-	pr_err("DEBUG! %s cc=%d", __func__, lc->mapped_bio_cnt++);
-
 	bio_set_dev(bio, lc->dev->bdev);
 	if (bio_sectors(bio) || op_is_zone_mgmt(bio_op(bio)))
 		bio->bi_iter.bi_sector =

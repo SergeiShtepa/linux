@@ -2675,21 +2675,27 @@ static void origin_dtr(struct dm_target *ti)
 static int origin_map(struct dm_target *ti, struct bio *bio)
 {
 	struct dm_origin *o = ti->private;
-	unsigned available_sectors;
 
 	bio_set_dev(bio, o->dev->bdev);
-
 	if (unlikely(bio->bi_opf & REQ_PREFLUSH))
 		return DM_MAPIO_REMAPPED;
 
 	if (bio_data_dir(bio) != WRITE)
 		return DM_MAPIO_REMAPPED;
 
-	available_sectors = o->split_boundary -
-		((unsigned)bio->bi_iter.bi_sector & (o->split_boundary - 1));
+	/*
+	 * If no snapshot is connected to origin, then split_boundary
+	 * will be set to zero. In this case, we don't need to split a bio.
+	 */
+	if (o->split_boundary) {
+		unsigned available_sectors = o->split_boundary -
+			((unsigned)bio->bi_iter.bi_sector & (o->split_boundary - 1));
 
-	if (bio_sectors(bio) > available_sectors)
-		dm_accept_partial_bio(bio, available_sectors);
+		if (bio_sectors(bio) > available_sectors) {
+			pr_err("DEBUG! %s available_sectors=%u", __func__, available_sectors);
+			dm_accept_partial_bio(bio, available_sectors);
+		}
+	}
 
 	/* Only tell snapshots if this is a write */
 	return do_origin(o->dev, bio, true);
