@@ -805,9 +805,31 @@ static struct inode *bdev_alloc_inode(struct super_block *sb)
 	return &ei->vfs_inode;
 }
 
+static void bdev_filter_cleanup(struct block_device *bdev)
+{
+	percpu_down_write(&bdev->bd_filters_lock);
+
+	if (!list_empty(&bdev->bd_filters)) {
+		struct blk_filter *flt;
+
+		list_for_each_entry(flt, &bdev->bd_filters, list) {
+			if (flt->fops->detach_cb)
+				flt->fops->detach_cb(bdev);
+
+			list_del(&flt->list);
+			kfree(flt);
+		}
+	}
+
+	percpu_up_write(&bdev->bd_filters_lock);
+}
+
 static void bdev_free_inode(struct inode *inode)
 {
 	struct block_device *bdev = I_BDEV(inode);
+
+	bdev_filter_cleanup(bdev);
+	percpu_free_rwsem(&bdev->bd_filters_lock);
 
 	free_percpu(bdev->bd_stats);
 	kfree(bdev->bd_meta_info);
@@ -909,6 +931,9 @@ struct block_device *bdev_alloc(struct gendisk *disk, u8 partno)
 		iput(inode);
 		return NULL;
 	}
+
+	INIT_LIST_HEAD(&bdev->bd_filters);
+	percpu_init_rwsem(&bdev->bd_filters_lock);
 	return bdev;
 }
 
@@ -963,7 +988,7 @@ void bdput(struct block_device *bdev)
 	iput(bdev->bd_inode);
 }
 EXPORT_SYMBOL(bdput);
- 
+
 /**
  * bd_may_claim - test whether a block device can be claimed
  * @bdev: block device of interest
@@ -1945,3 +1970,110 @@ void iterate_bdevs(void (*func)(struct block_device *, void *), void *arg)
 	spin_unlock(&blockdev_superblock->s_inode_list_lock);
 	iput(old_inode);
 }
+
+static inline struct blk_filter *filter_find_by_name(struct list_head *head,
+						     const char* name)
+{
+	struct blk_filter *flt;
+
+	list_for_each_entry(flt, head, list)
+		if (strncmp(flt->name, name, FLT_NAME_LENGTH) == 0)
+			return flt;
+	return NULL;
+}
+
+/**
+ * bdev_filter_add - Attach a filter block device to original
+ * @dev_id: block device id
+ * @filter_submit_bio: A function for intercepting a bio request.
+ * @filter_detach: Callback function for the filters detaching.
+ *
+ * Before attaching an interposer, it is necessary to lock the processing
+ * of bio requests of the original device by calling bdev_interposer_lock().
+ *
+ * The bdev_interposer_detach() function allows to detach the interposer
+ * from the original block device.
+ */
+int bdev_filter_add(dev_t dev_id, const char* filter_name,
+		    const struct filter_operations *fops)
+{
+	int ret = 0;
+	struct block_device *bdev;
+	struct blk_filter *flt;
+	fmode_t mode = FMODE_READ | FMODE_WRITE;
+
+	bdev = blkdev_get_by_dev(dev_id, mode, NULL);
+	if (IS_ERR(bdev))
+		return PTR_ERR(bdev);
+
+	percpu_down_write(&bdev->bd_filters_lock);
+	flt = filter_find_by_name(&bdev->bd_filters, filter_name);
+	if (flt) {
+		ret = -EBUSY;
+		flt = NULL;
+		goto fail;
+	}
+
+	flt = kzalloc(sizeof(struct blk_filter), GFP_KERNEL);
+	if (!flt) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+	if (strncpy(flt->name, filter_name, FLT_NAME_LENGTH) == NULL) {
+		ret = -EINVAL;
+		goto fail;
+	}
+
+	flt->fops = fops;
+
+	list_add(&flt->list, &bdev->bd_filters);
+fail:
+	percpu_up_write(&bdev->bd_filters_lock);
+	blkdev_put(bdev, mode);
+	if (ret)
+		kfree(flt);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(bdev_filter_add);
+
+/**
+ * bdev_interposer_detach - Detach interposer from block device
+ * @original: original block device
+ *
+ * Before detaching an interposer, it is necessary to lock the processing
+ * of bio requests of the original device by calling bdev_interposer_lock().
+ *
+ * The interposer should be attached using the bdev_interposer_attach()
+ * function.
+ */
+int bdev_filter_del(dev_t dev_id, const char* filter_name)
+{
+	int ret = 0;
+	struct block_device *bdev;
+	struct blk_filter *flt;
+	fmode_t mode = FMODE_READ | FMODE_WRITE;
+
+	bdev = blkdev_get_by_dev(dev_id, mode, NULL);
+	if (IS_ERR(bdev))
+		return PTR_ERR(bdev);
+
+	percpu_down_write(&bdev->bd_filters_lock);
+	flt = filter_find_by_name(&bdev->bd_filters, filter_name);
+	if (!flt) {
+		ret = -ENOENT;
+		goto fail;
+	}
+
+	if (flt->fops->detach_cb)
+		flt->fops->detach_cb(bdev);
+	list_del(&flt->list);
+	kfree(flt);
+fail:
+	percpu_up_write(&bdev->bd_filters_lock);
+	blkdev_put(bdev, mode);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(bdev_filter_del);
+

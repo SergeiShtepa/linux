@@ -47,6 +47,11 @@ struct block_device {
 	struct gendisk *	bd_disk;
 	struct backing_dev_info *bd_bdi;
 
+	/* The list of filters for this block device */
+	struct list_head	bd_filters;
+	/* Lock the queue of block device to add or delete filter. */
+	struct percpu_rw_semaphore bd_filters_lock;
+
 	/* The counter of freeze processes */
 	int			bd_fsfreeze_count;
 	/* Mutex for freeze */
