@@ -1054,7 +1054,7 @@ again:
 		goto out;
 
 	list_for_each_entry(flt, &bdev->bd_filters, list) {
-		status = flt->fops->submit_bio_cb(bio);
+		status = flt->fops->submit_bio_cb(bio, flt->ctx);
 		if (status != FLT_ST_PASS)
 			break;
 	}

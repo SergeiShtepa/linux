@@ -814,7 +814,7 @@ static void bdev_filter_cleanup(struct block_device *bdev)
 
 		list_for_each_entry(flt, &bdev->bd_filters, list) {
 			if (flt->fops->detach_cb)
-				flt->fops->detach_cb(bdev);
+				flt->fops->detach_cb(flt->ctx);
 
 			list_del(&flt->list);
 			kfree(flt);
@@ -1971,16 +1971,53 @@ void iterate_bdevs(void (*func)(struct block_device *, void *), void *arg)
 	iput(old_inode);
 }
 
-static inline struct blk_filter *filter_find_by_name(struct list_head *head,
-						     const char* name)
+static inline struct blk_filter *bdev_filter_find_by_name(struct block_device *bdev,
+					    const char* name)
 {
 	struct blk_filter *flt;
 
-	list_for_each_entry(flt, head, list)
+	list_for_each_entry(flt, &bdev->bd_filters, list)
 		if (strncmp(flt->name, name, FLT_NAME_LENGTH) == 0)
 			return flt;
+
 	return NULL;
 }
+
+#define FLT_BDEV_MODE (FMODE_READ | FMODE_WRITE)
+
+struct block_device *bdev_filter_lock(dev_t dev_id)
+{
+	struct block_device *bdev;
+
+	bdev = blkdev_get_by_dev(dev_id, FLT_BDEV_MODE, NULL);
+	if (!IS_ERR(bdev))
+		percpu_down_write(&bdev->bd_filters_lock);
+
+	return bdev;
+}
+EXPORT_SYMBOL_GPL(bdev_filter_lock);
+
+void bdev_filter_unlock(struct block_device *bdev)
+{
+	percpu_up_write(&bdev->bd_filters_lock);
+	blkdev_put(bdev, FLT_BDEV_MODE);
+}
+EXPORT_SYMBOL_GPL(bdev_filter_unlock);
+
+/**
+ *
+ */
+void *bdev_filter_find_ctx(struct block_device *bdev, const char* filter_name)
+{
+	struct blk_filter *flt;
+
+	flt = bdev_filter_find_by_name(bdev, filter_name);
+	if (!flt)
+		return ERR_PTR(-ENOENT);
+
+	return flt->ctx;
+}
+EXPORT_SYMBOL_GPL(bdev_filter_find_ctx);
 
 /**
  * bdev_filter_add - Attach a filter block device to original
@@ -1994,42 +2031,27 @@ static inline struct blk_filter *filter_find_by_name(struct list_head *head,
  * The bdev_interposer_detach() function allows to detach the interposer
  * from the original block device.
  */
-int bdev_filter_add(dev_t dev_id, const char* filter_name,
-		    const struct filter_operations *fops)
+int bdev_filter_add(struct block_device *bdev, const char* filter_name,
+		    const struct filter_operations *fops, void* ctx)
 {
 	int ret = 0;
-	struct block_device *bdev;
 	struct blk_filter *flt;
-	fmode_t mode = FMODE_READ | FMODE_WRITE;
 
-	bdev = blkdev_get_by_dev(dev_id, mode, NULL);
-	if (IS_ERR(bdev))
-		return PTR_ERR(bdev);
-
-	percpu_down_write(&bdev->bd_filters_lock);
-	flt = filter_find_by_name(&bdev->bd_filters, filter_name);
-	if (flt) {
-		ret = -EBUSY;
-		flt = NULL;
-		goto fail;
-	}
+	flt = bdev_filter_find_by_name(bdev, filter_name);
+	if (flt)
+		return -EBUSY;
 
 	flt = kzalloc(sizeof(struct blk_filter), GFP_KERNEL);
 	if (!flt) {
 		ret = -ENOMEM;
-		goto fail;
-	}
-	if (strncpy(flt->name, filter_name, FLT_NAME_LENGTH) == NULL) {
-		ret = -EINVAL;
-		goto fail;
+		goto out;
 	}
 
+	strncpy(flt->name, filter_name, FLT_NAME_LENGTH);
 	flt->fops = fops;
-
+	flt->ctx = ctx;
 	list_add(&flt->list, &bdev->bd_filters);
-fail:
-	percpu_up_write(&bdev->bd_filters_lock);
-	blkdev_put(bdev, mode);
+out:
 	if (ret)
 		kfree(flt);
 
@@ -2047,31 +2069,21 @@ EXPORT_SYMBOL_GPL(bdev_filter_add);
  * The interposer should be attached using the bdev_interposer_attach()
  * function.
  */
-int bdev_filter_del(dev_t dev_id, const char* filter_name)
+int bdev_filter_del(struct block_device *bdev, const char* filter_name)
 {
 	int ret = 0;
-	struct block_device *bdev;
 	struct blk_filter *flt;
-	fmode_t mode = FMODE_READ | FMODE_WRITE;
 
-	bdev = blkdev_get_by_dev(dev_id, mode, NULL);
-	if (IS_ERR(bdev))
-		return PTR_ERR(bdev);
-
-	percpu_down_write(&bdev->bd_filters_lock);
-	flt = filter_find_by_name(&bdev->bd_filters, filter_name);
-	if (!flt) {
-		ret = -ENOENT;
-		goto fail;
-	}
+	flt = bdev_filter_find_by_name(bdev, filter_name);
+	if (!flt)
+		return -ENOENT;
 
 	if (flt->fops->detach_cb)
-		flt->fops->detach_cb(bdev);
+		flt->fops->detach_cb(flt->ctx);
 	list_del(&flt->list);
 	kfree(flt);
-fail:
-	percpu_up_write(&bdev->bd_filters_lock);
-	blkdev_put(bdev, mode);
+
+	bdev_filter_unlock(bdev);
 
 	return ret;
 }
