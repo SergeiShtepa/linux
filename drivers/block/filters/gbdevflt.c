@@ -31,11 +31,10 @@ static inline void gbf_rule_free(struct gbf_rule *rule)
 	if (!rule)
 		return;
 
+	list_del(&rule->list);
 	kfree(rule->range);
 	kfree(rule->owner);
 	kfree(rule);
-
-	list_del(&rule->list);
 }
 
 static inline struct gbf_rule *gbf_rule_new(
@@ -169,9 +168,9 @@ static inline struct gbf_rule *gbf_ctx_find_rule(struct gbf_ctx *ctx,
 
 	list_for_each_entry(rule, &ctx->rules_list, list)
 		if (strncmp(rule->name, rule_name, GBF_RULE_NAME_LENGTH) == 0)
-			break;
+			return rule;
 
-	return rule;
+	return NULL;
 }
 
 static flt_st_t gbf_submit_bio_cb(struct bio *bio, void* gbf_ctx)
