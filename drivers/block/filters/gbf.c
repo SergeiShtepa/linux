@@ -4,45 +4,113 @@
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/blkdev.h>
-#include "gbdevflt.h"
+#include "rpnexp.h"
+#include "gbf.h"
 
 #define MODULE_NAME "gbdevflt"
 
 #ifdef GBF_DEFAULT_FILTER
 static uint g_bdev_mj = 7;
 static uint g_bdev_mn = 1;
+static char *g_rule = "0 1024 range 2048 1024 range || write && !" ;
 #endif
 
 LIST_HEAD(ctx_list);
 struct mutex ctx_list_lock;
 
+static int gfp_rule_range(struct rpn_stack *stack, void *ctx)
+{
+	int ret;
+	struct bio *bio = ctx;
+	sector_t ofs;
+	sector_t len;
+	u64 result;
+
+	ret = rpn_stack_pop(stack, &len);
+	if (unlikely(ret) )
+		return ret;
+
+	ret = rpn_stack_pop(stack, &ofs);
+	if (unlikely(ret) )
+		return ret;
+
+	result = (bio_offset(bio) <= (ofs + len -1)) &&
+		 (bio_end_sector(bio) > ofs);
+
+	ret = rpn_stack_push(stack, result);
+	if (unlikely(ret) )
+		return ret;
+
+	return 0;
+};
+
+static int gfp_rule_owner(struct rpn_stack *stack, void *ctx)
+{
+	int ret;
+	struct bio *bio = ctx;
+	u64 owner;
+	u64 result;
+
+	ret = rpn_stack_pop(stack, &owner);
+	if (unlikely(ret) )
+		return ret;
+
+	result = (void *)bio->bi_end_io == (void *)owner;
+
+	ret = rpn_stack_push(stack, result);
+	if (unlikely(ret) )
+		return ret;
+
+	return 0;
+};
+
+static int gfp_rule_read(struct rpn_stack *stack, void *ctx)
+{
+	int ret;
+	struct bio *bio = ctx;
+	u64 result;
+
+	result = bio_has_data(bio) && !op_is_write(bio_op(bio));
+
+	ret = rpn_stack_push(stack, result);
+	if (unlikely(ret) )
+		return ret;
+
+	return 0;
+};
+
+static int gfp_rule_write(struct rpn_stack *stack, void *ctx)
+{
+	int ret;
+	struct bio *bio = ctx;
+	u64 result;
+
+	result = bio_has_data(bio) && op_is_write(bio_op(bio));
+
+	ret = rpn_stack_push(stack, result);
+	if (unlikely(ret) )
+		return ret;
+
+	return 0;
+};
+
+const struct rpn_ext_op gbf_op_dict[] = {
+	{"range", gfp_rule_range},
+	{"owner", gfp_rule_owner},
+	{"read", gfp_rule_read},
+	{"write", gfp_rule_write},
+	{NULL, NULL}
+};
+
 #define GBF_RULE_NAME_LENGTH 31
 struct gbf_rule {
 	struct list_head list;
 	char name[GBF_RULE_NAME_LENGTH+1];
-	gbf_rule_consent_t consent;
-	gbf_rule_join_t join;
-	struct gbf_rule_range *range;
-	struct gbf_rule_owner *owner;
+	u64 *bytecode;
 };
 
-static inline void gbf_rule_free(struct gbf_rule *rule)
-{
-	if (!rule)
-		return;
-
-	list_del(&rule->list);
-	kfree(rule->range);
-	kfree(rule->owner);
-	kfree(rule);
-}
-
-static inline struct gbf_rule *gbf_rule_new(
-	const char *rule_name,
-	const gbf_rule_consent_t consent,
-	const gbf_rule_join_t join,
-	const struct gbf_rule_range *rule_range,
-	const struct gbf_rule_owner *rule_owner)
+static inline struct gbf_rule *gbf_rule_new(const char *rule_name,
+					    char *rule_exp)
 {
 	struct gbf_rule *rule;
 
@@ -50,31 +118,26 @@ static inline struct gbf_rule *gbf_rule_new(
 	if (!rule)
 		return NULL;
 
-	if (rule_range) {
-		rule->range = kzalloc(sizeof(struct gbf_rule_range), GFP_KERNEL);
-		if (!rule->range)
-			goto fail;
+	rule->bytecode = rpn_parse_expression(rule_exp, gbf_op_dict);
+	if (IS_ERR(rule->bytecode)) {
+		pr_err("Failed to parse rule expression: %s\n", rule_exp);
 
-		memcpy(rule->range, rule_range, sizeof(struct gbf_rule_range));
-	}
-	if (rule_owner) {
-		rule->owner = kzalloc(sizeof(struct gbf_rule_owner), GFP_KERNEL);
-		if (!rule->owner)
-			goto fail;
-
-		memcpy(rule->owner, rule_owner, sizeof(struct gbf_rule_owner));
+		kfree(rule);
+		return NULL;
 	}
 
 	strncpy(rule->name, rule_name, GBF_RULE_NAME_LENGTH);
-	rule->consent = consent;
-	rule->join = join;
+	INIT_LIST_HEAD(&rule->list);
 
 	return rule;
-fail:
-	kfree(rule->range);
-	kfree(rule->owner);
+}
+
+static inline void gbf_rule_free(struct gbf_rule *rule)
+{
+	list_del(&rule->list);
+
+	kfree(rule->bytecode);
 	kfree(rule);
-	return NULL;
 }
 
 void inline gbf_rules_cleanup(struct list_head *rules_list)
@@ -87,47 +150,27 @@ void inline gbf_rules_cleanup(struct list_head *rules_list)
 	}
 }
 
-static inline bool gbf_rule_range_apply(struct gbf_rule_range *range,
-					sector_t bio_first, sector_t bio_last)
-{
-	return (bio_first <= range->last) && (bio_last >= range->first);
-}
-
-static inline bool gbf_rule_owner_apply(struct gbf_rule_owner *owner,
-					bio_end_io_t *bi_end_io)
-{
-	return (owner->bi_end_io == bi_end_io);
-}
-
 static flt_st_t gbf_rule_apply(struct gbf_rule *rule, struct bio *bio)
 {
-	bool is_apply;
-	unsigned char check = 0;
-	unsigned char condition = 0;
+	int ret = 0;
+	u64 result;
+	RPN_STACK(st, 8);
 
-	if (rule->range) {
-		check |= 1;
-		if (gbf_rule_range_apply(rule->range, bio_offset(bio), bio_end_sector(bio)-1))
-			condition |= 1;
+	ret = rpn_execute(rule->bytecode, &st, bio);
+	if (unlikely(ret)) {
+		pr_err("Failed to execute rule.");
+		goto deny;
 	}
 
-	if (rule->owner) {
-		check |= 2;
-		if (gbf_rule_owner_apply(rule->owner, bio->bi_end_io))
-			condition |= 2;
+	ret = rpn_stack_pop(&st, &result);
+	if (unlikely(ret)) {
+		pr_err("Cannot get rules result.");
+		goto deny;
 	}
 
-	if ((check == 0))
-		is_apply = true;
-	else if ((check == 3) && (rule->join == GBF_RULE_JOIN_AND))
-		is_apply = (condition == 3);
-	else
-		is_apply = !!condition;
-
-	if (((rule->consent == GBF_RULE_CONSENT_ALLOW) && is_apply) ||
-	    ((rule->consent == GBF_RULE_CONSENT_DENY) && !is_apply))
+	if (result)
 		return FLT_ST_PASS;
-
+deny:
 	bio->bi_status = BLK_STS_NOTSUPP;
 	bio_endio(bio);
 	return FLT_ST_COMPLETE;
@@ -141,7 +184,7 @@ struct gbf_ctx {
 
 static inline struct gbf_ctx *gbf_ctx_new(void )
 {
-	struct gbf_ctx * ctx;
+	struct gbf_ctx *ctx;
 
 	ctx = kzalloc(sizeof(struct gbf_ctx), GFP_KERNEL);
 	if (!ctx)
@@ -208,12 +251,8 @@ const static struct filter_operations gbf_fops = {
 /**
  *
  */
-int gbf_rule_add(dev_t dev_id, const char *rule_name,
-		const gbf_rule_consent_t consent,
-		const gbf_rule_add_t rule_add,
-		const gbf_rule_join_t join,
-		const struct gbf_rule_range *rule_range,
-		const struct gbf_rule_owner *rule_owner)
+int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
+		 bool add_to_head)
 {
 	int ret = 0;
 	struct  block_device *bdev;
@@ -247,13 +286,13 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name,
 		goto out;
 	}
 
-	rule = gbf_rule_new(rule_name, consent, join, rule_range, rule_owner);
+	rule = gbf_rule_new(rule_name, rule_exp);
 	if (!rule) {
 		ret = -ENOMEM;
 		goto out;
 	}
 
-	if (rule_add == GBF_RULE_ADD_HEAD)
+	if (add_to_head)
 		list_add(&rule->list, &ctx->rules_list);
 	else
 		list_add_tail(&rule->list, &ctx->rules_list);
@@ -308,10 +347,7 @@ static int __init gbf_init(void)
 	mutex_init(&ctx_list_lock);
 
 #ifdef GBF_DEFAULT_FILTER
-	ret = gbf_rule_add(MKDEV(g_bdev_mj, g_bdev_mn), "gbf_test",
-			GBF_RULE_CONSENT_DENY,
-			GBF_RULE_ADD_HEAD,
-			GBF_RULE_JOIN_OR, NULL, NULL);
+	ret = gbf_rule_add(MKDEV(g_bdev_mj, g_bdev_mn), "gbf_test", g_rule, true);
 #endif
 	return ret;
 }
@@ -351,10 +387,12 @@ module_init(gbf_init);
 module_exit(gbf_exit);
 
 #ifdef GBF_DEFAULT_FILTER
-module_param_named( bdev_mj, g_bdev_mj, uint, 0644 );
-MODULE_PARM_DESC( bdev_mj, "Major number of filtering block device." );
-module_param_named( bdev_mn, g_bdev_mn, uint, 0644 );
-MODULE_PARM_DESC( bdev_mn, "Minor number of filtering block device." );
+module_param_named(bdev_mj, g_bdev_mj, uint, 0644);
+MODULE_PARM_DESC(bdev_mj, "Major number of filtering block device.");
+module_param_named(bdev_mn, g_bdev_mn, uint, 0644);
+MODULE_PARM_DESC(bdev_mn, "Minor number of filtering block device.");
+module_param_named(rule, g_rule, charp, 0644);
+MODULE_PARM_DESC(rule, "Default rule for block device.");
 #endif
 
 MODULE_DESCRIPTION("Generic Block Device Filter");
