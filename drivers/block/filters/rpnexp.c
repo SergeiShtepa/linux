@@ -167,16 +167,22 @@ static int rpn_parse_word(char *word, size_t length,
 	if (find_buildin_op(word, length, &opcode))
 		return rpn_bytecode_append(bc, opcode);
 
-	if (find_ext_op(word, length, ext_op_dict, &opcode)) {
-		ret = rpn_bytecode_append(bc, RPN_OP_CALL);
-		if(!ret)
-			return ret;
+	if (ext_op_dict) {
+		if (find_ext_op(word, length, ext_op_dict, &opcode)) {
+			ret = rpn_bytecode_append(bc, RPN_OP_CALL);
+			if(ret)
+				return ret;
 
-		return rpn_bytecode_append(bc, opcode);
+			return rpn_bytecode_append(bc, opcode);
+		}
 	}
 
 	ret = kstrtou64(word, 0, &opcode);
-	if (!ret)
+	if (ret)
+		return ret;
+
+	ret = rpn_bytecode_append(bc, RPN_OP_LD);
+	if(ret)
 		return ret;
 
 	return rpn_bytecode_append(bc, opcode);
@@ -194,7 +200,7 @@ u64* rpn_parse_expression(char *exp, const struct rpn_ext_op *op_dict)
 	char *word = NULL;
 	size_t inx = 0;
 
-	while(exp[inx] == '\0') {
+	while(exp[inx] != '\0') {
 		if (exp[inx] != ' ') {
 			if (word == NULL)
 				word = &exp[inx];
@@ -251,7 +257,7 @@ int rpn_execute(u64 *op, struct rpn_stack *stack, void *ctx)
 				 * and push to stack
 				 */
 				ret = rpn_stack_push(stack, v0);
-				if (unlikely(!ret))
+				if (unlikely(ret))
 					return ret;
 
 			} else if (opcode == RPN_OP_CALL) {
@@ -262,7 +268,7 @@ int rpn_execute(u64 *op, struct rpn_stack *stack, void *ctx)
 				 * It's allow to implement external operands.
 				 */
 				ret = ((int(*)(struct rpn_stack *, void *))(v0))(stack, ctx);
-				if (unlikely(!ret))
+				if (unlikely(ret))
 					return ret;
 			} else
 				return -ENOTSUPP;
@@ -272,13 +278,13 @@ int rpn_execute(u64 *op, struct rpn_stack *stack, void *ctx)
 			 * Get two integer from stack and execute operation.
 			 */
 			ret = rpn_stack_pop_double(stack, &v0, &v1);
-			if (unlikely(!ret))
+			if (unlikely(ret))
 				return ret;
 
 			v0 = rpn_two_op_fn[opcode - RPN_TWO_OP](v0, v1);
 
 			ret = rpn_stack_push(stack, v0);
-			if (unlikely(!ret))
+			if (unlikely(ret))
 				return ret;
 		} else if (opcode & RPN_UNARY_OP) {
 			u64 v0;
@@ -287,13 +293,13 @@ int rpn_execute(u64 *op, struct rpn_stack *stack, void *ctx)
 			 * unary operation.
 			 */
 			ret = rpn_stack_pop(stack, &v0);
-			if (unlikely(!ret))
+			if (unlikely(ret))
 				return ret;
 
 			v0 = rpn_unary_op_fn[opcode - RPN_UNARY_OP](v0);
 
 			ret = rpn_stack_push(stack, v0);
-			if (unlikely(!ret))
+			if (unlikely(ret))
 				return ret;
 		} else
 			return -ENOTSUPP;

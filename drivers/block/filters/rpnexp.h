@@ -14,11 +14,11 @@ struct rpn_stack {
 };
 
 #define RPN_STACK(name, size)							\
-	u64 name ##_data[size];							\
+	u64 name ##_data[size] = {0};						\
 	struct rpn_stack name = {						\
 		.roof = name ##_data,						\
-		.top = name ##_data + size -1,					\
-		.bottom = name ##_data + size -1				\
+		.top = name ##_data + size,					\
+		.bottom = name ##_data + size					\
 	};									\
 
 
@@ -34,11 +34,11 @@ static inline int rpn_stack_pop(struct rpn_stack *st, u64 *value)
 
 static inline int rpn_stack_pop_double(struct rpn_stack *st, u64 *v0, u64 *v1)
 {
-	if (unlikely((st->bottom - st->top)))
+	if (unlikely((st->top + 2) > st->bottom))
 		return -ENODATA;
 
-	*v0 = st->top[0];
-	*v1 = st->top[1];
+	*v1 = st->top[0];
+	*v0 = st->top[1];
 	st->top+=2;
 	return 0;
 };
@@ -48,8 +48,8 @@ static inline int rpn_stack_push(struct rpn_stack *st, u64 value)
 	if (unlikely(st->top == st->roof))
 		return -ENOMEM;
 
-	*st->top = value;
 	st->top--;
+	*st->top = value;
 
 	return 0;
 };
