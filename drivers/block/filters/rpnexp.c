@@ -96,7 +96,7 @@ static const struct rpn_buildin_op rpn_buildin_op_dict[] = {
 };
 
 /* searching in build-in dictionary */
-bool find_buildin_op(const char *word, size_t length, u64 *opcode)
+static bool find_buildin_op(const char *word, size_t length, u64 *opcode)
 {
 	const struct rpn_buildin_op *op = rpn_buildin_op_dict;
 	size_t inx = 0;
@@ -114,8 +114,8 @@ bool find_buildin_op(const char *word, size_t length, u64 *opcode)
 }
 
 /* searching in extended dictionary*/
-bool find_ext_op(const char *word, size_t length,
-		 const struct rpn_ext_op *op, u64 *opcode)
+static bool find_ext_op(const char *word, size_t length,
+			const struct rpn_ext_op *op, u64 *opcode)
 {
 	size_t inx = 0;
 
@@ -147,7 +147,8 @@ static inline int rpn_bytecode_append(struct rpn_bytecode *bc, u64 value)
 				return -ENOMEM;
 		} else {
 			bc->len = bc->len << 1;
-			bc->head = krealloc(bc->head, sizeof(u64) * bc->len, GFP_KERNEL);
+			bc->head = krealloc(bc->head, sizeof(u64) * bc->len,
+					    GFP_KERNEL);
 			if (!bc->head)
 				return -ENOMEM;
 		}
@@ -201,7 +202,7 @@ u64* rpn_parse_expression(char *exp, const struct rpn_ext_op *op_dict)
 	size_t inx = 0;
 
 	while(exp[inx] != '\0') {
-		if (exp[inx] != ' ') {
+		if ((exp[inx] != ' ') && (exp[inx] != '\t')) {
 			if (word == NULL)
 				word = &exp[inx];
 			++inx;
@@ -267,7 +268,8 @@ int rpn_execute(u64 *op, struct rpn_stack *stack, void *ctx)
 				 * convert to function pointer and call it.
 				 * It's allow to implement external operands.
 				 */
-				ret = ((int(*)(struct rpn_stack *, void *))(v0))(stack, ctx);
+				ret = ((int(*)(struct rpn_stack *, void *))(v0))
+					(stack, ctx);
 				if (unlikely(ret))
 					return ret;
 			} else

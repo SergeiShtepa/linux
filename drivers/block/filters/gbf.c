@@ -6,14 +6,9 @@
 #include <linux/blkdev.h>
 #include "rpnexp.h"
 #include "gbf.h"
+#include "gbf_sysfs.h"
 
 #define MODULE_NAME "gbdevflt"
-
-#ifdef GBF_DEFAULT_FILTER
-static uint g_bdev_mj = 7;
-static uint g_bdev_mn = 1;
-static char *g_rule = "0 1024 range 2048 1024 range || write && !" ;
-#endif
 
 LIST_HEAD(ctx_list);
 struct mutex ctx_list_lock;
@@ -102,7 +97,6 @@ const struct rpn_ext_op gbf_op_dict[] = {
 	{NULL, NULL}
 };
 
-#define GBF_RULE_NAME_LENGTH 31
 struct gbf_rule {
 	struct list_head list;
 	char name[GBF_RULE_NAME_LENGTH+1];
@@ -114,20 +108,22 @@ static inline struct gbf_rule *gbf_rule_new(const char *rule_name,
 {
 	struct gbf_rule *rule;
 
+	pr_err("DEBUG! %s: Parse rule expression: [%s]\n", __func__, rule_exp);
+
 	rule = kzalloc(sizeof(struct gbf_rule), GFP_KERNEL);
 	if (!rule)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
+
+	INIT_LIST_HEAD(&rule->list);
+	strncpy(rule->name, rule_name, GBF_RULE_NAME_LENGTH);
 
 	rule->bytecode = rpn_parse_expression(rule_exp, gbf_op_dict);
 	if (IS_ERR(rule->bytecode)) {
-		pr_err("Failed to parse rule expression: %s\n", rule_exp);
+		pr_err("Failed to parse rule expression: \"%s\"\n", rule_exp);
 
 		kfree(rule);
-		return NULL;
+		return ERR_PTR(PTR_ERR(rule->bytecode));
 	}
-
-	strncpy(rule->name, rule_name, GBF_RULE_NAME_LENGTH);
-	INIT_LIST_HEAD(&rule->list);
 
 	return rule;
 }
@@ -259,6 +255,8 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 	struct gbf_ctx *ctx;
 	struct gbf_rule *rule;
 
+	pr_err("DEBUG! %s: Add rule: [%s]\n", __func__, rule_exp);
+
 	bdev = bdev_filter_lock(dev_id);
 	if (IS_ERR(bdev))
 		return PTR_ERR(bdev);
@@ -287,8 +285,8 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 	}
 
 	rule = gbf_rule_new(rule_name, rule_exp);
-	if (!rule) {
-		ret = -ENOMEM;
+	if (IS_ERR(rule)) {
+		ret = PTR_ERR(rule);
 		goto out;
 	}
 
@@ -340,17 +338,6 @@ out:
 }
 EXPORT_SYMBOL_GPL(gbf_rule_del);
 
-static int __init gbf_init(void)
-{
-	int ret = 0;
-
-	mutex_init(&ctx_list_lock);
-
-#ifdef GBF_DEFAULT_FILTER
-	ret = gbf_rule_add(MKDEV(g_bdev_mj, g_bdev_mn), "gbf_test", g_rule, true);
-#endif
-	return ret;
-}
 
 static void gfb_cleanup(dev_t dev_id)
 {
@@ -369,8 +356,26 @@ static void gfb_cleanup(dev_t dev_id)
 	bdev_filter_unlock(bdev);
 }
 
+static int __init gbf_init(void)
+{
+	int ret = 0;
+
+	pr_err("DEBUG! %s %s: ", MODULE_NAME, __func__);
+	mutex_init(&ctx_list_lock);
+
+	ret = gbf_sysfs_init(MODULE_NAME);
+	if (ret) {
+		pr_err("Failed to initialize sysfs interface.");
+		return ret;
+	}
+
+	return ret;
+}
+
 static void __exit gbf_exit(void)
 {
+	pr_err("DEBUG! %s %s: ", MODULE_NAME, __func__);
+
 	mutex_lock(&ctx_list_lock);
 	while(!list_empty(&ctx_list)){
 		struct gbf_ctx *ctx;
@@ -381,19 +386,12 @@ static void __exit gbf_exit(void)
 		gbf_ctx_free(ctx);
 	}
 	mutex_unlock(&ctx_list_lock);
+
+	gbf_sysfs_done();
 }
 
 module_init(gbf_init);
 module_exit(gbf_exit);
-
-#ifdef GBF_DEFAULT_FILTER
-module_param_named(bdev_mj, g_bdev_mj, uint, 0644);
-MODULE_PARM_DESC(bdev_mj, "Major number of filtering block device.");
-module_param_named(bdev_mn, g_bdev_mn, uint, 0644);
-MODULE_PARM_DESC(bdev_mn, "Minor number of filtering block device.");
-module_param_named(rule, g_rule, charp, 0644);
-MODULE_PARM_DESC(rule, "Default rule for block device.");
-#endif
 
 MODULE_DESCRIPTION("Generic Block Device Filter");
 MODULE_AUTHOR("Oracle Corporation");
