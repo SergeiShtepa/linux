@@ -124,7 +124,20 @@ static inline struct gbf_rule *gbf_rule_new(const char *rule_name,
 		kfree(rule);
 		return ERR_PTR(PTR_ERR(rule->bytecode));
 	}
+	{//DEBUG output
+		char *str;
 
+		str = rpn_bytecode_to_dbgstr(rule->bytecode);
+		if (IS_ERR(str)) {
+			pr_err("Failed to check rule expression: \"%s\"\n", rule_exp);
+
+			kfree(rule);
+			return ERR_PTR(PTR_ERR(str));
+		}
+
+		pr_err("DEBUG! %s: %s", __func__, str);
+		kfree(str);
+	}
 	return rule;
 }
 
@@ -152,6 +165,7 @@ static flt_st_t gbf_rule_apply(struct gbf_rule *rule, struct bio *bio)
 	u64 result;
 	RPN_STACK(st, 8);
 
+	pr_err("DEBUG! %s", __func__);
 	ret = rpn_execute(rule->bytecode, &st, bio);
 	if (unlikely(ret)) {
 		pr_err("Failed to execute rule.");
@@ -318,14 +332,18 @@ int gbf_rule_del(dev_t dev_id, const char* rule_name)
 
 	ctx = bdev_filter_find_ctx(bdev, MODULE_NAME);
 	if (IS_ERR(ctx)) {
-		pr_err("Filter [%s] is not exist\n", MODULE_NAME);
+		pr_err("Filter [%s] is not exist on device [%d:%d]\n",
+			MODULE_NAME, MAJOR(dev_id), MINOR(dev_id));
 		pr_err("Failed to delete rule [%s]\n", rule_name);
 		ret = -ENXIO;
 		goto out;
 	}
 
 	rule = gbf_ctx_find_rule(ctx, rule_name);
-	if (rule) {
+	if (!rule) {
+		pr_err("Rule is not exist on device [%d:%d]\n",
+			MAJOR(dev_id), MINOR(dev_id));
+		pr_err("Failed to delete rule [%s]\n", rule_name);
 		ret = -ENOENT;
 		goto out;
 	}

@@ -17,7 +17,6 @@
 #define RPN_SERVICE_OP 0x01000000
 enum {
 	RPN_OP_END = RPN_SERVICE_OP,	/* byte code termination operation */
-	RPN_OP_LD,			/* load integer to stack */
 	RPN_OP_CALL			/* load address and call */
 };
 
@@ -165,27 +164,26 @@ static int rpn_parse_word(char *word, size_t length,
 	int ret = 0;
 	u64 opcode;
 
-	if (find_buildin_op(word, length, &opcode))
+	if (find_buildin_op(word, length, &opcode)) {
+		/* put buildin opcode */
 		return rpn_bytecode_append(bc, opcode);
+	}
 
 	if (ext_op_dict) {
 		if (find_ext_op(word, length, ext_op_dict, &opcode)) {
-			ret = rpn_bytecode_append(bc, RPN_OP_CALL);
+			/* put external operations address */
+			ret = rpn_bytecode_append(bc, opcode);
 			if(ret)
 				return ret;
-
-			return rpn_bytecode_append(bc, opcode);
+			/* put call operation */
+			return rpn_bytecode_append(bc, RPN_OP_CALL);
 		}
 	}
 
 	ret = kstrtou64(word, 0, &opcode);
 	if (ret)
 		return ret;
-
-	ret = rpn_bytecode_append(bc, RPN_OP_LD);
-	if(ret)
-		return ret;
-
+	/* put constant */
 	return rpn_bytecode_append(bc, opcode);
 }
 
@@ -228,6 +226,7 @@ u64* rpn_parse_expression(char *exp, const struct rpn_ext_op *op_dict)
 			goto fail;
 	}
 
+	/* put the end of program operation */
 	ret = rpn_bytecode_append(&bc, RPN_OP_END);
 	if (ret)
 		goto fail;
@@ -250,44 +249,21 @@ int rpn_execute(u64 *op, struct rpn_stack *stack, void *ctx)
 	u64 opcode;
 
 	while((opcode = *op++) != RPN_OP_END) {
+		pr_err("DEBUG! opcode=%llx", opcode);
 		if (opcode & RPN_SERVICE_OP) {
-			if (opcode == RPN_OP_LD) {
-				u64 v0 = *op++;
-				/*
-				 * get constant from byte code
-				 * and push to stack
-				 */
-				ret = rpn_stack_push(stack, v0);
+			if (opcode == RPN_OP_CALL) {
+				u64 v0;
+
+				ret = rpn_stack_pop(stack, &v0);
 				if (unlikely(ret))
 					return ret;
-
-			} else if (opcode == RPN_OP_CALL) {
-				u64 v0 = *op++;
-				/*
-				 * get constant from byte code
-				 * convert to function pointer and call it.
-				 * It's allow to implement external operands.
-				 */
+				pr_err("DEBUG! call=%llx", v0);
 				ret = ((int(*)(struct rpn_stack *, void *))(v0))
 					(stack, ctx);
 				if (unlikely(ret))
 					return ret;
 			} else
 				return -ENOTSUPP;
-		} else if (opcode & RPN_TWO_OP) {
-			u64 v0, v1;
-			/*
-			 * Get two integer from stack and execute operation.
-			 */
-			ret = rpn_stack_pop_double(stack, &v0, &v1);
-			if (unlikely(ret))
-				return ret;
-
-			v0 = rpn_two_op_fn[opcode - RPN_TWO_OP](v0, v1);
-
-			ret = rpn_stack_push(stack, v0);
-			if (unlikely(ret))
-				return ret;
 		} else if (opcode & RPN_UNARY_OP) {
 			u64 v0;
 			/*
@@ -297,15 +273,68 @@ int rpn_execute(u64 *op, struct rpn_stack *stack, void *ctx)
 			ret = rpn_stack_pop(stack, &v0);
 			if (unlikely(ret))
 				return ret;
-
+			pr_err("DEBUG! unary op %llx for %llx", opcode - RPN_UNARY_OP, v0);
 			v0 = rpn_unary_op_fn[opcode - RPN_UNARY_OP](v0);
 
 			ret = rpn_stack_push(stack, v0);
 			if (unlikely(ret))
 				return ret;
-		} else
-			return -ENOTSUPP;
+		} else if (opcode & RPN_TWO_OP) {
+			u64 v0, v1;
+			/*
+			 * Get two integer from stack and execute operation.
+			 */
+			ret = rpn_stack_pop_double(stack, &v0, &v1);
+			if (unlikely(ret))
+				return ret;
+			pr_err("DEBUG! two op %llx for %llx,%llx ", opcode - RPN_UNARY_OP, v0, v1);
+			v0 = rpn_two_op_fn[opcode - RPN_TWO_OP](v0, v1);
+
+			ret = rpn_stack_push(stack, v0);
+			if (unlikely(ret))
+				return ret;
+		} else {
+			/*
+			 * get constant from byte code
+			 * and push to stack
+			 */
+			pr_err("DEBUG! push constant");
+			ret = rpn_stack_push(stack, opcode);
+			if (unlikely(ret))
+				return ret;
+		}
 	}
 
 	return ret;
+}
+
+char* rpn_bytecode_to_dbgstr(u64 *op)
+{
+	char* str;
+	char* tail;
+	size_t len = 4096;
+	u64 opcode = 0;
+	size_t word_len = 0;
+
+	str = kzalloc(4096, GFP_KERNEL);
+	if (!str)
+		return ERR_PTR(-ENOMEM);
+
+	tail = str;
+
+	while((opcode = *op++) != RPN_OP_END) {
+		if (len < 32) {
+			snprintf(tail, len, "...\n");
+			break;
+		}
+
+		snprintf(tail, len, "%llx ", opcode);
+		word_len = strlen(tail);
+		len -= word_len;
+		tail += word_len;
+	}
+	if (opcode != 0)
+		snprintf(tail, len, "%llx", opcode);
+
+	return str;
 }

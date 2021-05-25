@@ -62,4 +62,5 @@ struct rpn_ext_op {
 u64* rpn_parse_expression(char *exp, const struct rpn_ext_op *op_dict);
 int rpn_execute(u64 *op, struct rpn_stack *stack, void *ctx);
 
+char* rpn_bytecode_to_dbgstr(u64 *op);
 #endif

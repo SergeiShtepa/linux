@@ -177,7 +177,7 @@ static int rule_remove_execute(struct rule_remove_opt *opt)
 		return ret;
 	}
 
-	return gbf_rule_del(dev_id, opt->path);
+	return gbf_rule_del(dev_id, opt->name);
 }
 
 static int rule_remove_parse(char *options, struct rule_remove_opt *opt)
@@ -187,7 +187,7 @@ static int rule_remove_parse(char *options, struct rule_remove_opt *opt)
 	int token;
 	substring_t args[MAX_OPT_ARGS];
 
-	while ((p = strsep(&options, ";\0")) != NULL) {
+	while ((p = strsep(&options, ";\n")) != NULL) {
 		if (!*p)
 			continue;
 
