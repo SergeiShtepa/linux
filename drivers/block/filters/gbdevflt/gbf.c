@@ -399,7 +399,7 @@ static int __init gbf_init(void)
 static void __exit gbf_exit(void)
 {
 	mutex_lock(&ctx_list_lock);
-	while (!list_empty(&ctx_list)){
+	while (!list_empty(&ctx_list)) {
 		struct gbf_ctx *ctx;
 
 		ctx = list_first_entry(&ctx_list, struct gbf_ctx, list);

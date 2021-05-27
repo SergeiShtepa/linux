@@ -18,7 +18,7 @@ struct rpn_stack {
 		.roof = name ##_data,						\
 		.top = name ##_data + size,					\
 		.bottom = name ##_data + size					\
-	};
+	}
 
 static inline int rpn_stack_pop(struct rpn_stack *st, u64 *value)
 {

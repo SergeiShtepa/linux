@@ -143,18 +143,15 @@ struct rpn_bytecode {
 static inline int rpn_bytecode_append(struct rpn_bytecode *bc, u64 value)
 {
 	if (unlikely(bc->ofs == bc->len)) {
-		if (bc->len == 0) {
-			bc->len = RPN_BYTECODE_MINIMUM;
-			bc->head = kcalloc(bc->len, sizeof(u64), GFP_KERNEL);
-			if (!bc->head)
-				return -ENOMEM;
-		} else {
+		if (bc->len)
 			bc->len = bc->len << 1;
-			bc->head = krealloc(bc->head, bc->len * sizeof(u64),
-					    GFP_KERNEL);
-			if (!bc->head)
-				return -ENOMEM;
-		}
+		else
+			bc->len = RPN_BYTECODE_MINIMUM;
+
+		bc->head = krealloc(bc->head, bc->len * sizeof(u64),
+				    GFP_KERNEL);
+		if (!bc->head)
+			return -ENOMEM;
 	}
 
 	bc->head[bc->ofs++] = value;
