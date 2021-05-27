@@ -2034,7 +2034,7 @@ struct blk_filter {
 	struct list_head list;
 	char name[FLT_NAME_LENGTH + 1];
 	const struct filter_operations *fops;
-	void* ctx;
+	void *ctx;
 };
 
 /*
@@ -2046,19 +2046,18 @@ enum {
 	FLT_ST_COMPLETE,
 	FLT_ST_REDIRECT
 };
-typedef unsigned int flt_st_t;
 
 struct filter_operations {
-	flt_st_t (*submit_bio_cb)(struct bio *bio, void* ctx);
-	void (*detach_cb)(void* ctx);
+	int (*submit_bio_cb)(struct bio *bio, void *ctx);
+	void (*detach_cb)(void *ctx);
 };
 
 struct block_device *bdev_filter_lock(dev_t dev_id);
 void bdev_filter_unlock(struct block_device *bdev);
 
-void *bdev_filter_find_ctx(struct block_device *bdev, const char* filter_name);
-int bdev_filter_add(struct block_device *bdev, const char* filter_name,
-		    const struct filter_operations *fops, void* ctx);
-int bdev_filter_del(struct block_device *bdev, const char* filter_name);
+void *bdev_filter_find_ctx(struct block_device *bdev, const char *filter_name);
+int bdev_filter_add(struct block_device *bdev, const char *filter_name,
+		    const struct filter_operations *fops, void *ctx);
+int bdev_filter_del(struct block_device *bdev, const char *filter_name);
 
 #endif /* _LINUX_BLKDEV_H */

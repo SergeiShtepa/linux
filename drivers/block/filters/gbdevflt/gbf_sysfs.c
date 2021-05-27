@@ -329,7 +329,7 @@ static struct device *gbf_dev;
 static struct class *gbf_dev_class;
 static struct kobject *gbf_rules_kobj;
 
-int gbf_sysfs_init(const char* module_name)
+int gbf_sysfs_init(const char *module_name)
 {
 	int ret = 0;
 

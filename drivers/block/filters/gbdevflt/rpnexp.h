@@ -1,5 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
-
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Reverse Polish notation (RPN) expression processor.
  * It's allows to recognize rules written in RPN and execute them.
@@ -19,8 +18,7 @@ struct rpn_stack {
 		.roof = name ##_data,						\
 		.top = name ##_data + size,					\
 		.bottom = name ##_data + size					\
-	};									\
-
+	};
 
 static inline int rpn_stack_pop(struct rpn_stack *st, u64 *value)
 {
@@ -39,7 +37,7 @@ static inline int rpn_stack_pop_double(struct rpn_stack *st, u64 *v0, u64 *v1)
 
 	*v1 = st->top[0];
 	*v0 = st->top[1];
-	st->top+=2;
+	st->top += 2;
 	return 0;
 };
 
@@ -59,7 +57,7 @@ struct rpn_ext_op {
 	int (*fn)(struct rpn_stack *stack, void *ctx);
 };
 
-u64* rpn_parse_expression(char *exp, const struct rpn_ext_op *op_dict);
+u64 *rpn_parse_expression(char *exp, const struct rpn_ext_op *op_dict);
 int rpn_execute(u64 *op, struct rpn_stack *stack, void *ctx);
 
 #endif

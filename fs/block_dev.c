@@ -685,13 +685,13 @@ static loff_t block_llseek(struct file *file, loff_t offset, int whence)
 	inode_unlock(bd_inode);
 	return retval;
 }
-	
+
 int blkdev_fsync(struct file *filp, loff_t start, loff_t end, int datasync)
 {
 	struct inode *bd_inode = bdev_file_inode(filp);
 	struct block_device *bdev = I_BDEV(bd_inode);
 	int error;
-	
+
 	error = file_write_and_wait_range(filp, start, end);
 	if (error)
 		return error;
@@ -1971,8 +1971,8 @@ void iterate_bdevs(void (*func)(struct block_device *, void *), void *arg)
 	iput(old_inode);
 }
 
-static inline struct blk_filter *bdev_filter_find_by_name(struct block_device *bdev,
-					    const char* name)
+static inline struct blk_filter *bdev_filter_find_by_name(
+				struct block_device *bdev, const char *name)
 {
 	struct blk_filter *flt;
 
@@ -2007,7 +2007,7 @@ EXPORT_SYMBOL_GPL(bdev_filter_unlock);
 /**
  *
  */
-void *bdev_filter_find_ctx(struct block_device *bdev, const char* filter_name)
+void *bdev_filter_find_ctx(struct block_device *bdev, const char *filter_name)
 {
 	struct blk_filter *flt;
 
@@ -2021,18 +2021,19 @@ EXPORT_SYMBOL_GPL(bdev_filter_find_ctx);
 
 /**
  * bdev_filter_add - Attach a filter block device to original
- * @dev_id: block device id
- * @filter_submit_bio: A function for intercepting a bio request.
- * @filter_detach: Callback function for the filters detaching.
+ * @bdev: block device
+ * @filter_name: a unique filter name, such as the module name
+ * @fops: table of filter callbacks
+ * @ctx: Filter specific private data
  *
- * Before attaching an interposer, it is necessary to lock the processing
- * of bio requests of the original device by calling bdev_interposer_lock().
+ * Before adding a filter, it is necessary to lock the processing
+ * of bio requests of the original device by calling bdev_filter_lock().
  *
- * The bdev_interposer_detach() function allows to detach the interposer
- * from the original block device.
+ * The bdev_filter_del() function allows to delete the filter from the block
+ * device.
  */
-int bdev_filter_add(struct block_device *bdev, const char* filter_name,
-		    const struct filter_operations *fops, void* ctx)
+int bdev_filter_add(struct block_device *bdev, const char *filter_name,
+		    const struct filter_operations *fops, void *ctx)
 {
 	int ret = 0;
 	struct blk_filter *flt;
@@ -2060,16 +2061,16 @@ out:
 EXPORT_SYMBOL_GPL(bdev_filter_add);
 
 /**
- * bdev_interposer_detach - Detach interposer from block device
- * @original: original block device
+ * bdev_filter_del - Delete filter from the block device
+ * @bdev: block device
+ * @filter_name: unique filters name
  *
- * Before detaching an interposer, it is necessary to lock the processing
- * of bio requests of the original device by calling bdev_interposer_lock().
+ * Before deleting a filter, it is necessary to lock the processing
+ * of bio requests of the device by calling bdev_filter_lock().
  *
- * The interposer should be attached using the bdev_interposer_attach()
- * function.
+ * The filter should be added using the bdev_filter_add() function.
  */
-int bdev_filter_del(struct block_device *bdev, const char* filter_name)
+int bdev_filter_del(struct block_device *bdev, const char *filter_name)
 {
 	int ret = 0;
 	struct blk_filter *flt;
@@ -2088,4 +2089,3 @@ int bdev_filter_del(struct block_device *bdev, const char* filter_name)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(bdev_filter_del);
-

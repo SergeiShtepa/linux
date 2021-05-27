@@ -24,18 +24,18 @@ static int gfp_rule_range(struct rpn_stack *stack, void *ctx)
 	u64 result;
 
 	ret = rpn_stack_pop(stack, &len);
-	if (unlikely(ret) )
+	if (unlikely(ret))
 		return ret;
 
 	ret = rpn_stack_pop(stack, &ofs);
-	if (unlikely(ret) )
+	if (unlikely(ret))
 		return ret;
 
-	result = (bio_offset(bio) <= (ofs + len -1)) &&
+	result = (bio_offset(bio) <= (ofs + len - 1)) &&
 		 (bio_end_sector(bio) > ofs);
 
 	ret = rpn_stack_push(stack, result);
-	if (unlikely(ret) )
+	if (unlikely(ret))
 		return ret;
 
 	return 0;
@@ -49,13 +49,13 @@ static int gfp_rule_owner(struct rpn_stack *stack, void *ctx)
 	u64 result;
 
 	ret = rpn_stack_pop(stack, &owner);
-	if (unlikely(ret) )
+	if (unlikely(ret))
 		return ret;
 
 	result = (void *)bio->bi_end_io == (void *)owner;
 
 	ret = rpn_stack_push(stack, result);
-	if (unlikely(ret) )
+	if (unlikely(ret))
 		return ret;
 
 	return 0;
@@ -70,7 +70,7 @@ static int gfp_rule_read(struct rpn_stack *stack, void *ctx)
 	result = bio_has_data(bio) && !op_is_write(bio_op(bio));
 
 	ret = rpn_stack_push(stack, result);
-	if (unlikely(ret) )
+	if (unlikely(ret))
 		return ret;
 
 	return 0;
@@ -85,7 +85,7 @@ static int gfp_rule_write(struct rpn_stack *stack, void *ctx)
 	result = bio_has_data(bio) && op_is_write(bio_op(bio));
 
 	ret = rpn_stack_push(stack, result);
-	if (unlikely(ret) )
+	if (unlikely(ret))
 		return ret;
 
 	return 0;
@@ -136,20 +136,21 @@ static inline void gbf_rule_free(struct gbf_rule *rule)
 	kfree(rule);
 }
 
-void inline gbf_rules_cleanup(struct list_head *rules_list)
+static inline void gbf_rules_cleanup(struct list_head *rules_list)
 {
 	struct gbf_rule *rule;
 
-	while(!list_empty(rules_list)) {
+	while (!list_empty(rules_list)) {
 		rule = list_first_entry(rules_list, struct gbf_rule, list);
 		gbf_rule_free(rule);
 	}
 }
 
-static flt_st_t gbf_rule_apply(struct gbf_rule *rule, struct bio *bio)
+static int gbf_rule_apply(struct gbf_rule *rule, struct bio *bio)
 {
 	int ret = 0;
 	u64 result;
+
 	RPN_STACK(st, 8);
 
 	ret = rpn_execute(rule->bytecode, &st, bio);
@@ -178,7 +179,7 @@ struct gbf_ctx {
 	struct list_head rules_list;
 };
 
-static inline struct gbf_ctx *gbf_ctx_new(void )
+static inline struct gbf_ctx *gbf_ctx_new(void)
 {
 	struct gbf_ctx *ctx;
 
@@ -197,8 +198,8 @@ static inline void gbf_ctx_free(struct gbf_ctx *ctx)
 	kfree(ctx);
 }
 
-static inline struct gbf_rule *gbf_ctx_find_rule(struct gbf_ctx *ctx,
-						 const char* rule_name)
+static struct gbf_rule *gbf_ctx_find_rule(struct gbf_ctx *ctx,
+					  const char *rule_name)
 {
 	struct gbf_rule *rule = NULL;
 
@@ -212,9 +213,9 @@ static inline struct gbf_rule *gbf_ctx_find_rule(struct gbf_ctx *ctx,
 	return NULL;
 }
 
-static flt_st_t gbf_submit_bio_cb(struct bio *bio, void* gbf_ctx)
+static int gbf_submit_bio_cb(struct bio *bio, void *gbf_ctx)
 {
-	flt_st_t st = FLT_ST_PASS;
+	int st = FLT_ST_PASS;
 	struct gbf_ctx *ctx = gbf_ctx;
 
 	if (!list_empty(&ctx->rules_list)) {
@@ -230,7 +231,7 @@ static flt_st_t gbf_submit_bio_cb(struct bio *bio, void* gbf_ctx)
 	return st;
 }
 
-static void gbf_detach_cb(void* gbf_ctx)
+static void gbf_detach_cb(void *gbf_ctx)
 {
 	struct gbf_ctx *ctx = gbf_ctx;
 
@@ -239,7 +240,7 @@ static void gbf_detach_cb(void* gbf_ctx)
 	gbf_ctx_free(ctx);
 }
 
-const static struct filter_operations gbf_fops = {
+static const struct filter_operations gbf_fops = {
 	.submit_bio_cb = gbf_submit_bio_cb,
 	.detach_cb = gbf_detach_cb
 };
@@ -325,7 +326,7 @@ EXPORT_SYMBOL_GPL(gbf_rule_add);
  * @rule_name: unique rule name
  *
  */
-int gbf_rule_remove(dev_t dev_id, const char* rule_name)
+int gbf_rule_remove(dev_t dev_id, const char *rule_name)
 {
 	int ret = 0;
 	struct block_device *bdev;
@@ -398,7 +399,7 @@ static int __init gbf_init(void)
 static void __exit gbf_exit(void)
 {
 	mutex_lock(&ctx_list_lock);
-	while(!list_empty(&ctx_list)){
+	while (!list_empty(&ctx_list)){
 		struct gbf_ctx *ctx;
 
 		ctx = list_first_entry(&ctx_list, struct gbf_ctx, list);

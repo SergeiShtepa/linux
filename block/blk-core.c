@@ -1026,7 +1026,7 @@ static inline struct block_device *filters_lock(struct bio *bio)
 		if (unlikely(!locked)) {
 			bio_wouldblock_error(bio);
 			return NULL;
- 		}
+		}
 	} else
 		percpu_down_read(&bdev->bd_filters_lock);
 
@@ -1036,13 +1036,13 @@ static inline struct block_device *filters_lock(struct bio *bio)
 static inline void filters_unlock(struct block_device *bdev)
 {
 	percpu_up_read(&bdev->bd_filters_lock);
- }
+}
 
-static flt_st_t filters_apply(struct bio *bio)
+static int filters_apply(struct bio *bio)
 {
 	struct block_device *bdev;
 	struct blk_filter *flt;
-	flt_st_t status;
+	int status;
 
 again:
 	status = FLT_ST_PASS;

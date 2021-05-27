@@ -19,7 +19,7 @@ if BDEVFLT
 config BDEVFLT_GENERIC
 	tristate "Generic Block Device Filter Driver"
 	help
-	  This is the generic block device filter driver.  It can be used with
+	  This is the generic block device filter driver. It can be used with
           <some Oracle security tool>.  Say Y or M.
 
 endif # BDEVFLT

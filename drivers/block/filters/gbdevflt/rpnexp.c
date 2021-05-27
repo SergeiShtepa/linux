@@ -27,8 +27,8 @@ enum {
 /* operations with two variables */
 #define RPN_TWO_OP 0x02000000
 enum {
-	RPN_OP_ADD = RPN_TWO_OP,	/* get to integers from stack, add and
-					   push result back */
+	RPN_OP_ADD = RPN_TWO_OP,	/* get to integers from stack, add */
+					/* and push result back */
 	RPN_OP_SUB,			/* also but for subtraction */
 	RPN_OP_MUL,
 	RPN_OP_DIV,
@@ -83,7 +83,7 @@ static u64 (*const rpn_unary_op_fn[])(u64)  = {
 };
 
 struct rpn_buildin_op {
-	const char * name;
+	const char *name;
 	u64 code;
 };
 
@@ -145,12 +145,12 @@ static inline int rpn_bytecode_append(struct rpn_bytecode *bc, u64 value)
 	if (unlikely(bc->ofs == bc->len)) {
 		if (bc->len == 0) {
 			bc->len = RPN_BYTECODE_MINIMUM;
-			bc->head = kzalloc(sizeof(u64) * bc->len, GFP_KERNEL);
+			bc->head = kcalloc(bc->len, sizeof(u64), GFP_KERNEL);
 			if (!bc->head)
 				return -ENOMEM;
 		} else {
 			bc->len = bc->len << 1;
-			bc->head = krealloc(bc->head, sizeof(u64) * bc->len,
+			bc->head = krealloc(bc->head, bc->len * sizeof(u64),
 					    GFP_KERNEL);
 			if (!bc->head)
 				return -ENOMEM;
@@ -177,7 +177,7 @@ static int rpn_parse_word(char *word, size_t length,
 		if (find_ext_op(word, length, ext_op_dict, &opcode)) {
 			/* put external operations address */
 			ret = rpn_bytecode_append(bc, opcode);
-			if(ret)
+			if (ret)
 				return ret;
 			/* put call operation */
 			return rpn_bytecode_append(bc, RPN_OP_CALL);
@@ -202,14 +202,14 @@ static int rpn_parse_word(char *word, size_t length,
  * If the expression was not parsed correctly, the function returns
  * an error code.
  */
-u64* rpn_parse_expression(char *exp, const struct rpn_ext_op *op_dict)
+u64 *rpn_parse_expression(char *exp, const struct rpn_ext_op *op_dict)
 {
 	int ret = 0;
 	struct rpn_bytecode bc = {0};
 	char *word = NULL;
 	size_t inx = 0;
 
-	while(exp[inx] != '\0') {
+	while (exp[inx] != '\0') {
 		if ((exp[inx] != ' ') && (exp[inx] != '\t')) {
 			if (word == NULL)
 				word = &exp[inx];
@@ -264,7 +264,7 @@ int rpn_execute(u64 *op, struct rpn_stack *stack, void *ctx)
 	u64 v0, v1;
 	u64 opcode;
 
-	while((opcode = *op++) != RPN_OP_END) {
+	while ((opcode = *op++) != RPN_OP_END) {
 		if (opcode & RPN_SERVICE_OP) {
 			if (opcode == RPN_OP_CALL) {
 				ret = rpn_stack_pop(stack, &v0);
@@ -276,7 +276,7 @@ int rpn_execute(u64 *op, struct rpn_stack *stack, void *ctx)
 				if (unlikely(ret))
 					return ret;
 			} else
-				return -ENOTSUPP;
+				return -EOPNOTSUPP;
 		} else if (opcode & RPN_UNARY_OP) {
 			/*
 			 * Get one integer from stack and execute
