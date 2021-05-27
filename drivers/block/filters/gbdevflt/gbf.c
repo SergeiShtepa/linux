@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
-
+/*
+ * This file contains the basic logic for working with the rules.
+ */
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/errno.h>
@@ -108,8 +110,6 @@ static inline struct gbf_rule *gbf_rule_new(const char *rule_name,
 {
 	struct gbf_rule *rule;
 
-	pr_err("DEBUG! %s: Parse rule expression: [%s]\n", __func__, rule_exp);
-
 	rule = kzalloc(sizeof(struct gbf_rule), GFP_KERNEL);
 	if (!rule)
 		return ERR_PTR(-ENOMEM);
@@ -124,20 +124,7 @@ static inline struct gbf_rule *gbf_rule_new(const char *rule_name,
 		kfree(rule);
 		return ERR_PTR(PTR_ERR(rule->bytecode));
 	}
-	{//DEBUG output
-		char *str;
 
-		str = rpn_bytecode_to_dbgstr(rule->bytecode);
-		if (IS_ERR(str)) {
-			pr_err("Failed to check rule expression: \"%s\"\n", rule_exp);
-
-			kfree(rule);
-			return ERR_PTR(PTR_ERR(str));
-		}
-
-		pr_err("DEBUG! %s: %s", __func__, str);
-		kfree(str);
-	}
 	return rule;
 }
 
@@ -165,7 +152,6 @@ static flt_st_t gbf_rule_apply(struct gbf_rule *rule, struct bio *bio)
 	u64 result;
 	RPN_STACK(st, 8);
 
-	pr_err("DEBUG! %s", __func__);
 	ret = rpn_execute(rule->bytecode, &st, bio);
 	if (unlikely(ret)) {
 		pr_err("Failed to execute rule.");
@@ -259,7 +245,26 @@ const static struct filter_operations gbf_fops = {
 };
 
 /**
+ * gbf_rule_add() - add rule to generic block device filter
+ * @dev_id: block device id
+ * @rule_name: unique rule name
+ * @rule_exp: rule expression in RPN
+ * @add_to_head: boolean attribute allows to add a rule to the beginning
+ * of the rule queue for a given block device.
  *
+ * Description:
+ * The added rule will be executed for each bio of this block device.
+ * @rule_name must be unique to for this device. The length of the name is
+ * limited by GBF_RULE_NAME_LENGTH.
+ * @rule_exp it's a expression in reverse polish notation (RPN).
+ * Basic arithmetic and logical operations are supported by build-in rpnexp
+ * operands. External "range", "owner", "read" and "write" operations are
+ * implemented specifically for processing bio.
+ *
+ * Example:
+ * Block writes to the first 8 sectors of the block device.
+ * rpn expression: 0 8 range write && !
+ * equivalent ordinary arithmetic-logical expression: !(range(0,8) && write)
  */
 int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 		 bool add_to_head)
@@ -268,8 +273,6 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 	struct  block_device *bdev;
 	struct gbf_ctx *ctx;
 	struct gbf_rule *rule;
-
-	pr_err("DEBUG! %s: Add rule: [%s]\n", __func__, rule_exp);
 
 	bdev = bdev_filter_lock(dev_id);
 	if (IS_ERR(bdev))
@@ -317,9 +320,12 @@ out:
 EXPORT_SYMBOL_GPL(gbf_rule_add);
 
 /**
+ * gbf_rule_remove() - remove rule from generic block device filter
+ * @dev_id: block device id
+ * @rule_name: unique rule name
  *
  */
-int gbf_rule_del(dev_t dev_id, const char* rule_name)
+int gbf_rule_remove(dev_t dev_id, const char* rule_name)
 {
 	int ret = 0;
 	struct block_device *bdev;
@@ -354,7 +360,7 @@ out:
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(gbf_rule_del);
+EXPORT_SYMBOL_GPL(gbf_rule_remove);
 
 
 static void gfb_cleanup(dev_t dev_id)
@@ -378,7 +384,6 @@ static int __init gbf_init(void)
 {
 	int ret = 0;
 
-	pr_err("DEBUG! %s %s: ", MODULE_NAME, __func__);
 	mutex_init(&ctx_list_lock);
 
 	ret = gbf_sysfs_init(MODULE_NAME);
@@ -392,8 +397,6 @@ static int __init gbf_init(void)
 
 static void __exit gbf_exit(void)
 {
-	pr_err("DEBUG! %s %s: ", MODULE_NAME, __func__);
-
 	mutex_lock(&ctx_list_lock);
 	while(!list_empty(&ctx_list)){
 		struct gbf_ctx *ctx;

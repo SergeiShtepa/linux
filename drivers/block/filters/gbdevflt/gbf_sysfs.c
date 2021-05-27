@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Implements module management via sysfs files.
+ */
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
@@ -114,8 +117,6 @@ static int rule_add_execute(struct rule_add_opt *opt)
 	dev_t dev_id;
 	bool add_to;
 
-	pr_err("DEBUG! %s: [%s] [%s] [%s] [%s]",__func__, opt->name, opt->path, opt->to, opt->exp);
-
 	if (!opt->name) {
 		pr_err("Option 'name' not found");
 		return -EINVAL;
@@ -160,8 +161,6 @@ static int rule_remove_execute(struct rule_remove_opt *opt)
 	int ret;
 	dev_t dev_id;
 
-	pr_err("DEBUG! %s: %s %s",__func__, opt->name, opt->path);
-
 	if (!opt->name) {
 		pr_err("Option 'name' not found");
 		return -EINVAL;
@@ -177,7 +176,7 @@ static int rule_remove_execute(struct rule_remove_opt *opt)
 		return ret;
 	}
 
-	return gbf_rule_del(dev_id, opt->name);
+	return gbf_rule_remove(dev_id, opt->name);
 }
 
 static int rule_remove_parse(char *options, struct rule_remove_opt *opt)

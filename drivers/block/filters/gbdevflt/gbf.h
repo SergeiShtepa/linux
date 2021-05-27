@@ -10,6 +10,6 @@
 int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 		 bool add_to_head);
 
-int gbf_rule_del(dev_t dev_id, const char *rule_name);
+int gbf_rule_remove(dev_t dev_id, const char *rule_name);
 
 #endif

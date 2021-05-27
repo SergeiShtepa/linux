@@ -1,7 +1,4 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- *
- */
 #ifndef __GBF_SYSFS_H__
 #define __GBF_SYSFS_H__
 
