@@ -2016,4 +2016,35 @@ int fsync_bdev(struct block_device *bdev);
 int freeze_bdev(struct block_device *bdev);
 int thaw_bdev(struct block_device *bdev);
 
+#define FLT_NAME_LENGTH 31
+struct blk_filter {
+	struct list_head list;
+	char name[FLT_NAME_LENGTH + 1];
+	const struct filter_operations *fops;
+	void *ctx;
+};
+
+/*
+ * Each filter can skip the bio request or complete it,
+ * or even redirect it to another block device.
+ */
+enum {
+	FLT_ST_PASS,
+	FLT_ST_COMPLETE,
+	FLT_ST_REDIRECT
+};
+
+struct filter_operations {
+	int (*submit_bio_cb)(struct bio *bio, void *ctx);
+	void (*detach_cb)(void *ctx);
+};
+
+struct block_device *bdev_filter_lock(dev_t dev_id);
+void bdev_filter_unlock(struct block_device *bdev);
+
+void *bdev_filter_find_ctx(struct block_device *bdev, const char *filter_name);
+int bdev_filter_add(struct block_device *bdev, const char *filter_name,
+		    const struct filter_operations *fops, void *ctx);
+int bdev_filter_del(struct block_device *bdev, const char *filter_name);
+
 #endif /* _LINUX_BLKDEV_H */

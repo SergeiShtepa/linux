@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Block device filter drivers configuration
+#
+
+menuconfig BDEVFLT
+	bool "Block device filters"
+	depends on BLOCK
+	default y
+	help
+	  Say Y here to get to see options for various different block device
+	  filter drivers. This option alone does not add any kernel code.
+
+	  If you say N, all options in this submenu will be skipped and disabled;
+	  only do this if you know what you are doing.
+
+if BDEVFLT
+
+config BDEVFLT_GENERIC
+	tristate "Generic Block Device Filter Driver"
+	help
+	  This is the generic block device filter driver. It can be used with
+          <some Oracle security tool>.  Say Y or M.
+
+endif # BDEVFLT

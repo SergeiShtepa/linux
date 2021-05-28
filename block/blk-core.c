@@ -819,8 +819,6 @@ static noinline_for_stack bool submit_bio_checks(struct bio *bio)
 	if (!bio_flagged(bio, BIO_REMAPPED)) {
 		if (unlikely(bio_check_eod(bio)))
 			goto end_io;
-		if (bdev->bd_partno && unlikely(blk_partition_remap(bio)))
-			goto end_io;
 	}
 
 	/*
@@ -1018,6 +1016,64 @@ static blk_qc_t __submit_bio_noacct_mq(struct bio *bio)
 	return ret;
 }
 
+static inline struct block_device *filters_lock(struct bio *bio)
+{
+	bool locked;
+	struct block_device *bdev = bio->bi_bdev;
+
+	if (bio->bi_opf & REQ_NOWAIT) {
+		locked = percpu_down_read_trylock(&bdev->bd_filters_lock);
+		if (unlikely(!locked)) {
+			bio_wouldblock_error(bio);
+			return NULL;
+		}
+	} else
+		percpu_down_read(&bdev->bd_filters_lock);
+
+	return bdev;
+}
+
+static inline void filters_unlock(struct block_device *bdev)
+{
+	percpu_up_read(&bdev->bd_filters_lock);
+}
+
+static int filters_apply(struct bio *bio)
+{
+	struct block_device *bdev;
+	struct blk_filter *flt;
+	int status;
+
+again:
+	status = FLT_ST_PASS;
+	bdev = filters_lock(bio);
+	if (!bdev)
+		return FLT_ST_COMPLETE;
+
+	if (list_empty(&bdev->bd_filters))
+		goto out;
+
+	list_for_each_entry(flt, &bdev->bd_filters, list) {
+		status = flt->fops->submit_bio_cb(bio, flt->ctx);
+		if (status != FLT_ST_PASS)
+			break;
+	}
+
+	if (status == FLT_ST_REDIRECT) {
+		/*
+		 * Bio request was redirected to another device, we should
+		 * process the filters again.
+		 */
+		filters_unlock(bdev);
+		goto again;
+	}
+
+out:
+	filters_unlock(bdev);
+
+	return status;
+}
+
 /**
  * submit_bio_noacct - re-submit a bio to the block device layer for I/O
  * @bio:  The bio describing the location in memory and on the device.
@@ -1041,6 +1097,17 @@ blk_qc_t submit_bio_noacct(struct bio *bio)
 	if (current->bio_list) {
 		bio_list_add(&current->bio_list[0], bio);
 		return BLK_QC_T_NONE;
+	}
+
+	if (filters_apply(bio) != FLT_ST_PASS)
+		return BLK_QC_T_NONE;
+
+	if (bio->bi_bdev->bd_partno) {
+		if (unlikely(blk_partition_remap(bio))) {
+			bio->bi_status = BLK_STS_IOERR;
+			bio_endio(bio);
+			return BLK_QC_T_NONE;
+		}
 	}
 
 	if (!bio->bi_bdev->bd_disk->fops->submit_bio)
