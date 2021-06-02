@@ -4,4 +4,4 @@
 
 gbdevflt-y := rpnexp.o gbf_sysfs.o gbf.o
 
-obj-$(CONFIG_BDEVFLT_GENERIC)	+= gbdevflt.o
+obj-$(CONFIG_GBDEVFLT)	+= gbdevflt.o

@@ -118,15 +118,15 @@ static int rule_add_execute(struct rule_add_opt *opt)
 	bool add_to;
 
 	if (!opt->name) {
-		pr_err("Option 'name' not found");
+		pr_err("Option 'name' not found\n");
 		return -EINVAL;
 	}
 	if (!opt->path) {
-		pr_err("Option 'path' not found");
+		pr_err("Option 'path' not found\n");
 		return -EINVAL;
 	}
 	if (!opt->exp) {
-		pr_err("Option 'exp' not found");
+		pr_err("Option 'exp' not found\n");
 		return -EINVAL;
 	}
 	add_to = (opt->to) && (strcmp(opt->to, "head") == 0);
@@ -162,11 +162,11 @@ static int rule_remove_execute(struct rule_remove_opt *opt)
 	dev_t dev_id;
 
 	if (!opt->name) {
-		pr_err("Option 'name' not found");
+		pr_err("Option 'name' not found\n");
 		return -EINVAL;
 	}
 	if (!opt->path) {
-		pr_err("Option 'path' not found");
+		pr_err("Option 'path' not found\n");
 		return -EINVAL;
 	}
 
@@ -256,12 +256,12 @@ static ssize_t rule_add_store(struct class *class, struct class_attribute *attr,
 
 	ret = rule_add_parse(options, &opt);
 	if (ret) {
-		pr_err("Failed to parse options %s", options);
+		pr_err("Failed to parse options %s\n", options);
 		goto out;
 	}
 	ret = rule_add_execute(&opt);
 	if (ret) {
-		pr_err("Failed to execute add command with options %s", options);
+		pr_err("Failed to execute add command with options %s\n", options);
 		goto out;
 	}
 	rule_file_add(opt.name, opt.path, opt.exp);
@@ -271,7 +271,6 @@ out:
 	if (ret)
 		return (ssize_t)ret;
 
-	pr_err("rule was added");
 	return count;
 };
 
@@ -288,12 +287,12 @@ static ssize_t rule_remove_store(struct class *class, struct class_attribute *at
 
 	ret = rule_remove_parse(options, &opt);
 	if (ret) {
-		pr_err("Failed to parse options %s", options);
+		pr_err("Failed to parse options %s\n", options);
 		goto out;
 	}
 	ret = rule_remove_execute(&opt);
 	if (ret) {
-		pr_err("Failed to execute remove command with options %s", options);
+		pr_err("Failed to execute remove command with options %s\n", options);
 		goto out;
 	}
 	rule_file_remove(opt.name, opt.name);
@@ -303,7 +302,6 @@ out:
 	if (ret)
 		return (ssize_t)ret;
 
-	pr_err("rule was removed");
 	return count;
 };
 

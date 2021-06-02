@@ -2035,7 +2035,6 @@ EXPORT_SYMBOL_GPL(bdev_filter_find_ctx);
 int bdev_filter_add(struct block_device *bdev, const char *filter_name,
 		    const struct filter_operations *fops, void *ctx)
 {
-	int ret = 0;
 	struct blk_filter *flt;
 
 	flt = bdev_filter_find_by_name(bdev, filter_name);
@@ -2043,20 +2042,15 @@ int bdev_filter_add(struct block_device *bdev, const char *filter_name,
 		return -EBUSY;
 
 	flt = kzalloc(sizeof(struct blk_filter), GFP_KERNEL);
-	if (!flt) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	if (!flt)
+		return -ENOMEM;
 
 	strncpy(flt->name, filter_name, FLT_NAME_LENGTH);
 	flt->fops = fops;
 	flt->ctx = ctx;
 	list_add(&flt->list, &bdev->bd_filters);
-out:
-	if (ret)
-		kfree(flt);
 
-	return ret;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(bdev_filter_add);
 
@@ -2072,7 +2066,6 @@ EXPORT_SYMBOL_GPL(bdev_filter_add);
  */
 int bdev_filter_del(struct block_device *bdev, const char *filter_name)
 {
-	int ret = 0;
 	struct blk_filter *flt;
 
 	flt = bdev_filter_find_by_name(bdev, filter_name);
@@ -2084,8 +2077,6 @@ int bdev_filter_del(struct block_device *bdev, const char *filter_name)
 	list_del(&flt->list);
 	kfree(flt);
 
-	bdev_filter_unlock(bdev);
-
-	return ret;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(bdev_filter_del);
