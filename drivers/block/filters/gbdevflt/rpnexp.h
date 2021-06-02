@@ -19,6 +19,10 @@ struct rpn_stack {
 		.top = name ##_data + size,					\
 		.bottom = name ##_data + size					\
 	}
+struct rpn_bytecode {
+	u8 *ops;		/* code segment */
+	u64 *data;		/* data segment */
+};
 
 static inline int rpn_stack_pop(struct rpn_stack *st, u64 *value)
 {
@@ -57,7 +61,15 @@ struct rpn_ext_op {
 	int (*fn)(struct rpn_stack *stack, void *ctx);
 };
 
-u64 *rpn_parse_expression(char *exp, const struct rpn_ext_op *op_dict);
-int rpn_execute(u64 *op, struct rpn_stack *stack, void *ctx);
-
+int rpn_parse_expression(char *exp,
+			 const struct rpn_ext_op *op_ext_dict,
+			 struct rpn_bytecode *bc);
+int rpn_execute_bytecode(struct rpn_bytecode bc,
+			 const struct rpn_ext_op *op_ext_dict,
+			 struct rpn_stack *stack,
+			 void *ctx);
+static inline void rpn_release_bytecode(struct rpn_bytecode *bc)
+{
+	kfree(bc->ops);
+};
 #endif

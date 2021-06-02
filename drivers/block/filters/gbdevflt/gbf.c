@@ -6,15 +6,16 @@
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/blkdev.h>
+#include <linux/delay.h>
 #include "rpnexp.h"
 #include "gbf.h"
 #include "gbf_sysfs.h"
 
 #define MODULE_NAME "gbdevflt"
-
-LIST_HEAD(ctx_list);
-struct mutex ctx_list_lock;
-
+/*
+LIST_HEAD(devinfo_list);
+struct mutex devinfo_list_lock;
+*/
 static int gfp_rule_range(struct rpn_stack *stack, void *ctx)
 {
 	int ret;
@@ -91,23 +92,43 @@ static int gfp_rule_write(struct rpn_stack *stack, void *ctx)
 	return 0;
 };
 
+static int gfp_rule_sleep(struct rpn_stack *stack, void *ctx)
+{
+	int ret;
+	u64 usecs;
+
+	ret = rpn_stack_pop(stack, &usecs);
+	if (unlikely(ret))
+		return ret;
+
+	fsleep(usecs);
+
+	ret = rpn_stack_push(stack, 1); /* always pass */
+	if (unlikely(ret))
+		return ret;
+
+	return 0;
+};
+
 const struct rpn_ext_op gbf_op_dict[] = {
 	{"range", gfp_rule_range},
 	{"owner", gfp_rule_owner},
 	{"read", gfp_rule_read},
 	{"write", gfp_rule_write},
+	{"sleep", gfp_rule_sleep},
 	{NULL, NULL}
 };
 
 struct gbf_rule {
 	struct list_head list;
 	char name[GBF_RULE_NAME_LENGTH+1];
-	u64 *bytecode;
+	struct rpn_bytecode bytecode;
 };
 
 static inline struct gbf_rule *gbf_rule_new(const char *rule_name,
 					    char *rule_exp)
 {
+	int ret;
 	struct gbf_rule *rule;
 
 	rule = kzalloc(sizeof(struct gbf_rule), GFP_KERNEL);
@@ -117,12 +138,12 @@ static inline struct gbf_rule *gbf_rule_new(const char *rule_name,
 	INIT_LIST_HEAD(&rule->list);
 	strncpy(rule->name, rule_name, GBF_RULE_NAME_LENGTH);
 
-	rule->bytecode = rpn_parse_expression(rule_exp, gbf_op_dict);
-	if (IS_ERR(rule->bytecode)) {
+	ret = rpn_parse_expression(rule_exp, gbf_op_dict, &rule->bytecode);
+	if (ret) {
 		pr_err("Failed to parse rule expression: \"%s\"\n", rule_exp);
 
 		kfree(rule);
-		return ERR_PTR(PTR_ERR(rule->bytecode));
+		return ERR_PTR(ret);
 	}
 
 	return rule;
@@ -132,7 +153,7 @@ static inline void gbf_rule_free(struct gbf_rule *rule)
 {
 	list_del(&rule->list);
 
-	kfree(rule->bytecode);
+	rpn_release_bytecode(&rule->bytecode);
 	kfree(rule);
 }
 
@@ -151,17 +172,17 @@ static int gbf_rule_apply(struct gbf_rule *rule, struct bio *bio)
 	int ret = 0;
 	u64 result;
 
-	RPN_STACK(st, 8);
+	RPN_STACK(stack, CONFIG_GBDEVFLT_STACK_DEPTH);
 
-	ret = rpn_execute(rule->bytecode, &st, bio);
+	ret = rpn_execute_bytecode(rule->bytecode, gbf_op_dict, &stack, bio);
 	if (unlikely(ret)) {
-		pr_err("Failed to execute rule.");
+		pr_err("Failed to execute rule.\n");
 		goto deny;
 	}
 
-	ret = rpn_stack_pop(&st, &result);
+	ret = rpn_stack_pop(&stack, &result);
 	if (unlikely(ret)) {
-		pr_err("Cannot get rules result.");
+		pr_err("Cannot get rules result.\n");
 		goto deny;
 	}
 
@@ -172,14 +193,36 @@ deny:
 	bio_endio(bio);
 	return FLT_ST_COMPLETE;
 }
-
-struct gbf_ctx {
+/*
+struct gbf_devinfo {
 	struct list_head list;
+	dev_t dev_id;
+};
+
+static inline int gbf_devinfo_add(dev_t dev_id)
+{
+	struct gbf_devinfo *info;
+
+	info = kzalloc(sizeof(struct gbf_devinfo), GFP_KERNEL);
+	if (!info)
+		return -ENOMEM;
+
+	INIT_LIST_HEAD(&info->list);
+	info->dev_id = dev_id;
+
+	mutex_lock(&devinfo_list_lock);
+	list_add(&info->list, &devinfo_list);
+	mutex_unlock(&devinfo_list_lock);
+
+	return 0;
+}
+*/
+struct gbf_ctx {
 	dev_t dev_id;
 	struct list_head rules_list;
 };
 
-static inline struct gbf_ctx *gbf_ctx_new(void)
+static inline struct gbf_ctx *gbf_ctx_new(dev_t dev_id)
 {
 	struct gbf_ctx *ctx;
 
@@ -188,17 +231,17 @@ static inline struct gbf_ctx *gbf_ctx_new(void)
 		return NULL;
 
 	INIT_LIST_HEAD(&ctx->rules_list);
+	ctx->dev_id = dev_id;
 
 	return ctx;
 }
 
 static inline void gbf_ctx_free(struct gbf_ctx *ctx)
 {
-	list_del(&ctx->list);
 	kfree(ctx);
 }
 
-static struct gbf_rule *gbf_ctx_find_rule(struct gbf_ctx *ctx,
+static inline struct gbf_rule *gbf_ctx_find_rule(struct gbf_ctx *ctx,
 					  const char *rule_name)
 {
 	struct gbf_rule *rule = NULL;
@@ -211,6 +254,14 @@ static struct gbf_rule *gbf_ctx_find_rule(struct gbf_ctx *ctx,
 			return rule;
 
 	return NULL;
+}
+
+static inline struct gbf_rule *gbf_ctx_first_rule(struct gbf_ctx *ctx)
+{
+	if (list_empty(&ctx->rules_list))
+		return NULL;
+
+	return list_first_entry(&ctx->rules_list, struct gbf_rule, list);
 }
 
 static int gbf_submit_bio_cb(struct bio *bio, void *gbf_ctx)
@@ -276,12 +327,15 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 	struct gbf_rule *rule;
 
 	bdev = bdev_filter_lock(dev_id);
-	if (IS_ERR(bdev))
+	if (IS_ERR(bdev)) {
+		pr_err("Failed to lock device [%d:%d]\n",
+			MAJOR(dev_id), MINOR(dev_id));
 		return PTR_ERR(bdev);
+	}
 
 	ctx = bdev_filter_find_ctx(bdev, MODULE_NAME);
 	if (IS_ERR(ctx)) {
-		ctx = gbf_ctx_new();
+		ctx = gbf_ctx_new(dev_id);
 		if (!ctx) {
 			ret = -ENOMEM;
 			goto out;
@@ -290,10 +344,6 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 		ret = bdev_filter_add(bdev, MODULE_NAME, &gbf_fops, ctx);
 		if (ret)
 			goto out;
-
-		mutex_lock(&ctx_list_lock);
-		list_add(&ctx->list, &ctx_list);
-		mutex_unlock(&ctx_list_lock);
 	}
 
 	rule = gbf_ctx_find_rule(ctx, rule_name);
@@ -312,7 +362,7 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 		list_add(&rule->list, &ctx->rules_list);
 	else
 		list_add_tail(&rule->list, &ctx->rules_list);
-
+	pr_info("Rule \"%s\" was added\n", rule_name);
 out:
 	bdev_filter_unlock(bdev);
 
@@ -334,8 +384,11 @@ int gbf_rule_remove(dev_t dev_id, const char *rule_name)
 	struct gbf_rule *rule;
 
 	bdev = bdev_filter_lock(dev_id);
-	if (IS_ERR(bdev))
+	if (IS_ERR(bdev)) {
+		pr_err("Failed to lock device [%d:%d]\n",
+			MAJOR(dev_id), MINOR(dev_id));
 		return PTR_ERR(bdev);
+	}
 
 	ctx = bdev_filter_find_ctx(bdev, MODULE_NAME);
 	if (IS_ERR(ctx)) {
@@ -346,16 +399,29 @@ int gbf_rule_remove(dev_t dev_id, const char *rule_name)
 		goto out;
 	}
 
-	rule = gbf_ctx_find_rule(ctx, rule_name);
-	if (!rule) {
-		pr_err("Rule is not exist on device [%d:%d]\n",
-			MAJOR(dev_id), MINOR(dev_id));
-		pr_err("Failed to delete rule [%s]\n", rule_name);
-		ret = -ENOENT;
-		goto out;
+	if (rule_name == NULL)
+		while (!list_empty(&ctx->rules_list)) {
+			rule = gbf_ctx_first_rule(ctx);
+			gbf_rule_free(rule);
+		}
+	else {
+		rule = gbf_ctx_find_rule(ctx, rule_name);
+		if (!rule) {
+			pr_err("Rule is not exist on device [%d:%d]\n",
+				MAJOR(dev_id), MINOR(dev_id));
+			pr_err("Failed to delete rule [%s]\n", rule_name);
+			ret = -ENOENT;
+			goto out;
+		}
+		gbf_rule_free(rule);
 	}
 
-	gbf_rule_free(rule);
+	if (list_empty(&ctx->rules_list)) {
+		ret = bdev_filter_del(bdev, MODULE_NAME);
+		if (ret)
+			goto out;
+	}
+	pr_info("Rule \"%s\" was removed\n", rule_name);
 out:
 	bdev_filter_unlock(bdev);
 
@@ -363,53 +429,69 @@ out:
 }
 EXPORT_SYMBOL_GPL(gbf_rule_remove);
 
-
-static void gfb_cleanup(dev_t dev_id)
+/*
+static void gbf_cleanup(dev_t dev_id)
 {
 	int ret;
 	struct block_device *bdev;
 
 	bdev = bdev_filter_lock(dev_id);
-	if (IS_ERR(bdev))
+	if (IS_ERR(bdev)) {
+		pr_err("Failed to lock device [%d:%d]\n",
+			MAJOR(dev_id), MINOR(dev_id));
 		return;
+	}
 
 	ret = bdev_filter_del(bdev, MODULE_NAME);
 	if (ret)
-		pr_err("Failed to detach Generic Block Device Filter from device [%d:%d]",
-			MAJOR(dev_id), MINOR(dev_id));
+		pr_err("Failed to detach %s from device [%d:%d]\n",
+			MODULE_NAME, MAJOR(dev_id), MINOR(dev_id));
 
 	bdev_filter_unlock(bdev);
+}*/
+
+static void print_op_dict(const struct rpn_ext_op *op_dict)
+{
+	size_t inx = 0;
+
+	pr_info("Extended operations dictionary content:\n");
+	while (op_dict[inx].name != NULL) {
+		pr_info(" %s\n", op_dict[inx].name);
+		inx++;
+	}
 }
 
 static int __init gbf_init(void)
 {
 	int ret = 0;
 
-	mutex_init(&ctx_list_lock);
+	pr_info("Init \"%s\" module.\n", MODULE_NAME);
+	/*mutex_init(&devinfo_list_lock);
+	ctx_list_is_active = true;
+	barrier();*/
 
 	ret = gbf_sysfs_init(MODULE_NAME);
 	if (ret) {
-		pr_err("Failed to initialize sysfs interface.");
+		pr_err("Failed to initialize sysfs interface.\n");
 		return ret;
 	}
+
+	print_op_dict(gbf_op_dict);
 
 	return ret;
 }
 
 static void __exit gbf_exit(void)
 {
-	mutex_lock(&ctx_list_lock);
-	while (!list_empty(&ctx_list)) {
-		struct gbf_ctx *ctx;
 
-		ctx = list_first_entry(&ctx_list, struct gbf_ctx, list);
-
-		gfb_cleanup(ctx->dev_id);
-		gbf_ctx_free(ctx);
-	}
-	mutex_unlock(&ctx_list_lock);
+	pr_info("Exit \"%s\" module.\n", MODULE_NAME);
 
 	gbf_sysfs_done();
+
+	/* TODO: detach all rules from all devices */
+	/*while() {
+		gbf_cleanup()
+	}*/
 }
 
 module_init(gbf_init);

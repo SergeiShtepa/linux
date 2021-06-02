@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Generic Block Device Filter driver configuration
+#
+
+config GBDEVFLT
+	tristate "Generic Block Device Filter Driver"
+	help
+	  This is the generic block device filter driver. It can be used with
+          <some Oracle security tool>.  Say Y or M.
+
+config GBDEVFLT_STACK_DEPTH
+	int "The size of the stack that the bytecode processor is limited to."
+	depends on GBDEVFLT
+	default 8
+	help
+	  The stack is allocated on the main stack, so the smaller the better.
+	  Also, there is no reason for tricky rules to filter I/O requests.
+
+	  If the stack is suddenly missing, check the correctness of the rule
+	  you created.

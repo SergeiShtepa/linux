@@ -3,4 +3,4 @@
 # Makefile for the kernel block device filter drivers.
 #
 
-obj-$(CONFIG_BDEVFLT_GENERIC)	+= gbdevflt/
+obj-y	+= gbdevflt/
