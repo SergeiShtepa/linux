@@ -388,7 +388,7 @@ fail:
 /**
  * rpn_execute_bytecode() - execute bytecode
  * @bc: copy of bytecode structure on stack
- * @op_dict: extended operations dictionary
+ * @op_ext_dict: extended operations dictionary
  * @stack: data stack defined by RPN_STACK()
  * @ctx: context for extended operations
  *
@@ -397,7 +397,7 @@ fail:
  * Thread safety is ensured by the fact that each call uses its own stack.
  */
 int rpn_execute_bytecode(struct rpn_bytecode bc,
-			 const struct rpn_ext_op *op_dict,
+			 const struct rpn_ext_op *op_ext_dict,
 			 struct rpn_stack *stack, void *ctx)
 {
 	int ret = 0;
@@ -457,7 +457,7 @@ next_opcode:
 			return ret;
 		break;
 	default:
-		ret = (op_dict + opcode)->fn(stack, ctx);
+		ret = (op_ext_dict + opcode)->fn(stack, ctx);
 		if (unlikely(ret))
 			return ret;
 	}
