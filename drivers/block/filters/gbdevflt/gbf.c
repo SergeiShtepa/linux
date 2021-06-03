@@ -12,10 +12,9 @@
 #include "gbf_sysfs.h"
 
 #define MODULE_NAME "gbdevflt"
-/*
-LIST_HEAD(devinfo_list);
-struct mutex devinfo_list_lock;
-*/
+
+LIST_HEAD(ctx_list);
+
 static int gfp_rule_range(struct rpn_stack *stack, void *ctx)
 {
 	int ret;
@@ -193,31 +192,9 @@ deny:
 	bio_endio(bio);
 	return FLT_ST_COMPLETE;
 }
-/*
-struct gbf_devinfo {
-	struct list_head list;
-	dev_t dev_id;
-};
 
-static inline int gbf_devinfo_add(dev_t dev_id)
-{
-	struct gbf_devinfo *info;
-
-	info = kzalloc(sizeof(struct gbf_devinfo), GFP_KERNEL);
-	if (!info)
-		return -ENOMEM;
-
-	INIT_LIST_HEAD(&info->list);
-	info->dev_id = dev_id;
-
-	mutex_lock(&devinfo_list_lock);
-	list_add(&info->list, &devinfo_list);
-	mutex_unlock(&devinfo_list_lock);
-
-	return 0;
-}
-*/
 struct gbf_ctx {
+	struct list_head list;
 	dev_t dev_id;
 	struct list_head rules_list;
 };
@@ -233,11 +210,15 @@ static inline struct gbf_ctx *gbf_ctx_new(dev_t dev_id)
 	INIT_LIST_HEAD(&ctx->rules_list);
 	ctx->dev_id = dev_id;
 
+	INIT_LIST_HEAD(&ctx->list);
+	list_add(&ctx->list, &ctx_list);
+
 	return ctx;
 }
 
 static inline void gbf_ctx_free(struct gbf_ctx *ctx)
 {
+	list_del(&ctx->list);
 	kfree(ctx);
 }
 
@@ -324,6 +305,7 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 	int ret = 0;
 	struct  block_device *bdev;
 	struct gbf_ctx *ctx;
+	struct gbf_ctx *new_ctx = NULL;
 	struct gbf_rule *rule;
 
 	bdev = bdev_filter_lock(dev_id);
@@ -335,15 +317,17 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 
 	ctx = bdev_filter_find_ctx(bdev, MODULE_NAME);
 	if (IS_ERR(ctx)) {
-		ctx = gbf_ctx_new(dev_id);
-		if (!ctx) {
+		new_ctx = gbf_ctx_new(dev_id);
+		if (!new_ctx) {
 			ret = -ENOMEM;
 			goto out;
 		}
 
-		ret = bdev_filter_add(bdev, MODULE_NAME, &gbf_fops, ctx);
+		ret = bdev_filter_add(bdev, MODULE_NAME, &gbf_fops, new_ctx);
 		if (ret)
 			goto out;
+
+		ctx = new_ctx;
 	}
 
 	rule = gbf_ctx_find_rule(ctx, rule_name);
@@ -364,6 +348,10 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 		list_add_tail(&rule->list, &ctx->rules_list);
 	pr_info("Rule \"%s\" was added\n", rule_name);
 out:
+	if (ret) {
+		if (new_ctx)
+			gbf_ctx_free(new_ctx);
+	}
 	bdev_filter_unlock(bdev);
 
 	return ret;
@@ -429,7 +417,18 @@ out:
 }
 EXPORT_SYMBOL_GPL(gbf_rule_remove);
 
-/*
+static bool gbf_take_first_own_dev(dev_t *dev_id)
+{
+	struct gbf_ctx *ctx;
+
+	if (list_empty(&ctx_list))
+		return false;
+
+	ctx = list_first_entry(&ctx_list, struct gbf_ctx, list);
+	*dev_id = ctx->dev_id;
+	return true;
+}
+
 static void gbf_cleanup(dev_t dev_id)
 {
 	int ret;
@@ -448,7 +447,7 @@ static void gbf_cleanup(dev_t dev_id)
 			MODULE_NAME, MAJOR(dev_id), MINOR(dev_id));
 
 	bdev_filter_unlock(bdev);
-}*/
+}
 
 static void print_op_dict(const struct rpn_ext_op *op_dict)
 {
@@ -466,10 +465,6 @@ static int __init gbf_init(void)
 	int ret = 0;
 
 	pr_info("Init \"%s\" module.\n", MODULE_NAME);
-	/*mutex_init(&devinfo_list_lock);
-	ctx_list_is_active = true;
-	barrier();*/
-
 	ret = gbf_sysfs_init(MODULE_NAME);
 	if (ret) {
 		pr_err("Failed to initialize sysfs interface.\n");
@@ -483,20 +478,18 @@ static int __init gbf_init(void)
 
 static void __exit gbf_exit(void)
 {
+	dev_t dev_id;
 
 	pr_info("Exit \"%s\" module.\n", MODULE_NAME);
-
 	gbf_sysfs_done();
 
-	/* TODO: detach all rules from all devices */
-	/*while() {
-		gbf_cleanup()
-	}*/
+	while (gbf_take_first_own_dev(&dev_id))
+		gbf_cleanup(dev_id);
 }
 
 module_init(gbf_init);
 module_exit(gbf_exit);
 
 MODULE_DESCRIPTION("Generic Block Device Filter");
-MODULE_AUTHOR("Oracle Corporation");
+MODULE_AUTHOR("Sergei Shtepa");
 MODULE_LICENSE("GPL");
