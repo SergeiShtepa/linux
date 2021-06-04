@@ -1976,15 +1976,28 @@ static inline struct blk_filter *bdev_filter_find_by_name(
 {
 	struct blk_filter *flt;
 
-	list_for_each_entry(flt, &bdev->bd_filters, list)
-		if (strncmp(flt->name, name, FLT_NAME_LENGTH) == 0)
-			return flt;
+	if (!list_empty(&bdev->bd_filters))
+		list_for_each_entry(flt, &bdev->bd_filters, list)
+			if (strncmp(flt->name, name, FLT_NAME_LENGTH) == 0)
+				return flt;
 
 	return NULL;
 }
 
 #define FLT_BDEV_MODE (FMODE_READ | FMODE_WRITE)
 
+/*
+ * bdev_filter_lock - Locks the processing of I/O requests for block device
+ * @dev_id: block device id
+ *
+ * Opens the block device and locks the execution of the submit_bio_noacct()
+ * function for it.
+ * To avoid calling a deadlock, do not call I/O operations after this lock.
+ * To do this, using the memalloc_noio_save() function can be useful.
+ *
+ * If successful, returns a pointer to the block device structure.
+ * Returns an error code when an error occurs.
+ */
 struct block_device *bdev_filter_lock(dev_t dev_id)
 {
 	struct block_device *bdev;
@@ -1997,6 +2010,13 @@ struct block_device *bdev_filter_lock(dev_t dev_id)
 }
 EXPORT_SYMBOL_GPL(bdev_filter_lock);
 
+/*
+ * bdev_filter_lock - Unlocks the processing of I/O requests for block device
+ * @bdev: pointer to block device structure
+ *
+ * The submit_bio_noacct() function can be continued. The pointer to the block
+ * device structure can no longer be used.
+ */
 void bdev_filter_unlock(struct block_device *bdev)
 {
 	percpu_up_write(&bdev->bd_filters_lock);
@@ -2005,7 +2025,12 @@ void bdev_filter_unlock(struct block_device *bdev)
 EXPORT_SYMBOL_GPL(bdev_filter_unlock);
 
 /**
+ * bdev_filter_find_ctx - Find filters context
+ * @bdev: block device
+ * @filter_name: a unique filter name, such as the module name
  *
+ * The returned pointer is the private data of the filter. It's can be NULL.
+ * If the filter could not be found by name, an error code will be returned.
  */
 void *bdev_filter_find_ctx(struct block_device *bdev, const char *filter_name)
 {
@@ -2041,7 +2066,7 @@ int bdev_filter_add(struct block_device *bdev, const char *filter_name,
 	if (flt)
 		return -EBUSY;
 
-	flt = kzalloc(sizeof(struct blk_filter), GFP_KERNEL);
+	flt = kzalloc(sizeof(struct blk_filter), GFP_NOIO);
 	if (!flt)
 		return -ENOMEM;
 

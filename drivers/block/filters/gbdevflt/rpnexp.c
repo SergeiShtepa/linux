@@ -214,8 +214,7 @@ static int rpn_bytecode_append_op(struct rpn_bytecode *bc,
 		else
 			state->ops_len = RPN_BYTECODE_MINIMUM;
 
-		buffer = krealloc(bc->ops, state->ops_len * sizeof(u8),
-				  GFP_KERNEL);
+		buffer = krealloc(bc->ops, state->ops_len, GFP_KERNEL);
 		if (!buffer)
 			return -ENOMEM;
 
@@ -298,9 +297,12 @@ static int combine_segments(struct rpn_bytecode *bc,
 {
 	void *buffer;
 	size_t aligned_len;
+	size_t data_len;
 
 	aligned_len = (state->ops_ofs + (sizeof(u64) - 1)) & ~(sizeof(u64) - 1);
-	buffer = kzalloc(aligned_len + state->data_ofs * sizeof(u64), GFP_KERNEL);
+	data_len = state->data_ofs * sizeof(u64);
+
+	buffer = kzalloc(aligned_len + data_len, GFP_KERNEL);
 	if (!buffer)
 		return -ENOMEM;
 
@@ -308,9 +310,9 @@ static int combine_segments(struct rpn_bytecode *bc,
 	kfree(bc->ops);
 	bc->ops = buffer;
 
-	memcpy(buffer + aligned_len, bc->data, state->data_ofs);
+	memcpy(buffer + aligned_len, bc->data, data_len);
 	kfree(bc->data);
-	bc->data = buffer + aligned_len;
+	bc->data = (buffer + aligned_len);
 
 	return 0;
 }
@@ -338,8 +340,6 @@ int rpn_parse_expression(char *exp, const struct rpn_ext_op *op_ext_dict,
 	size_t inx = 0;
 	size_t length;
 	struct rpn_bytecode_state state = {0};
-
-	memset(bc, 0, sizeof(struct rpn_bytecode));
 
 	while (exp[inx] != '\0') {
 		if ((exp[inx] != ' ') && (exp[inx] != '\t')) {
