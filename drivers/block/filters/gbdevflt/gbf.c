@@ -5,6 +5,7 @@
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/errno.h>
+#include <linux/sched/mm.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include "rpnexp.h"
@@ -48,11 +49,14 @@ static int gfp_rule_owner(struct rpn_stack *stack, void *ctx)
 	u64 owner;
 	u64 result;
 
+	pr_err("DEBUG! %s\n", __func__);
 	ret = rpn_stack_pop(stack, &owner);
 	if (unlikely(ret))
 		return ret;
+	pr_err("DEBUG! owner=0x%llx\n", owner);
+	pr_err("DEBUG! bi_end_io=0x%llx\n", (u64)bio->bi_end_io);
 
-	result = (void *)bio->bi_end_io == (void *)owner;
+	result = ((void *)bio->bi_end_io == (void *)owner);
 
 	ret = rpn_stack_push(stack, result);
 	if (unlikely(ret))
@@ -136,6 +140,8 @@ static inline struct gbf_rule *gbf_rule_new(const char *rule_name,
 
 	INIT_LIST_HEAD(&rule->list);
 	strncpy(rule->name, rule_name, GBF_RULE_NAME_LENGTH);
+	rule->bytecode.ops = NULL;
+	rule->bytecode.data = NULL;
 
 	ret = rpn_parse_expression(rule_exp, gbf_op_dict, &rule->bytecode);
 	if (ret) {
@@ -307,13 +313,19 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 	struct gbf_ctx *ctx;
 	struct gbf_ctx *new_ctx = NULL;
 	struct gbf_rule *rule;
+	unsigned int current_flags;
 
+	pr_err("DEBUG! %s %s %s", __func__, rule_name, rule_exp);
 	bdev = bdev_filter_lock(dev_id);
 	if (IS_ERR(bdev)) {
 		pr_err("Failed to lock device [%d:%d]\n",
 			MAJOR(dev_id), MINOR(dev_id));
 		return PTR_ERR(bdev);
 	}
+	/*
+	 * memory allocation should be without IO
+	 */
+	current_flags = memalloc_noio_save();
 
 	ctx = bdev_filter_find_ctx(bdev, MODULE_NAME);
 	if (IS_ERR(ctx)) {
@@ -352,6 +364,8 @@ out:
 		if (new_ctx)
 			gbf_ctx_free(new_ctx);
 	}
+
+	memalloc_noio_restore(current_flags);
 	bdev_filter_unlock(bdev);
 
 	return ret;
@@ -370,6 +384,7 @@ int gbf_rule_remove(dev_t dev_id, const char *rule_name)
 	struct block_device *bdev;
 	struct gbf_ctx *ctx;
 	struct gbf_rule *rule;
+	unsigned int current_flags;
 
 	bdev = bdev_filter_lock(dev_id);
 	if (IS_ERR(bdev)) {
@@ -377,6 +392,11 @@ int gbf_rule_remove(dev_t dev_id, const char *rule_name)
 			MAJOR(dev_id), MINOR(dev_id));
 		return PTR_ERR(bdev);
 	}
+
+	/*
+	 * memory allocation should be without IO
+	 */
+	current_flags = memalloc_noio_save();
 
 	ctx = bdev_filter_find_ctx(bdev, MODULE_NAME);
 	if (IS_ERR(ctx)) {
@@ -411,6 +431,7 @@ int gbf_rule_remove(dev_t dev_id, const char *rule_name)
 	}
 	pr_info("Rule \"%s\" was removed\n", rule_name);
 out:
+	memalloc_noio_restore(current_flags);
 	bdev_filter_unlock(bdev);
 
 	return ret;
@@ -433,6 +454,7 @@ static void gbf_cleanup(dev_t dev_id)
 {
 	int ret;
 	struct block_device *bdev;
+	unsigned int current_flags;
 
 	bdev = bdev_filter_lock(dev_id);
 	if (IS_ERR(bdev)) {
@@ -440,12 +462,17 @@ static void gbf_cleanup(dev_t dev_id)
 			MAJOR(dev_id), MINOR(dev_id));
 		return;
 	}
+	/*
+	 * memory allocation should be without IO
+	 */
+	current_flags = memalloc_noio_save();
 
 	ret = bdev_filter_del(bdev, MODULE_NAME);
 	if (ret)
 		pr_err("Failed to detach %s from device [%d:%d]\n",
 			MODULE_NAME, MAJOR(dev_id), MINOR(dev_id));
 
+	memalloc_noio_restore(current_flags);
 	bdev_filter_unlock(bdev);
 }
 
