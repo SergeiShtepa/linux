@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * gbf.h - Header file for General Block Device Filter kernel module
  */
