@@ -92,30 +92,11 @@ static int gfp_rule_write(struct rpn_stack *stack, void *ctx)
 	return 0;
 };
 
-static int gfp_rule_sleep(struct rpn_stack *stack, void *ctx)
-{
-	int ret;
-	u64 usecs;
-
-	ret = rpn_stack_pop(stack, &usecs);
-	if (unlikely(ret))
-		return ret;
-
-	fsleep(usecs);
-
-	ret = rpn_stack_push(stack, 1); /* always pass */
-	if (unlikely(ret))
-		return ret;
-
-	return 0;
-};
-
 const struct rpn_ext_op gbf_op_dict[] = {
 	{"range", gfp_rule_range},
 	{"owner", gfp_rule_owner},
 	{"read", gfp_rule_read},
 	{"write", gfp_rule_write},
-	{"sleep", gfp_rule_sleep},
 	{NULL, NULL}
 };
 
