@@ -290,6 +290,7 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 	struct  block_device *bdev;
 	struct gbf_ctx *ctx;
 	struct gbf_ctx *new_ctx = NULL;
+	struct rule_info *rule_info = NULL;
 	struct gbf_rule *rule;
 	unsigned int current_flags;
 
@@ -324,6 +325,11 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 		ret = -EALREADY;
 		goto out;
 	}
+	rule_info = gbf_rule_info_new(dev_id, rule_name, rule_exp);
+	if (!rule_info) {
+		ret = -ENOMEM;
+		goto out;
+	}
 
 	rule = gbf_rule_new(rule_name, rule_exp);
 	if (IS_ERR(rule)) {
@@ -337,15 +343,19 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 		list_add_tail(&rule->list, &ctx->rules_list);
 	pr_info("Rule \"%s\" was added\n", rule_name);
 out:
-	if (ret) {
-		if (new_ctx)
-			gbf_ctx_free(new_ctx);
-	}
-
 	memalloc_noio_restore(current_flags);
 	bdev_filter_unlock(bdev);
 
-	return ret;
+	if (ret) {
+		if (new_ctx)
+			gbf_ctx_free(new_ctx);
+		kfree(rule_info);
+		return ret;
+	}
+
+	gbf_rules_list_append(rule_info);
+	return 0;
+
 }
 EXPORT_SYMBOL_GPL(gbf_rule_add);
 
@@ -411,7 +421,11 @@ out:
 	memalloc_noio_restore(current_flags);
 	bdev_filter_unlock(bdev);
 
-	return ret;
+	if (ret)
+		return ret;
+
+	gbf_rules_list_erase(dev_id, rule_name);
+	return 0;
 }
 EXPORT_SYMBOL_GPL(gbf_rule_remove);
 
@@ -476,7 +490,6 @@ static int __init gbf_init(void)
 	}
 
 	print_op_dict(gbf_op_dict);
-
 	return ret;
 }
 
