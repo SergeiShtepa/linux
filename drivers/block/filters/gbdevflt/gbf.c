@@ -49,12 +49,9 @@ static int gfp_rule_owner(struct rpn_stack *stack, void *ctx)
 	u64 owner;
 	u64 result;
 
-	pr_err("DEBUG! %s\n", __func__);
 	ret = rpn_stack_pop(stack, &owner);
 	if (unlikely(ret))
 		return ret;
-	pr_err("DEBUG! owner=0x%llx\n", owner);
-	pr_err("DEBUG! bi_end_io=0x%llx\n", (u64)bio->bi_end_io);
 
 	result = ((void *)bio->bi_end_io == (void *)owner);
 
@@ -315,7 +312,6 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 	struct gbf_rule *rule;
 	unsigned int current_flags;
 
-	pr_err("DEBUG! %s %s %s", __func__, rule_name, rule_exp);
 	bdev = bdev_filter_lock(dev_id);
 	if (IS_ERR(bdev)) {
 		pr_err("Failed to lock device [%d:%d]\n",
