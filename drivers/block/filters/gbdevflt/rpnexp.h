@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Reverse Polish notation (RPN) expression processor.
  * It's allows to recognize rules written in RPN and execute them.

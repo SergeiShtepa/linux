@@ -1,7 +1,8 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Implements module management via sysfs files.
  */
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
@@ -10,10 +11,11 @@
 #include <linux/device.h>
 #include <linux/blkdev.h>
 #include <linux/parser.h>
-#include "gbf_sysfs.h"
 #include "gbf.h"
+#include "gbf_sysfs.h"
 
-struct mutex sysfs_rules_lock;
+struct mutex rules_list_lock;
+LIST_HEAD(rules_list);
 
 enum {
 	GBF_OPT_ERR = 0,
@@ -137,7 +139,11 @@ static int rule_add_execute(struct rule_add_opt *opt)
 		return ret;
 	}
 
-	return gbf_rule_add(dev_id, opt->name, opt->exp, add_to);
+	ret = gbf_rule_add(dev_id, opt->name, opt->exp, add_to);
+	if (ret)
+		pr_err("Failed to add rule '%s' for device '%s'\n",
+			opt->name, opt->path);
+	return ret;
 }
 
 static const match_table_t gbf_remove_tokens = {
@@ -176,7 +182,11 @@ static int rule_remove_execute(struct rule_remove_opt *opt)
 		return ret;
 	}
 
-	return gbf_rule_remove(dev_id, opt->name);
+	ret = gbf_rule_remove(dev_id, opt->name);
+	if (ret)
+		pr_err("Failed to remove rule '%s' for device '%s'\n",
+			opt->name, opt->path);
+	return ret;
 }
 
 static int rule_remove_parse(char *options, struct rule_remove_opt *opt)
@@ -227,24 +237,8 @@ out:
 	return ret;
 }
 
-static void rule_file_add(char *name, char *path, char *exp)
-{
-	/* TODO: add rule file to sysfs */
-	mutex_lock(&sysfs_rules_lock);
-
-	mutex_unlock(&sysfs_rules_lock);
-}
-
-static void rule_file_remove(char *name, char *path)
-{
-	/* TODO: remove rule file from sysfs */
-	mutex_lock(&sysfs_rules_lock);
-
-	mutex_unlock(&sysfs_rules_lock);
-}
-
 static ssize_t rule_add_store(struct class *class, struct class_attribute *attr,
-			    const char *buf, size_t count)
+			      const char *buf, size_t count)
 {
 	int ret = 0;
 	char *options = NULL;
@@ -261,21 +255,21 @@ static ssize_t rule_add_store(struct class *class, struct class_attribute *attr,
 	}
 	ret = rule_add_execute(&opt);
 	if (ret) {
-		pr_err("Failed to execute add command with options %s\n", options);
+		pr_err("Failed to execute add command with options %s\n",
+			options);
 		goto out;
 	}
-	rule_file_add(opt.name, opt.path, opt.exp);
 out:
 	rule_add_free(&opt);
 	kfree(options);
 	if (ret)
 		return (ssize_t)ret;
-
 	return count;
 };
 
-static ssize_t rule_remove_store(struct class *class, struct class_attribute *attr,
-			    const char *buf, size_t count)
+static ssize_t rule_remove_store(struct class *class,
+				 struct class_attribute *attr,
+				 const char *buf, size_t count)
 {
 	int ret = 0;
 	char *options = NULL;
@@ -292,25 +286,65 @@ static ssize_t rule_remove_store(struct class *class, struct class_attribute *at
 	}
 	ret = rule_remove_execute(&opt);
 	if (ret) {
-		pr_err("Failed to execute remove command with options %s\n", options);
+		pr_err("Failed to execute remove command with options %s\n",
+			options);
 		goto out;
 	}
-	rule_file_remove(opt.name, opt.name);
 out:
 	rule_remove_free(&opt);
 	kfree(options);
 	if (ret)
 		return (ssize_t)ret;
-
 	return count;
 };
 
+/*
+ * Displays a list of added rules. Each rule starts with a new line.
+ * However, only one page of data can be output via sysfs. So if there are too
+ * many rules, they will not be displayed completely. In this case, the "\n"
+ * character will not be added at the end.
+ */
+static ssize_t rule_list_show(struct class *class, struct class_attribute *attr,
+				 char *buf)
+{
+	struct rule_info *rule_info = NULL;
+	size_t pos = 0;
+	size_t line_sz;
+
+	mutex_lock(&rules_list_lock);
+	if (list_empty(&rules_list))
+		goto out;
+
+	list_for_each_entry(rule_info, &rules_list, list) {
+		line_sz = snprintf(buf + pos, PAGE_SIZE - pos,
+			"dev_id=%d:%d;name=%s;exp=%s;\n",
+			 MAJOR(rule_info->dev_id), MINOR(rule_info->dev_id),
+			 rule_info->name, rule_info->exp);
+		if (line_sz > (PAGE_SIZE - pos)) {
+			pos += line_sz;
+			break;
+		}
+		if (line_sz == (PAGE_SIZE - pos)) {
+			/* remove '\n' on the tail */
+			pos += line_sz - 1;
+			break;
+		}
+
+		pos += line_sz;
+	}
+out:
+	mutex_unlock(&rules_list_lock);
+	return pos;
+}
+
 CLASS_ATTR_WO(rule_add);
 CLASS_ATTR_WO(rule_remove);
+CLASS_ATTR_RO(rule_list);
 
 static struct attribute *gbf_attrs[] = {
 	&class_attr_rule_add.attr,
 	&class_attr_rule_remove.attr,
+	&class_attr_rule_list.attr,
 	NULL,
 };
 
@@ -327,36 +361,101 @@ static struct device *gbf_dev;
 static struct class *gbf_dev_class;
 static struct kobject *gbf_rules_kobj;
 
+struct rule_info *gbf_rule_info_new(dev_t dev_id, const char *rule_name,
+				    char *rule_exp)
+{
+	struct rule_info *rule_info = NULL;
+	size_t rule_exp_len = strlen(rule_exp);
+
+	rule_info = kzalloc(sizeof(struct rule_info) + rule_exp_len,
+			    GFP_KERNEL);
+	if (!rule_info)
+		return NULL;
+
+	INIT_LIST_HEAD(&rule_info->list);
+	rule_info->dev_id = dev_id;
+	strncpy(rule_info->name, rule_name, GBF_RULE_NAME_LENGTH);
+	strncpy(rule_info->exp, rule_exp, rule_exp_len);
+	return rule_info;
+}
+
+void gbf_rules_list_append(struct rule_info *rule_info)
+{
+	mutex_lock(&rules_list_lock);
+	list_add_tail(&rule_info->list, &rules_list);
+	mutex_unlock(&rules_list_lock);
+}
+
+void gbf_rules_list_erase(dev_t dev_id, const char *rule_name)
+{
+	struct rule_info *rule_info;
+
+	/*
+	 * A separate list "rules_list" and mutex "rules_list_lock" is used
+	 * to avoid using the bdev_filter_lock() lock.
+	 * This allows not to lock access to block devices when reading the
+	 * list of available rules.
+	 *
+	 * However, if the function to remove a rule from one thread is called
+	 * at the same time as the function to remove the same rule from
+	 * another thread, the rule removal thread may overtake the add thread.
+	 * To avoid this situation, the deletion from the list is repeated
+	 * after the thread is forced out. Otherwise, the list may accumulate
+	 * non-existent rules.
+	 */
+repeat:
+	mutex_lock(&rules_list_lock);
+
+	if (!list_empty(&rules_list)) {
+		list_for_each_entry(rule_info, &rules_list, list) {
+			if ((rule_info->dev_id == dev_id) &&
+			    (strncmp(rule_info->name, rule_name,
+			    	     GBF_RULE_NAME_LENGTH)==0)) {
+				/* The rule was found. */
+				list_del(&rule_info->list);
+				kfree(rule_info);
+				mutex_unlock(&rules_list_lock);
+				return;
+			}
+		}
+	}
+	/* The rule was not found. Try again. */
+	mutex_unlock(&rules_list_lock);
+	schedule();
+	goto repeat;
+}
+
+void gbf_rules_list_cleanup(void)
+{
+	mutex_lock(&rules_list_lock);
+	while (!list_empty(&rules_list)) {
+		struct rule_info *rule_info =
+			list_first_entry(&rules_list, struct rule_info, list);
+
+		list_del(&rule_info->list);
+		kfree(rule_info);
+	}
+	mutex_unlock(&rules_list_lock);
+}
+
 int gbf_sysfs_init(const char *module_name)
 {
 	int ret = 0;
 
-	mutex_init(&sysfs_rules_lock);
+	mutex_init(&rules_list_lock);
 
 	gbf_dev_class = class_create(THIS_MODULE, module_name);
 	if (IS_ERR(gbf_dev_class))
 		return PTR_ERR(gbf_dev_class);
 
-	//gbf_dev = device_create(gbf_dev_class, NULL,
-	//			  MKDEV(0, 0), NULL, "ctl");
 	gbf_dev = device_create_with_groups(gbf_dev_class, NULL,
-					MKDEV(0, 0), NULL,
-					gbf_attr_groups, "ctl");
+					    MKDEV(0, 0), NULL,
+					    gbf_attr_groups, "ctl");
 	if (IS_ERR(gbf_dev)) {
 		ret =  PTR_ERR(gbf_dev);
 		goto fail_device;
 	}
-
-	/* should content actual rules */
-	gbf_rules_kobj = kobject_create_and_add("rules", &gbf_dev->kobj);
-	if (!gbf_rules_kobj) {
-		ret = -ENOMEM;
-		goto fail;
-	}
-
 	return 0;
-fail:
-	device_destroy(gbf_dev_class, MKDEV(0, 0));
 fail_device:
 	class_destroy(gbf_dev_class);
 	return ret;
@@ -368,4 +467,6 @@ void gbf_sysfs_done(void)
 	kobject_put(gbf_rules_kobj);
 	device_destroy(gbf_dev_class, MKDEV(0, 0));
 	class_destroy(gbf_dev_class);
+
+	gbf_rules_list_cleanup();
 }
