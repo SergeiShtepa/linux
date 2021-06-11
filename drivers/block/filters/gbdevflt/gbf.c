@@ -2,6 +2,7 @@
 /*
  * This file contains the basic logic for working with the rules.
  */
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/errno.h>
@@ -11,8 +12,6 @@
 #include "rpnexp.h"
 #include "gbf.h"
 #include "gbf_sysfs.h"
-
-#define MODULE_NAME "gbdevflt"
 
 LIST_HEAD(ctx_list);
 
@@ -135,7 +134,6 @@ static inline struct gbf_rule *gbf_rule_new(const char *rule_name,
 static inline void gbf_rule_free(struct gbf_rule *rule)
 {
 	list_del(&rule->list);
-
 	rpn_release_bytecode(&rule->bytecode);
 	kfree(rule);
 }
@@ -296,7 +294,7 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 
 	bdev = bdev_filter_lock(dev_id);
 	if (IS_ERR(bdev)) {
-		pr_err("Failed to lock device [%d:%d]\n",
+		pr_err("Failed to lock device '%d:%d'\n",
 			MAJOR(dev_id), MINOR(dev_id));
 		return PTR_ERR(bdev);
 	}
@@ -305,7 +303,7 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 	 */
 	current_flags = memalloc_noio_save();
 
-	ctx = bdev_filter_find_ctx(bdev, MODULE_NAME);
+	ctx = bdev_filter_find_ctx(bdev, KBUILD_MODNAME);
 	if (IS_ERR(ctx)) {
 		new_ctx = gbf_ctx_new(dev_id);
 		if (!new_ctx) {
@@ -313,7 +311,7 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 			goto out;
 		}
 
-		ret = bdev_filter_add(bdev, MODULE_NAME, &gbf_fops, new_ctx);
+		ret = bdev_filter_add(bdev, KBUILD_MODNAME, &gbf_fops, new_ctx);
 		if (ret)
 			goto out;
 
@@ -341,7 +339,8 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 		list_add(&rule->list, &ctx->rules_list);
 	else
 		list_add_tail(&rule->list, &ctx->rules_list);
-	pr_info("Rule \"%s\" was added\n", rule_name);
+	pr_info("Rule '%s' for device '%d:%d' was added\n", rule_name,
+		MAJOR(dev_id), MINOR(dev_id));
 out:
 	memalloc_noio_restore(current_flags);
 	bdev_filter_unlock(bdev);
@@ -375,7 +374,7 @@ int gbf_rule_remove(dev_t dev_id, const char *rule_name)
 
 	bdev = bdev_filter_lock(dev_id);
 	if (IS_ERR(bdev)) {
-		pr_err("Failed to lock device [%d:%d]\n",
+		pr_err("Failed to lock device '%d:%d'\n",
 			MAJOR(dev_id), MINOR(dev_id));
 		return PTR_ERR(bdev);
 	}
@@ -385,11 +384,11 @@ int gbf_rule_remove(dev_t dev_id, const char *rule_name)
 	 */
 	current_flags = memalloc_noio_save();
 
-	ctx = bdev_filter_find_ctx(bdev, MODULE_NAME);
+	ctx = bdev_filter_find_ctx(bdev, KBUILD_MODNAME);
 	if (IS_ERR(ctx)) {
-		pr_err("Filter [%s] is not exist on device [%d:%d]\n",
-			MODULE_NAME, MAJOR(dev_id), MINOR(dev_id));
-		pr_err("Failed to delete rule [%s]\n", rule_name);
+		pr_err("Filter '%s' is not exist on device '%d:%d'\n",
+			KBUILD_MODNAME, MAJOR(dev_id), MINOR(dev_id));
+		pr_err("Failed to delete rule '%s'\n", rule_name);
 		ret = -ENXIO;
 		goto out;
 	}
@@ -402,9 +401,9 @@ int gbf_rule_remove(dev_t dev_id, const char *rule_name)
 	else {
 		rule = gbf_ctx_find_rule(ctx, rule_name);
 		if (!rule) {
-			pr_err("Rule is not exist on device [%d:%d]\n",
+			pr_err("Rule is not exist on device '%d:%d'\n",
 				MAJOR(dev_id), MINOR(dev_id));
-			pr_err("Failed to delete rule [%s]\n", rule_name);
+			pr_err("Failed to delete rule '%s'\n", rule_name);
 			ret = -ENOENT;
 			goto out;
 		}
@@ -412,11 +411,12 @@ int gbf_rule_remove(dev_t dev_id, const char *rule_name)
 	}
 
 	if (list_empty(&ctx->rules_list)) {
-		ret = bdev_filter_del(bdev, MODULE_NAME);
+		ret = bdev_filter_del(bdev, KBUILD_MODNAME);
 		if (ret)
 			goto out;
 	}
-	pr_info("Rule \"%s\" was removed\n", rule_name);
+	pr_info("Rule '%s' for device '%d:%d' was removed\n", rule_name,
+		MAJOR(dev_id), MINOR(dev_id));
 out:
 	memalloc_noio_restore(current_flags);
 	bdev_filter_unlock(bdev);
@@ -447,9 +447,11 @@ static void gbf_cleanup(dev_t dev_id)
 	struct block_device *bdev;
 	unsigned int current_flags;
 
+	pr_info("Cleanup rules for device '%d:%d'",
+		MAJOR(dev_id), MINOR(dev_id));
 	bdev = bdev_filter_lock(dev_id);
 	if (IS_ERR(bdev)) {
-		pr_err("Failed to lock device [%d:%d]\n",
+		pr_err("Failed to lock device '%d:%d'\n",
 			MAJOR(dev_id), MINOR(dev_id));
 		return;
 	}
@@ -458,10 +460,10 @@ static void gbf_cleanup(dev_t dev_id)
 	 */
 	current_flags = memalloc_noio_save();
 
-	ret = bdev_filter_del(bdev, MODULE_NAME);
+	ret = bdev_filter_del(bdev, KBUILD_MODNAME);
 	if (ret)
-		pr_err("Failed to detach %s from device [%d:%d]\n",
-			MODULE_NAME, MAJOR(dev_id), MINOR(dev_id));
+		pr_err("Failed to detach filter from device '%d:%d'\n",
+			MAJOR(dev_id), MINOR(dev_id));
 
 	memalloc_noio_restore(current_flags);
 	bdev_filter_unlock(bdev);
@@ -482,8 +484,8 @@ static int __init gbf_init(void)
 {
 	int ret = 0;
 
-	pr_info("Init \"%s\" module.\n", MODULE_NAME);
-	ret = gbf_sysfs_init(MODULE_NAME);
+	pr_info("Init module.\n");
+	ret = gbf_sysfs_init(KBUILD_MODNAME);
 	if (ret) {
 		pr_err("Failed to initialize sysfs interface.\n");
 		return ret;
@@ -497,7 +499,7 @@ static void __exit gbf_exit(void)
 {
 	dev_t dev_id;
 
-	pr_info("Exit \"%s\" module.\n", MODULE_NAME);
+	pr_info("Exit module.\n");
 	gbf_sysfs_done();
 
 	while (gbf_take_first_own_dev(&dev_id))

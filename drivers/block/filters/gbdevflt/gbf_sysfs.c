@@ -2,6 +2,7 @@
 /*
  * Implements module management via sysfs files.
  */
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
@@ -412,6 +413,7 @@ repeat:
 			    	     GBF_RULE_NAME_LENGTH)==0)) {
 				/* The rule was found. */
 				list_del(&rule_info->list);
+				kfree(rule_info);
 				mutex_unlock(&rules_list_lock);
 				return;
 			}
@@ -421,6 +423,19 @@ repeat:
 	mutex_unlock(&rules_list_lock);
 	schedule();
 	goto repeat;
+}
+
+void gbf_rules_list_cleanup(void)
+{
+	mutex_lock(&rules_list_lock);
+	while (!list_empty(&rules_list)) {
+		struct rule_info *rule_info =
+			list_first_entry(&rules_list, struct rule_info, list);
+
+		list_del(&rule_info->list);
+		kfree(rule_info);
+	}
+	mutex_unlock(&rules_list_lock);
 }
 
 int gbf_sysfs_init(const char *module_name)
@@ -452,4 +467,6 @@ void gbf_sysfs_done(void)
 	kobject_put(gbf_rules_kobj);
 	device_destroy(gbf_dev_class, MKDEV(0, 0));
 	class_destroy(gbf_dev_class);
+
+	gbf_rules_list_cleanup();
 }
