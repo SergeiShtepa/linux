@@ -61,6 +61,31 @@ static int gfp_rule_owner(struct rpn_stack *stack, void *ctx)
 	return 0;
 };
 
+/*
+ * It is not yet certain that filtering by process ID is viable. The point
+ * is that the I/O service can be passed to the kernel worker processes
+ * (kworker). However, if you know for sure that the process initiates I/O
+ * requests directly, then you can apply this operation.
+ */
+static int gfp_rule_tgid(struct rpn_stack *stack, void *ctx)
+{
+	int ret;
+	u64 tgid;
+	u64 result;
+
+	ret = rpn_stack_pop(stack, &tgid);
+	if (unlikely(ret))
+		return ret;
+
+	result = (current->tgid == (pid_t)tgid);
+
+	ret = rpn_stack_push(stack, result);
+	if (unlikely(ret))
+		return ret;
+
+	return 0;
+};
+
 static int gfp_rule_read(struct rpn_stack *stack, void *ctx)
 {
 	int ret;
@@ -94,6 +119,7 @@ static int gfp_rule_write(struct rpn_stack *stack, void *ctx)
 const struct rpn_ext_op gbf_op_dict[] = {
 	{"range", gfp_rule_range},
 	{"owner", gfp_rule_owner},
+	{"tgid", gfp_rule_tgid},
 	{"read", gfp_rule_read},
 	{"write", gfp_rule_write},
 	{NULL, NULL}
