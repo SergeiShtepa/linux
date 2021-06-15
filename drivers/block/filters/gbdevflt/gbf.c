@@ -275,6 +275,8 @@ static void gbf_detach_cb(void *gbf_ctx)
 {
 	struct gbf_ctx *ctx = gbf_ctx;
 
+	pr_info("Cleanup filter for device '%d:%d'\n",
+		MAJOR(ctx->dev_id), MINOR(ctx->dev_id));
 	gbf_rules_cleanup(&ctx->rules_list);
 
 	gbf_ctx_free(ctx);
