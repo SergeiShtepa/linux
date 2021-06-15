@@ -807,20 +807,18 @@ static struct inode *bdev_alloc_inode(struct super_block *sb)
 
 static void bdev_filter_cleanup(struct block_device *bdev)
 {
+	struct blk_filter *flt;
+
+	might_sleep();
 	percpu_down_write(&bdev->bd_filters_lock);
+	while ((flt = list_first_entry_or_null(&bdev->bd_filters,
+					struct blk_filter, list)) != NULL) {
+		if (flt->fops->detach_cb)
+			flt->fops->detach_cb(flt->ctx);
 
-	if (!list_empty(&bdev->bd_filters)) {
-		struct blk_filter *flt;
-
-		list_for_each_entry(flt, &bdev->bd_filters, list) {
-			if (flt->fops->detach_cb)
-				flt->fops->detach_cb(flt->ctx);
-
-			list_del(&flt->list);
-			kfree(flt);
-		}
+		list_del(&flt->list);
+		kfree(flt);
 	}
-
 	percpu_up_write(&bdev->bd_filters_lock);
 }
 
@@ -828,9 +826,7 @@ static void bdev_free_inode(struct inode *inode)
 {
 	struct block_device *bdev = I_BDEV(inode);
 
-	bdev_filter_cleanup(bdev);
 	percpu_free_rwsem(&bdev->bd_filters_lock);
-
 	free_percpu(bdev->bd_stats);
 	kfree(bdev->bd_meta_info);
 
@@ -850,6 +846,7 @@ static void bdev_evict_inode(struct inode *inode)
 	truncate_inode_pages_final(&inode->i_data);
 	invalidate_inode_buffers(inode); /* is it needed here? */
 	clear_inode(inode);
+	bdev_filter_cleanup(bdev);
 	/* Detach inode from wb early as bdi_put() may free bdi->wb */
 	inode_detach_wb(inode);
 	if (bdev->bd_bdi != &noop_backing_dev_info) {

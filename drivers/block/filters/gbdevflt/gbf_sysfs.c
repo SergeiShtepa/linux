@@ -255,8 +255,7 @@ static ssize_t rule_add_store(struct class *class, struct class_attribute *attr,
 	}
 	ret = rule_add_execute(&opt);
 	if (ret) {
-		pr_err("Failed to execute add command with options %s\n",
-			options);
+		pr_err("Failed to add rule\n");
 		goto out;
 	}
 out:
@@ -286,8 +285,7 @@ static ssize_t rule_remove_store(struct class *class,
 	}
 	ret = rule_remove_execute(&opt);
 	if (ret) {
-		pr_err("Failed to execute remove command with options %s\n",
-			options);
+		pr_err("Failed to remove rule\n");
 		goto out;
 	}
 out:
