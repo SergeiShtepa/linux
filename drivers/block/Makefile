@@ -42,3 +42,5 @@ obj-$(CONFIG_BLK_DEV_RNBD)	+= rnbd/
 obj-$(CONFIG_BLK_DEV_NULL_BLK)	+= null_blk/
 
 swim_mod-y	:= swim.o swim_asm.o
+
+obj-y				+= filters/

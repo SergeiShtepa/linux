@@ -427,5 +427,6 @@ config BLK_DEV_RSXX
 	  module will be called rsxx.
 
 source "drivers/block/rnbd/Kconfig"
+source "drivers/block/filters/Kconfig"
 
 endif # BLK_DEV
