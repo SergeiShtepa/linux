@@ -2052,8 +2052,32 @@ struct filter_operations {
 	void (*detach_cb)(void *ctx);
 };
 
-struct block_device *bdev_filter_lock(dev_t dev_id);
-void bdev_filter_unlock(struct block_device *bdev);
+/*
+ * bdev_filter_lock - Locks the processing of I/O requests for block device
+ * @bdev: pointer to block device structure
+ *
+ * Locks block device the execution of the submit_bio_noacct() function for it.
+ * To avoid calling a deadlock, do not call I/O operations after this lock.
+ * To do this, using the memalloc_noio_save() function can be useful.
+ *
+ * If successful, returns a pointer to the block device structure.
+ * Returns an error code when an error occurs.
+ */
+static inline void bdev_filter_lock(struct block_device *bdev)
+{
+	percpu_down_write(&bdev->bd_filters_lock);
+};
+
+/*
+ * bdev_filter_lock - Unlocks the processing of I/O requests for block device
+ * @bdev: pointer to block device structure
+ *
+ * The submit_bio_noacct() function can be continued.
+ */
+static inline void bdev_filter_unlock(struct block_device *bdev)
+{
+	percpu_up_write(&bdev->bd_filters_lock);
+};
 
 void *bdev_filter_find_ctx(struct block_device *bdev, const char *filter_name);
 int bdev_filter_add(struct block_device *bdev, const char *filter_name,
