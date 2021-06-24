@@ -13,6 +13,7 @@
 #include "gbf.h"
 #include "gbf_sysfs.h"
 
+#define GBF_BDEV_MODE (FMODE_READ | FMODE_WRITE)
 LIST_HEAD(ctx_list);
 
 static int gfp_rule_range(struct rpn_stack *stack, void *ctx)
@@ -320,15 +321,13 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 	struct gbf_rule *rule;
 	unsigned int current_flags;
 
-	bdev = bdev_filter_lock(dev_id);
+	bdev = blkdev_get_by_dev(dev_id, GBF_BDEV_MODE, NULL);
 	if (IS_ERR(bdev)) {
-		pr_err("Failed to lock device '%d:%d'\n",
+		pr_err("Failed to open block device '%d:%d'\n",
 			MAJOR(dev_id), MINOR(dev_id));
 		return PTR_ERR(bdev);
 	}
-	/*
-	 * memory allocation should be without IO
-	 */
+	bdev_filter_lock(bdev);
 	current_flags = memalloc_noio_save();
 
 	ctx = bdev_filter_find_ctx(bdev, KBUILD_MODNAME);
@@ -372,6 +371,7 @@ int gbf_rule_add(dev_t dev_id, const char *rule_name, char *rule_exp,
 out:
 	memalloc_noio_restore(current_flags);
 	bdev_filter_unlock(bdev);
+	blkdev_put(bdev, GBF_BDEV_MODE);
 
 	if (ret) {
 		if (new_ctx)
@@ -400,16 +400,13 @@ int gbf_rule_remove(dev_t dev_id, const char *rule_name)
 	struct gbf_rule *rule;
 	unsigned int current_flags;
 
-	bdev = bdev_filter_lock(dev_id);
+	bdev = blkdev_get_by_dev(dev_id, GBF_BDEV_MODE, NULL);
 	if (IS_ERR(bdev)) {
-		pr_err("Failed to lock device '%d:%d'\n",
+		pr_err("Failed to open block device '%d:%d'\n",
 			MAJOR(dev_id), MINOR(dev_id));
 		return PTR_ERR(bdev);
 	}
-
-	/*
-	 * memory allocation should be without IO
-	 */
+	bdev_filter_lock(bdev);
 	current_flags = memalloc_noio_save();
 
 	ctx = bdev_filter_find_ctx(bdev, KBUILD_MODNAME);
@@ -448,6 +445,7 @@ int gbf_rule_remove(dev_t dev_id, const char *rule_name)
 out:
 	memalloc_noio_restore(current_flags);
 	bdev_filter_unlock(bdev);
+	blkdev_put(bdev, GBF_BDEV_MODE);
 
 	if (ret)
 		return ret;
@@ -477,15 +475,14 @@ static void gbf_cleanup(dev_t dev_id)
 
 	pr_info("Cleanup rules for device '%d:%d'",
 		MAJOR(dev_id), MINOR(dev_id));
-	bdev = bdev_filter_lock(dev_id);
+
+	bdev = blkdev_get_by_dev(dev_id, GBF_BDEV_MODE, NULL);
 	if (IS_ERR(bdev)) {
-		pr_err("Failed to lock device '%d:%d'\n",
+		pr_err("Failed to open block device '%d:%d'\n",
 			MAJOR(dev_id), MINOR(dev_id));
 		return;
 	}
-	/*
-	 * memory allocation should be without IO
-	 */
+	bdev_filter_lock(bdev);
 	current_flags = memalloc_noio_save();
 
 	ret = bdev_filter_del(bdev, KBUILD_MODNAME);
@@ -495,6 +492,7 @@ static void gbf_cleanup(dev_t dev_id)
 
 	memalloc_noio_restore(current_flags);
 	bdev_filter_unlock(bdev);
+	blkdev_put(bdev, GBF_BDEV_MODE);
 }
 
 static void print_op_dict(const struct rpn_ext_op *op_dict)
