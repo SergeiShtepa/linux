@@ -1016,26 +1016,25 @@ static blk_qc_t __submit_bio_noacct_mq(struct bio *bio)
 	return ret;
 }
 
-static inline struct block_device *filters_lock(struct bio *bio)
+static inline bool filters_lock(struct bio *bio)
 {
-	bool locked;
-	struct block_device *bdev = bio->bi_bdev;
-
 	if (bio->bi_opf & REQ_NOWAIT) {
-		locked = percpu_down_read_trylock(&bdev->bd_filters_lock);
+		bool locked = percpu_down_read_trylock(
+						&bio->bi_bdev->bd_filters_lock);
+
 		if (unlikely(!locked)) {
 			bio_wouldblock_error(bio);
-			return NULL;
+			return false;
 		}
 	} else
-		percpu_down_read(&bdev->bd_filters_lock);
+		percpu_down_read(&bio->bi_bdev->bd_filters_lock);
 
-	return bdev;
+	return true;
 }
 
-static inline void filters_unlock(struct block_device *bdev)
+static inline void filters_unlock(struct bio *bio)
 {
-	percpu_up_read(&bdev->bd_filters_lock);
+	percpu_up_read(&bio->bi_bdev->bd_filters_lock);
 }
 
 static int filters_apply(struct bio *bio)
@@ -1046,26 +1045,27 @@ static int filters_apply(struct bio *bio)
 
 again:
 	status = FLT_ST_PASS;
-	bdev = filters_lock(bio);
-	if (!bdev)
+	if (!filters_lock(bio))
 		return FLT_ST_COMPLETE;
 
+	bdev = bio->bi_bdev;
 	if (list_empty(&bdev->bd_filters))
 		goto out;
 
+	bio_set_flag(bio, BIO_FILTERED);
 	list_for_each_entry(flt, &bdev->bd_filters, list) {
 		status = flt->fops->submit_bio_cb(bio, flt->ctx);
-		if (status != FLT_ST_PASS)
-			break;
-	}
+		if (status == FLT_ST_COMPLETE)
+			goto out;
 
-	if (status == FLT_ST_REDIRECT) {
-		/*
-		 * Bio request was redirected to another device, we should
-		 * process the filters again.
-		 */
-		filters_unlock(bdev);
-		goto again;
+		if (status == FLT_ST_REDIRECT) {
+			/*
+			 * Bio request was redirected to another device,
+			 * we should process the filters again.
+			 */
+			filters_unlock(bdev);
+			goto again;
+		}
 	}
 
 out:
@@ -1099,8 +1099,9 @@ blk_qc_t submit_bio_noacct(struct bio *bio)
 		return BLK_QC_T_NONE;
 	}
 
-	if (filters_apply(bio) != FLT_ST_PASS)
-		return BLK_QC_T_NONE;
+	if (!bio_flagged(bio, BIO_FILTERED))
+		if (filters_apply(bio) == FLT_ST_COMPLETE)
+			return BLK_QC_T_NONE;
 
 	if (bio->bi_bdev->bd_partno) {
 		if (unlikely(blk_partition_remap(bio))) {
