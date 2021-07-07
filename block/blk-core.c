@@ -1032,9 +1032,13 @@ static inline bool filters_lock(struct bio *bio)
 	return true;
 }
 
-static inline void filters_unlock(struct bio *bio)
+/*
+ * The block device should be the parameter, since the bio may change
+ * during processing by the filter.
+ */
+static inline void filters_unlock(struct block_device *bdev)
 {
-	percpu_up_read(&bio->bi_bdev->bd_filters_lock);
+	percpu_up_read(&bdev->bd_filters_lock);
 }
 
 static int filters_apply(struct bio *bio)
@@ -1047,8 +1051,9 @@ again:
 	status = FLT_ST_PASS;
 	if (!filters_lock(bio))
 		return FLT_ST_COMPLETE;
-
+	/* Remember the block device that was locked.*/
 	bdev = bio->bi_bdev;
+
 	if (list_empty(&bdev->bd_filters))
 		goto out;
 
