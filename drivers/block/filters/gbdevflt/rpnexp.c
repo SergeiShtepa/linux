@@ -142,6 +142,11 @@ static const struct rpn_unary_op rpn_unary_op_dict[] = {
 	{NULL, NULL}
 };
 
+struct substring {
+	char *from;
+	size_t length;
+};
+
 struct rpn_bytecode_state {
 	size_t ops_ofs;
 	size_t data_ofs;
@@ -150,14 +155,14 @@ struct rpn_bytecode_state {
 };
 
 /* searching in two operations build-in dictionary */
-static bool find_buildin_two_op(const char *word, size_t length, u8 *opcode)
+static bool find_buildin_two_op(const struct substring *word, u8 *opcode)
 {
 	const struct rpn_two_op *op = rpn_two_op_dict;
 	u8 inx = 0;
 
 	while (op[inx].name != NULL) {
-		if (length == strlen(op[inx].name))
-			if (strncmp(op[inx].name, word, length) == 0) {
+		if (word->length == strlen(op[inx].name))
+			if (strncmp(op[inx].name, word->from, word->length) == 0) {
 				*opcode = RPN_TWO_OP | inx;
 				return true;
 			}
@@ -168,14 +173,14 @@ static bool find_buildin_two_op(const char *word, size_t length, u8 *opcode)
 }
 
 /* searching in unary operations build-in dictionary */
-static bool find_buildin_unary_op(const char *word, size_t length, u8 *opcode)
+static bool find_buildin_unary_op(const struct substring *word, u8 *opcode)
 {
 	const struct rpn_unary_op *op = rpn_unary_op_dict;
 	u8 inx = 0;
 
 	while (op[inx].name != NULL) {
-		if (length == strlen(op[inx].name))
-			if (strncmp(op[inx].name, word, length) == 0) {
+		if (word->length == strlen(op[inx].name))
+			if (strncmp(op[inx].name, word->from, word->length) == 0) {
 				*opcode = RPN_UNARY_OP | inx;
 				return true;
 			}
@@ -186,14 +191,14 @@ static bool find_buildin_unary_op(const char *word, size_t length, u8 *opcode)
 }
 
 /* searching in extended dictionary*/
-static bool find_ext_op(const char *word, size_t length,
+static bool find_ext_op(const struct substring *word,
 			const struct rpn_ext_op *op_dict, u8 *opcode)
 {
 	size_t inx = 0;
 
 	while (op_dict[inx].name != NULL) {
-		if (length == strlen(op_dict[inx].name))
-			if (strncmp(op_dict[inx].name, word, length) == 0) {
+		if (word->length == strlen(op_dict[inx].name))
+			if (strncmp(op_dict[inx].name, word->from, word->length) == 0) {
 				*opcode = inx;
 				return true;
 			}
@@ -248,19 +253,19 @@ static int rpn_bytecode_append_data(struct rpn_bytecode *bc,
 	return 0;
 }
 
-static inline int rpn_parse_constant(char *word, size_t length, u64 *value)
+static inline int rpn_parse_constant(const struct substring *word, u64 *value)
 {
 	int ret;
 	char *word_str;
 
-	word_str = kmemdup_nul(word, length, GFP_KERNEL);
+	word_str = kmemdup_nul(word->from, word->length, GFP_KERNEL);
 	ret = kstrtou64(word_str, 0, value);
 	kfree(word_str);
 
 	return ret;
 }
 
-static int rpn_parse_word(char *word, size_t length,
+static int rpn_parse_word(const struct substring *word,
 			  const struct rpn_ext_op *ext_op_dict,
 			  struct rpn_bytecode *bc,
 			  struct rpn_bytecode_state *state)
@@ -269,17 +274,17 @@ static int rpn_parse_word(char *word, size_t length,
 	u8 opcode;
 	u64 value;
 
-	if (find_buildin_two_op(word, length, &opcode))
+	if (find_buildin_two_op(word, &opcode))
 		goto append_op;
 
-	if (find_buildin_unary_op(word, length, &opcode))
+	if (find_buildin_unary_op(word, &opcode))
 		goto append_op;
 
-	if (ext_op_dict && find_ext_op(word, length, ext_op_dict, &opcode))
+	if (ext_op_dict && find_ext_op(word, ext_op_dict, &opcode))
 		goto append_op;
 
 	/* parse constant and put to bytecode data segment*/
-	ret = rpn_parse_constant(word, length, &value);
+	ret = rpn_parse_constant(word, &value);
 	if (ret)
 		return ret;
 
@@ -336,32 +341,31 @@ int rpn_parse_expression(char *exp, const struct rpn_ext_op *op_ext_dict,
 			 struct rpn_bytecode *bc)
 {
 	int ret = 0;
-	char *word = NULL;
+	struct substring word = {0};
 	size_t inx = 0;
-	size_t length;
 	struct rpn_bytecode_state state = {0};
 
 	while (exp[inx] != '\0') {
 		if ((exp[inx] != ' ') && (exp[inx] != '\t')) {
-			if (word == NULL)
-				word = &exp[inx];
+			if (word.from == NULL)
+				word.from = exp + inx;
 			++inx;
 			continue;
 		}
 
-		if (word) {
-			length = (size_t)(exp + inx - word);
-			ret = rpn_parse_word(word, length, op_ext_dict, bc, &state);
+		if (word.from) {
+			word.length = (size_t)(exp + inx - word.from);
+			ret = rpn_parse_word(&word, op_ext_dict, bc, &state);
 			if (ret)
 				goto fail;
-			word = NULL;
+			word.from = NULL;
 		}
 		++inx;
 	}
 
-	if (word) {
-		length = (size_t)(exp + inx - word);
-		ret = rpn_parse_word(word, length, op_ext_dict, bc, &state);
+	if (word.from) {
+		word.length = (size_t)(exp + inx - word.from);
+		ret = rpn_parse_word(&word, op_ext_dict, bc, &state);
 		if (ret)
 			goto fail;
 	}
