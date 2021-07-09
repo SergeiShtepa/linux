@@ -1022,13 +1022,12 @@ static inline bool filters_lock(struct bio *bio)
 		bool locked = percpu_down_read_trylock(
 						&bio->bi_bdev->bd_filters_lock);
 
-		if (unlikely(!locked)) {
+		if (unlikely(!locked))
 			bio_wouldblock_error(bio);
-			return false;
-		}
-	} else
-		percpu_down_read(&bio->bi_bdev->bd_filters_lock);
+		return locked;
+	}
 
+	percpu_down_read(&bio->bi_bdev->bd_filters_lock);
 	return true;
 }
 
@@ -1049,7 +1048,7 @@ static int filters_apply(struct bio *bio)
 
 again:
 	status = FLT_ST_PASS;
-	if (!filters_lock(bio))
+	if (unlikely(!filters_lock(bio)))
 		return FLT_ST_COMPLETE;
 	/* Remember the block device that was locked.*/
 	bdev = bio->bi_bdev;
