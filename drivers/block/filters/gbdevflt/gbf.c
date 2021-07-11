@@ -117,13 +117,63 @@ static int gfp_rule_write(struct rpn_stack *stack, void *ctx)
 	return 0;
 };
 
+static int gfp_rule_redirect(struct rpn_stack *stack, void *ctx)
+{
+	int ret;
+	struct bio *bio = ctx;
+	u64 value;
+	struct block_device *bdev;
+
+
+	ret = rpn_stack_pop(stack, &value);
+	if (unlikely(ret))
+		return ret;
+
+	bdev = *(struct block_device **)(value);
+	bio_set_dev(bio, bdev);
+
+	ret = rpn_stack_push(stack, 1);
+	if (unlikely(ret))
+		return ret;
+
+	return 0;
+};
+
 const struct rpn_ext_op gbf_op_dict[] = {
 	{"range", gfp_rule_range},
 	{"owner", gfp_rule_owner},
 	{"tgid", gfp_rule_tgid},
 	{"read", gfp_rule_read},
 	{"write", gfp_rule_write},
-	{NULL, NULL}
+	{"redirect", gfp_rule_redirect},
+	{0}
+};
+
+static int gbd_type_bdev_init(const char* bdev_name, void *pbdev)
+{
+	struct block_device *bdev;
+
+	bdev = blkdev_get_by_path(bdev_name, GBF_BDEV_MODE, NULL);
+	if (IS_ERR(bdev)) {
+		pr_err("Failed to open block device '%s'\n", bdev_name);
+		return PTR_ERR(bdev);
+	}
+
+	*(struct block_device **)pbdev = bdev;
+	return 0;
+}
+
+static void gbd_type_bdev_done(void *pbdev)
+{
+	struct block_device *bdev = *(struct block_device **)pbdev;
+
+	blkdev_put(bdev, GBF_BDEV_MODE);
+}
+
+const struct rpn_ext_type gbf_type_dict[] = {
+	{"bdev", sizeof(struct block_device *),
+		gbd_type_bdev_init, gbd_type_bdev_done },
+	{0}
 };
 
 struct gbf_rule {
@@ -146,8 +196,10 @@ static inline struct gbf_rule *gbf_rule_new(const char *rule_name,
 	strncpy(rule->name, rule_name, GBF_RULE_NAME_LENGTH);
 	rule->bytecode.ops = NULL;
 	rule->bytecode.data = NULL;
+	INIT_LIST_HEAD(&rule->bytecode.ext_data);
 
-	ret = rpn_parse_expression(rule_exp, gbf_op_dict, &rule->bytecode);
+	ret = rpn_parse_expression(rule_exp, gbf_op_dict, gbf_type_dict,
+				   &rule->bytecode);
 	if (ret) {
 		pr_err("Failed to parse rule expression: \"%s\"\n", rule_exp);
 
@@ -495,13 +547,21 @@ static void gbf_cleanup(dev_t dev_id)
 	blkdev_put(bdev, GBF_BDEV_MODE);
 }
 
-static void print_op_dict(const struct rpn_ext_op *op_dict)
+static void print_dicts(const struct rpn_ext_op *op_dict,
+			const struct rpn_ext_type *type_dict)
 {
 	size_t inx = 0;
 
 	pr_info("Extended operations dictionary content:\n");
 	while (op_dict[inx].name != NULL) {
 		pr_info(" %s\n", op_dict[inx].name);
+		inx++;
+	}
+
+	inx = 0;
+	pr_info("Extended type dictionary content:\n");
+	while (type_dict[inx].name != NULL) {
+		pr_info(" %s:%lu\n", type_dict[inx].name, type_dict[inx].size);
 		inx++;
 	}
 }
@@ -517,7 +577,7 @@ static int __init gbf_init(void)
 		return ret;
 	}
 
-	print_op_dict(gbf_op_dict);
+	print_dicts(gbf_op_dict, gbf_type_dict);
 	return ret;
 }
 

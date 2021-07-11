@@ -20,8 +20,10 @@ struct rpn_stack {
 		.bottom = name ##_data + size					\
 	}
 struct rpn_bytecode {
-	u8 *ops;		/* code segment */
-	u64 *data;		/* data segment */
+	u8 *ops;			/* code segment */
+	u64 *data;			/* data segment */
+	struct list_head ext_data;	/* for storing complex typed external */
+					/* data */
 };
 
 static inline int rpn_stack_pop(struct rpn_stack *st, u64 *value)
@@ -61,15 +63,21 @@ struct rpn_ext_op {
 	int (*fn)(struct rpn_stack *stack, void *ctx);
 };
 
+struct rpn_ext_type {
+	const char *name;
+	const size_t size;
+	int (*init)(const char* str, void *pvalue);
+	void (*done)(void *pvalue);
+};
+
 int rpn_parse_expression(char *exp,
 			 const struct rpn_ext_op *op_ext_dict,
+			 const struct rpn_ext_type *type_ext_dict,
 			 struct rpn_bytecode *bc);
 int rpn_execute_bytecode(struct rpn_bytecode bc,
 			 const struct rpn_ext_op *op_ext_dict,
 			 struct rpn_stack *stack,
 			 void *ctx);
-static inline void rpn_release_bytecode(struct rpn_bytecode *bc)
-{
-	kfree(bc->ops);
-};
+void rpn_release_bytecode(struct rpn_bytecode *bc);
+
 #endif

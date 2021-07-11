@@ -154,6 +154,12 @@ struct rpn_bytecode_state {
 	size_t data_len;
 };
 
+struct rpn_ext_object {
+	struct list_head list;
+	const struct rpn_ext_type *type;
+	char value[0];
+};
+
 /* searching in two operations build-in dictionary */
 static bool find_buildin_two_op(const struct substring *word, u8 *opcode)
 {
@@ -197,15 +203,102 @@ static bool find_ext_op(const struct substring *word,
 	size_t inx = 0;
 
 	while (op_dict[inx].name != NULL) {
-		if (word->length == strlen(op_dict[inx].name))
-			if (strncmp(op_dict[inx].name, word->from, word->length) == 0) {
-				*opcode = inx;
-				return true;
-			}
+		if ((word->length == strlen(op_dict[inx].name)) &&
+		    (strncmp(op_dict[inx].name, word->from, word->length) == 0)) {
+			*opcode = inx;
+			return true;
+		}
 		inx++;
 	}
 
 	return false;
+}
+
+static inline struct rpn_ext_object * ext_object_new(
+					const struct rpn_ext_type *type,
+					const char *str_value)
+{
+	int ret;
+	struct rpn_ext_object *object;
+
+	object = kzalloc(sizeof(struct rpn_ext_object) + type->size, GFP_KERNEL);
+	if (!object)
+		return ERR_PTR(-ENOMEM);
+
+	object->type = type;
+	ret = object->type->init(str_value, object->value);
+	if (ret) {
+		kfree(object);
+		return ERR_PTR(ret);
+	}
+
+	return object;
+}
+
+static inline void ext_object_free(struct rpn_ext_object *object)
+{
+	object->type->done(object->value);
+	kfree(object);
+}
+
+static bool find_ext_type(const struct substring *word,
+			  const struct rpn_ext_type *type_dict,
+			  size_t *ptype_index,
+			  struct substring *value_str)
+{
+	bool is_found = false;
+	size_t inx = 0;
+	char *to;
+	struct substring type_name;
+
+	to = strnchr(word->from, word->length, ':');
+	if (!to)
+		return false;
+
+	type_name.from = word->from;
+	type_name.length = to - word->from;
+
+	while (type_dict[inx].name != NULL) {
+		if ((type_name.length == strlen(type_dict[inx].name)) &&
+		    (strncmp(type_dict[inx].name, type_name.from, type_name.length) == 0)) {
+		    	is_found = true;
+		    	break;
+		}
+		inx++;
+	}
+	if (is_found) {
+		value_str->from = to + 1;
+		value_str->length = word->length - type_name.length - 1;
+
+		*ptype_index = inx;
+	}
+	return is_found;
+}
+
+static int rpn_parse_ext_type(struct rpn_bytecode *bc,
+			      const struct rpn_ext_type *type,
+			      struct substring *value_str, u64 *value)
+{
+	int ret = 0;
+	char *str_value = NULL;
+	struct rpn_ext_object *object;
+
+	str_value = kmemdup_nul(value_str->from,
+				value_str->length, GFP_KERNEL);
+	if (!str_value)
+		return -ENOMEM;
+
+	object = ext_object_new(type, str_value);
+	if (IS_ERR(object)) {
+		ret = PTR_ERR(object);
+		goto out;
+	}
+
+	*value = (u64)(object->value);
+	list_add(&object->list, &bc->ext_data);
+out:
+	kfree(str_value);
+	return ret;
 }
 
 static int rpn_bytecode_append_op(struct rpn_bytecode *bc,
@@ -259,6 +352,8 @@ static inline int rpn_parse_constant(const struct substring *word, u64 *value)
 	char *word_str;
 
 	word_str = kmemdup_nul(word->from, word->length, GFP_KERNEL);
+	if (!word_str)
+		return -ENOMEM;
 	ret = kstrtou64(word_str, 0, value);
 	kfree(word_str);
 
@@ -267,12 +362,15 @@ static inline int rpn_parse_constant(const struct substring *word, u64 *value)
 
 static int rpn_parse_word(const struct substring *word,
 			  const struct rpn_ext_op *ext_op_dict,
+			  const struct rpn_ext_type *ext_type_dict,
 			  struct rpn_bytecode *bc,
 			  struct rpn_bytecode_state *state)
 {
 	int ret = 0;
 	u8 opcode;
 	u64 value;
+	size_t type_inx;
+	struct substring value_str;
 
 	if (find_buildin_two_op(word, &opcode))
 		goto append_op;
@@ -283,11 +381,19 @@ static int rpn_parse_word(const struct substring *word,
 	if (ext_op_dict && find_ext_op(word, ext_op_dict, &opcode))
 		goto append_op;
 
-	/* parse constant and put to bytecode data segment*/
-	ret = rpn_parse_constant(word, &value);
-	if (ret)
-		return ret;
+	if (ext_type_dict &&
+	    find_ext_type(word, ext_type_dict, &type_inx, &value_str)) {
+		ret = rpn_parse_ext_type(bc, ext_type_dict + type_inx,
+					 &value_str, &value);
+		if (ret)
+			return ret;
+	} else {
+		ret = rpn_parse_constant(word, &value);
+		if (ret)
+			return ret;
+	}
 
+	/* put value to bytecode data segment */
 	ret = rpn_bytecode_append_data(bc, state, value);
 	if (ret)
 		return ret;
@@ -337,7 +443,9 @@ static int combine_segments(struct rpn_bytecode *bc,
  * If the expression was not parsed correctly, the function returns
  * an error code.
  */
-int rpn_parse_expression(char *exp, const struct rpn_ext_op *op_ext_dict,
+int rpn_parse_expression(char *exp,
+			 const struct rpn_ext_op *op_ext_dict,
+			 const struct rpn_ext_type *type_ext_dict,
 			 struct rpn_bytecode *bc)
 {
 	int ret = 0;
@@ -355,7 +463,8 @@ int rpn_parse_expression(char *exp, const struct rpn_ext_op *op_ext_dict,
 
 		if (word.from) {
 			word.length = (size_t)(exp + inx - word.from);
-			ret = rpn_parse_word(&word, op_ext_dict, bc, &state);
+			ret = rpn_parse_word(&word, op_ext_dict, type_ext_dict,
+					     bc, &state);
 			if (ret)
 				goto fail;
 			word.from = NULL;
@@ -365,7 +474,8 @@ int rpn_parse_expression(char *exp, const struct rpn_ext_op *op_ext_dict,
 
 	if (word.from) {
 		word.length = (size_t)(exp + inx - word.from);
-		ret = rpn_parse_word(&word, op_ext_dict, bc, &state);
+		ret = rpn_parse_word(&word, op_ext_dict, type_ext_dict,
+				     bc, &state);
 		if (ret)
 			goto fail;
 	}
@@ -466,4 +576,17 @@ next_opcode:
 			return ret;
 	}
 	goto next_opcode;
+}
+
+void rpn_release_bytecode(struct rpn_bytecode *bc)
+{
+	kfree(bc->ops);
+
+	while (!list_empty(&bc->ext_data)) {
+		struct rpn_ext_object *object = list_first_entry(
+				&bc->ext_data, struct rpn_ext_object, list);
+
+		list_del(&object->list);
+		ext_object_free(object);
+	}
 }
