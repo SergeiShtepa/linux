@@ -60,7 +60,7 @@ void __exit blk_snap_exit(void)
 	snapstore_device_done();
 	snapstore_done();
 
-	tracker_done();
+	//tracker_done();
 	tracking_done();
 
 	snapimage_done();

@@ -5,6 +5,21 @@
 #include "blk_util.h"
 #include "params.h"
 
+
+void tracker_submit_bio_cb(struct tracker *tracker, struct bio *bio)
+{
+	sector_t sectStart = bio->bi_iter.bi_sector;
+	sector_t sectCount = bio_sectors(bio);
+
+	if (atomic_read(&tracker->is_captured))
+		snapstore_device_cow(tracker->snapstore_device, sectStart, sectCount);
+
+	if (tracker_cbt_bitmap_lock(tracker)) {
+		tracker_cbt_bitmap_set(tracker, sectStart, sectCount);
+		tracker_cbt_bitmap_unlock(tracker);
+	}
+}
+/*
 LIST_HEAD(trackers);
 DEFINE_RWLOCK(trackers_lock);
 
@@ -63,7 +78,7 @@ int tracker_find_by_dev_id(dev_t dev_id, struct tracker **ptracker)
 
 	return result;
 }
-
+*/
 int tracker_enum_cbt_info(int max_count, struct cbt_info_s *p_cbt_info, int *p_count)
 {
 	int result = 0;
@@ -158,6 +173,37 @@ static int blk_freeze_bdev(dev_t dev_id, struct block_device *device,
 	return 0;
 }
 
+int _tracker_create(struct tracker *tracker, void *filter)
+{
+	int result = 0;
+	unsigned int sect_in_block_degree;
+	sector_t capacity;
+	struct super_block *superblock = NULL;
+
+	//result = blk_dev_open(tracker->original_dev_id, &tracker->target_dev);
+	//if (result != 0)
+	//	return ENODEV;
+
+	pr_info("Create tracker for device [%d:%d]. Capacity 0x%llx sectors\n",
+		MAJOR(tracker->original_dev_id), MINOR(tracker->original_dev_id),
+		(unsigned long long)part_nr_sects_read(tracker->target_dev->bd_part));
+
+	sect_in_block_degree = get_change_tracking_block_size_pow() - SECTOR_SHIFT;
+	capacity = part_nr_sects_read(tracker->target_dev->bd_part);
+
+	tracker->cbt_map = cbt_map_create(sect_in_block_degree, capacity);
+	if (tracker->cbt_map == NULL) {
+		pr_err("Failed to create tracker for device [%d:%d]\n",
+		       MAJOR(tracker->original_dev_id), MINOR(tracker->original_dev_id));
+		tracker_remove(tracker);
+		return -ENOMEM;
+	}
+
+
+
+	return 0;
+}
+/*
 int _tracker_create(struct tracker *tracker, void *filter, bool attach_filter)
 {
 	int result = 0;
@@ -198,8 +244,9 @@ int _tracker_create(struct tracker *tracker, void *filter, bool attach_filter)
 
 	return 0;
 }
-
-int tracker_create(dev_t dev_id, void *filter, struct tracker **ptracker)
+*/
+/*
+int tracker_create(struct block_device *bdev, struct tracker **ptracker)
 {
 	int ret;
 	struct tracker *tracker = NULL;
@@ -231,7 +278,63 @@ int tracker_create(dev_t dev_id, void *filter, struct tracker **ptracker)
 
 	return ret;
 }
+*/
 
+void __tracker_free(struct kref *kref)
+{
+	cbt_map_destroy(tracker->cbt_map);
+	kfree(container_of(kref, struct tracker, refcount));
+}
+
+struct tracker *tracker_new(struct block_device *bdev, unsigned long long snapshot_id)
+{
+	int ret;
+	sector_t capacity;
+	unsigned int sect_in_block_degree;
+	struct tracker *tracker = NULL;
+
+	tracker = kzalloc(sizeof(struct tracker), GFP_KERNEL);
+	if (unlikely(!tracker))
+		return NULL;
+
+	kref_init(&tracker->refcount);
+	atomic_set(&tracker->is_captured, 0);
+	tracker->original_dev_id = bdev->bd_dev;
+	tracker->snapshot_id = snapshot_id;
+
+	pr_info("Create tracker for device [%d:%d]\n",
+		MAJOR(tracker->original_dev_id),
+		MINOR(tracker->original_dev_id));
+
+	sect_in_block_degree = get_change_tracking_block_size_pow() - SECTOR_SHIFT;
+	capacity = part_nr_sects_read(bdev->bd_part);
+	tracker->cbt_map = cbt_map_create(sect_in_block_degree, capacity);
+	if (tracker->cbt_map == NULL) {
+		pr_err("Failed to create tracker for device [%d:%d]\n",
+		       MAJOR(tracker->original_dev_id),
+		       MINOR(tracker->original_dev_id));
+		kref_put(&tracker->refcount, __tracker_free);
+		return NULL;
+	}
+
+	return tracker;
+}
+
+bool tracker_renew_needed(struct tracker *tracker, struct block_device *bdev)
+{
+	if (!tracker->cbt_map->active) {
+		pr_warn("Nonactive CBT table detected. CBT fault\n");
+		return true;
+	}
+
+	if (tracker->cbt_map->device_capacity != part_nr_sects_read(bdev->bd_part)) {
+		pr_warn("Device resize detected. CBT fault\n");
+		return true;
+	}
+
+	return false;
+}
+#if 0
 void _tracker_remove(struct tracker *tracker, bool detach_filter)
 {
 	struct super_block *superblock = NULL;
@@ -267,6 +370,7 @@ void tracker_remove(struct tracker *tracker)
 
 	kfree(tracker);
 }
+#endif
 
 void tracker_remove_all(void)
 {
@@ -334,11 +438,21 @@ int _tracker_capture_snapshot(struct tracker *tracker)
 {
 	int result = 0;
 
-	result = defer_io_create(tracker->original_dev_id, tracker->target_dev, &tracker->defer_io);
+	/*result = defer_io_create(tracker->original_dev_id, tracker->target_dev, &tracker->defer_io);
 	if (result != 0) {
 		pr_err("Failed to create defer IO processor\n");
 		return result;
+	}*/
+	snapstore_device = snapstore_device_find_by_dev_id(dev_id);
+	if (snapstore_device == NULL) {
+		pr_err("Unable to create defer IO processor: failed to initialize snapshot data for device [%d:%d]\n",
+		       MAJOR(dev_id), MINOR(dev_id));
+
+		return -ENODATA;
 	}
+
+	tracker->snapstore_device = snapstore_device_get_resource(snapstore_device);
+	result =
 
 	atomic_set(&tracker->is_captured, true);
 
@@ -355,11 +469,55 @@ int _tracker_capture_snapshot(struct tracker *tracker)
 	return result;
 }
 
+struct capture_ctx {
+	struct tracker *tracker;
+	struct block_device *orig_bdev;
+}
+
 int tracker_capture_snapshot(dev_t *dev_id_set, int dev_id_set_size)
 {
 	int result = 0;
 	int inx = 0;
+	unsigned int curr_flags;
+	struct capture_ctx *capture_ctx_set;
 
+	capture_ctx_set = kcalloc(dev_id_set_size, sizeof(struct capture_ctx), GFP_KERNEL);
+	if (!capture_ctx_set)
+		return -ENOMEM;
+
+	/* Open all devices in snapshot set */
+	for (inx = 0; inx < dev_id_set_size; ++inx) {
+		struct block_device *bdev;
+
+		bdev = blkdev_get_by_dev(dev_id, TRACKER_BDEV_MODE, NULL);
+		if (IS_ERR(bdev)) {
+			pr_err("Unable to capture snapshot: cannot open device [%d:%d]\n",
+			       MAJOR(dev_id), MINOR(dev_id));
+			goto fail_open;
+		}
+
+		capture_ctx_set[inx].orig_bdev = bdev;
+	}
+
+
+	/* Freeze all devices in snapshot */
+	for (inx = 0; inx < dev_id_set_size; ++inx) {
+		result = freeze_bdev(capture_ctx_set[inx].orig_bdev);
+		if (result) {
+			pr_err("Unable to capture snapshot: cannot open device [%d:%d]\n",
+			       MAJOR(dev_id), MINOR(dev_id));
+			goto fail_freeze;
+		}
+
+	}
+
+	/* Lock all devices in snapshot */
+	for (inx = 0; inx < dev_id_set_size; ++inx) {
+		bdev_filter_lock(capture_ctx_set[inx].orig_bdev);
+
+	curr_flags = memalloc_noio_save();
+
+	/* Freeze and lock all devices in snapshot */
 	for (inx = 0; inx < dev_id_set_size; ++inx) {
 		struct super_block *superblock = NULL;
 		struct tracker *tracker = NULL;
@@ -411,6 +569,18 @@ int tracker_capture_snapshot(dev_t *dev_id_set, int dev_id_set_size)
 
 		tracker_release_snapshot(dev_id_set, dev_id_set_size);
 	}
+
+	memalloc_noio_restore(curr_flags);
+fail_freeze:
+	for (inx = 0; inx < dev_id_set_size; ++inx)
+		thaw_bdev(bdev);
+fail_open:
+	for (inx = 0; inx < dev_id_set_size; ++inx) {
+		if (capture_ctx_set[inx].orig_bdev)
+			blkdev_put(bdev, TRACKER_BDEV_MODE);
+	}
+	kfree(capture_ctx_set);
+
 	return result;
 }
 

@@ -1986,46 +1986,6 @@ static inline struct blk_filter *bdev_filter_find_by_name(
 	return NULL;
 }
 
-#define FLT_BDEV_MODE (FMODE_READ | FMODE_WRITE)
-
-/*
- * bdev_filter_lock - Locks the processing of I/O requests for block device
- * @dev_id: block device id
- *
- * Opens the block device and locks the execution of the submit_bio_noacct()
- * function for it.
- * To avoid calling a deadlock, do not call I/O operations after this lock.
- * To do this, using the memalloc_noio_save() function can be useful.
- *
- * If successful, returns a pointer to the block device structure.
- * Returns an error code when an error occurs.
- */
-struct block_device *bdev_filter_lock(dev_t dev_id)
-{
-	struct block_device *bdev;
-
-	bdev = blkdev_get_by_dev(dev_id, FLT_BDEV_MODE, NULL);
-	if (!IS_ERR(bdev))
-		percpu_down_write(&bdev->bd_filters_lock);
-
-	return bdev;
-}
-EXPORT_SYMBOL_GPL(bdev_filter_lock);
-
-/*
- * bdev_filter_lock - Unlocks the processing of I/O requests for block device
- * @bdev: pointer to block device structure
- *
- * The submit_bio_noacct() function can be continued. The pointer to the block
- * device structure can no longer be used.
- */
-void bdev_filter_unlock(struct block_device *bdev)
-{
-	percpu_up_write(&bdev->bd_filters_lock);
-	blkdev_put(bdev, FLT_BDEV_MODE);
-}
-EXPORT_SYMBOL_GPL(bdev_filter_unlock);
-
 /**
  * bdev_filter_find_ctx - Find filters context
  * @bdev: block device

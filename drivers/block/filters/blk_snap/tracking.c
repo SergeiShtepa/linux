@@ -10,11 +10,12 @@
 #include <linux/blk-filter.h>
 
 /* pointer to block layer filter */
-void *filter;
+//void *filter;
 
 /*
- * _tracking_submit_bio() - Intercept bio by block io layer filter
+ * tracking_submit_bio() - Intercept bio by block io layer filter
  */
+#if 0
 static void _tracking_submit_bio(struct bio *bio, void *filter_data)
 {
 	int res;
@@ -90,111 +91,126 @@ struct blk_filter_ops filter_ops = {
 	.filter_bio = _tracking_submit_bio,
 	.part_add = _tracking_part_add,
 	.part_del = _tracking_part_del };
-
+#endif
 
 
 int tracking_init(void)
 {
-	filter = blk_filter_register(&filter_ops);
-	if (!filter)
-		return -ENOMEM;
 	return 0;
 }
 
 void tracking_done(void)
 {
-	if (filter) {
-		blk_filter_unregister(filter);
-		filter = NULL;
-	}
+
 }
 
-static int _add_already_tracked(dev_t dev_id, unsigned long long snapshot_id,
-				struct tracker *tracker)
+static int tracking_submit_bio_cb(struct bio *bio, void *ctx)
 {
-	int result = 0;
-	bool cbt_reset_needed = false;
+	struct tracker *tracker = ctx;
+	unsigned int curr_flags;
+	struct bio_list bio_list_on_stack[2];
+	struct bio *new_bio;
 
-	if ((snapshot_id != 0ull) && (tracker->snapshot_id == 0ull))
-		tracker->snapshot_id = snapshot_id; // set new snapshot id
+	if (bio_data_dir(bio) != WRITE)
+		return FLT_ST_PASS;
 
-	if (tracker->cbt_map == NULL) {
-		unsigned int sect_in_block_degree =
-			get_change_tracking_block_size_pow() - SECTOR_SHIFT;
-		tracker->cbt_map = cbt_map_create(sect_in_block_degree - SECTOR_SHIFT,
-						  part_nr_sects_read(tracker->target_dev->bd_part));
-		if (tracker->cbt_map == NULL)
-			return -ENOMEM;
+	if ((bio->bi_end_io == tracker_cow_end_io))
+		return FLT_ST_PASS;
 
-		// skip snapshot id
-		tracker->snapshot_id = snapshot_id;
-		return 0;
-	}
+	/*
+	 * All memory allocations will be without IO to avoid blocking
+	 * the process when allocating memory.
+	 */
+	curr_flags = memalloc_noio_save();
+	/*
+	 * If the snapshot is held, the tracker appends initiates the COW
+	 * algorithm, adding read bio requests for the overwritten data.
+	 * To avoid loading the stack with a recursive calling of submit_bio()
+	 * function, current->bio_list is used.
+	 */
+	bio_list_init(&bio_list_on_stack[0]);
+	current->bio_list = bio_list_on_stack;
 
-	if (!tracker->cbt_map->active) {
-		cbt_reset_needed = true;
-		pr_warn("Nonactive CBT table detected. CBT fault\n");
-	}
+	tracker_submit_bio_cb(tracker, bio);
+	while ((new_bio = bio_list_pop(&bio_list_on_stack[0])))
+		submit_bio_noacct(new_bio);
 
-	if (tracker->cbt_map->device_capacity != part_nr_sects_read(tracker->target_dev->bd_part)) {
-		cbt_reset_needed = true;
-		pr_warn("Device resize detected. CBT fault\n");
-	}
+	current->bio_list = NULL;
+	memalloc_noio_restore(curr_flags);
 
-	if (!cbt_reset_needed)
-		return 0;
-
-	_tracker_remove(tracker, true);
-
-	result = _tracker_create(tracker, filter, true);
-	if (result != 0) {
-		pr_err("Failed to create tracker. errno=%d\n", result);
-		return result;
-	}
-
-	tracker->snapshot_id = snapshot_id;
-
-	return 0;
+	return FLT_ST_PASS;
 }
 
-static int _create_new_tracker(dev_t dev_id, unsigned long long snapshot_id)
+static void tracking_detach_cb(void *ctx)
 {
-	int result;
-	struct tracker *tracker = NULL;
+	struct tracker *tracker = ctx;
+	unsigned int curr_flags;
 
-	result = tracker_create(dev_id, filter, &tracker);
-	if (result != 0) {
-		pr_err("Failed to create tracker. errno=%d\n", result);
-		return result;
-	}
-
-	tracker->snapshot_id = snapshot_id;
-
-	return 0;
+	/*
+	 * In the process of releasing resources, memory is unlikely
+	 * to be allocated, but who knows...
+	 */
+	curr_flags = memalloc_noio_save();
+	tracker_put(tracker);
+	memalloc_noio_restore(curr_flags);
 }
 
+static const struct filter_operations tracking_fops = {
+	.submit_bio_cb = tracking_submit_bio_cb,
+	.detach_cb = tracking_detach_cb
+};
 
 int tracking_add(dev_t dev_id, unsigned long long snapshot_id)
 {
 	int result;
+	struct block_device *bdev;
+	unsigned int curr_flags;
 	struct tracker *tracker = NULL;
 
 	pr_info("Adding device [%d:%d] under tracking\n", MAJOR(dev_id), MINOR(dev_id));
+	bdev = blkdev_get_by_dev(dev_id, TRACKER_BDEV_MODE, NULL);
+	if (IS_ERR(bdev)) {
+		pr_err("Failed to lock device '%d:%d'\n",
+			MAJOR(dev_id), MINOR(dev_id));
+		return PTR_ERR(bdev);
+	}
+	bdev_filter_lock(bdev);
+	curr_flags = memalloc_noio_save();
 
-	result = tracker_find_by_dev_id(dev_id, &tracker);
-	if (result == 0) {
+	tracker = bdev_filter_find_ctx(bdev, KBUILD_MODNAME);
+	if (!IS_ERR(tracker)) {
 		//pr_info("Device [%d:%d] is already tracked\n", MAJOR(dev_id), MINOR(dev_id));
-		result = _add_already_tracked(dev_id, snapshot_id, tracker);
-		if (result == 0)
+		if (tracker_renew_needed(tracker, bdev)) {
+			result = bdev_filter_del(bdev, KBUILD_MODNAME);
+			tracker = NULL;
+		} else {
 			result = -EALREADY;
-	} else if (-ENODATA == result)
-		result = _create_new_tracker(dev_id, snapshot_id);
-	else {
-		pr_err("Unable to add device [%d:%d] under tracking\n", MAJOR(dev_id),
-			MINOR(dev_id));
-		pr_err("Invalid trackers container. errno=%d\n", result);
+			goto out;
+		}
+	} else if (PTR_ERR(tracker) != -ENOENT) {
+		pr_err("Unable to add device [%d:%d] under tracking\n",
+			MAJOR(dev_id), MINOR(dev_id));
+		result = PTR_ERR(tracker);
+		goto out;
 	}
 
+	tracker = tracker_new(bdev, snapshot_id);
+	if (!tracker) {
+		pr_err("Failed to allocate tracker.\n");
+		result = -ENOMEM;
+		goto out;
+	}
+
+	result = bdev_filter_add(bdev, KBUILD_MODNAME, &tracking_fops, tracker);
+	if (result) {
+		tracker_put(tracker);
+		goto out;
+	}
+
+out:
+	memalloc_noio_restore(curr_flags);
+	bdev_filter_unlock(bdev);
+	blkdev_put(bdev, TRACKER_BDEV_MODE);
 	return result;
 }
 
@@ -205,29 +221,19 @@ int tracking_remove(dev_t dev_id)
 
 	pr_info("Removing device [%d:%d] from tracking\n", MAJOR(dev_id), MINOR(dev_id));
 
-	result = tracker_find_by_dev_id(dev_id, &tracker);
-	if (result != 0) {
-		pr_err("Unable to remove device [%d:%d] from tracking: ",
-		       MAJOR(dev_id), MINOR(dev_id));
-
-		if (-ENODATA == result)
-			pr_err("tracker not found\n");
-		else
-			pr_err("tracker container failed. errno=%d\n", result);
-
-		return result;
+	bdev = blkdev_get_by_dev(dev_id, TRACKER_BDEV_MODE, NULL);
+	if (IS_ERR(bdev)) {
+		pr_err("Failed to lock device '%d:%d'\n",
+			MAJOR(dev_id), MINOR(dev_id));
+		return PTR_ERR(bdev);
 	}
+	bdev_filter_lock(bdev);
 
-	if (tracker->snapshot_id != 0ull) {
-		pr_err("Unable to remove device [%d:%d] from tracking: ",
-		       MAJOR(dev_id), MINOR(dev_id));
-		pr_err("snapshot [0x%llx] already exist\n", tracker->snapshot_id);
-		return -EBUSY;
-	}
+	result = bdev_filter_del(bdev, KBUILD_MODNAME);
 
-	tracker_remove(tracker);
-
-	return 0;
+	bdev_filter_unlock(bdev);
+	blkdev_put(bdev, TRACKER_BDEV_MODE);
+	return result;
 }
 
 int tracking_collect(int max_count, struct cbt_info_s *p_cbt_info, int *p_count)
