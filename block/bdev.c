@@ -427,6 +427,7 @@ static void init_once(void *data)
 
 static void bdev_evict_inode(struct inode *inode)
 {
+	bdev_filter_detach(I_BDEV(inode));
 	truncate_inode_pages_final(&inode->i_data);
 	invalidate_inode_buffers(inode); /* is it needed here? */
 	clear_inode(inode);
@@ -502,6 +503,7 @@ struct block_device *bdev_alloc(struct gendisk *disk, u8 partno)
 		return NULL;
 	}
 	bdev->bd_disk = disk;
+	bdev->bd_filter = NULL;
 	return bdev;
 }
 
@@ -1092,3 +1094,74 @@ void bdev_statx_dioalign(struct inode *inode, struct kstat *stat)
 
 	blkdev_put_no_open(bdev);
 }
+
+/**
+ * bdev_filter_attach - Attach a filter to the original block device.
+ * @bdev:
+ *	Block device.
+ * @flt:
+ *	Pointer to the filter structure.
+ *
+ * Before adding a filter, it is necessary to initialize &struct bdev_filter.
+ *
+ * The bdev_filter_detach() function allows to detach the filter from the block
+ * device.
+ *
+ * Return:
+ * 0 - OK
+ * -EALREADY - a filter with this name already exists
+ */
+int bdev_filter_attach(struct block_device *bdev,
+				     struct bdev_filter *flt)
+{
+	int ret = 0;
+
+	blk_mq_freeze_queue(bdev->bd_queue);
+	blk_mq_quiesce_queue(bdev->bd_queue);
+
+	if (bdev->bd_filter)
+		ret = -EALREADY;
+	else
+		bdev->bd_filter = flt;
+
+	blk_mq_unquiesce_queue(bdev->bd_queue);
+	blk_mq_unfreeze_queue(bdev->bd_queue);
+
+	return ret;
+}
+EXPORT_SYMBOL(bdev_filter_attach);
+
+/**
+ * bdev_filter_detach - Detach a filter from the block device.
+ * @bdev:
+ *	Block device.
+ *
+ * The filter should be added using the bdev_filter_attach() function.
+ *
+ * Return:
+ * 0 - OK
+ * -ENOENT - the filter was not found in the linked list
+ */
+int bdev_filter_detach(struct block_device *bdev)
+{
+	int ret = 0;
+	struct bdev_filter *flt = NULL;
+
+	blk_mq_freeze_queue(bdev->bd_queue);
+	blk_mq_quiesce_queue(bdev->bd_queue);
+
+	flt = bdev->bd_filter;
+	if (flt)
+		bdev->bd_filter = NULL;
+	else
+		ret = -ENOENT;
+
+	blk_mq_unquiesce_queue(bdev->bd_queue);
+	blk_mq_unfreeze_queue(bdev->bd_queue);
+
+	if (flt)
+		bdev_filter_put(flt);
+
+	return ret;
+}
+EXPORT_SYMBOL(bdev_filter_detach);
