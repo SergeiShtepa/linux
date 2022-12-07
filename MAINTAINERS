@@ -3659,7 +3659,7 @@ BLOCK DEVICE FILTERING MECHANISM
 M:	sergei.shtepa@veeam.com
 L:	linux-block@vger.kernel.org
 S:	Supported
-F:	Documentation/block/blkfiter.rst
+F:	Documentation/block/blkfilter.rst
 
 BLOCK DEVICE SNAPSHOTS MODULE
 M:	sergei.shtepa@veeam.com
