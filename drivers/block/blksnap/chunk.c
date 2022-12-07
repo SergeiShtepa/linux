@@ -224,10 +224,8 @@ void chunk_free(struct chunk *chunk)
 	kfree(chunk);
 }
 
-/**
- * chunk_async_store_diff() - Starts asynchronous storing of a chunk to the
- *	difference storage.
- *
+/*
+ * Starts asynchronous storing of a chunk to the  difference storage.
  */
 int chunk_async_store_diff(struct chunk *chunk, bool is_nowait)
 {
@@ -262,9 +260,8 @@ int chunk_async_store_diff(struct chunk *chunk, bool is_nowait)
 	return ret;
 }
 
-/**
- * chunk_async_load_orig() - Starts asynchronous loading of a chunk from
- *	the original block device.
+/*
+ * Starts asynchronous loading of a chunk from the original block device.
  */
 int chunk_async_load_orig(struct chunk *chunk, const bool is_nowait)
 {
@@ -299,9 +296,8 @@ int chunk_async_load_orig(struct chunk *chunk, const bool is_nowait)
 	return ret;
 }
 
-/**
- * chunk_load_orig() - Performs synchronous loading of a chunk from the
- *	original block device.
+/*
+ * Performs synchronous loading of a chunk from the original block device.
  */
 int chunk_load_orig(struct chunk *chunk)
 {
@@ -326,9 +322,8 @@ int chunk_load_orig(struct chunk *chunk)
 	return ret;
 }
 
-/**
- * chunk_load_diff() - Performs synchronous loading of a chunk from the
- *	difference storage.
+/*
+ * Performs synchronous loading of a chunk from the difference storage.
  */
 int chunk_load_diff(struct chunk *chunk)
 {
