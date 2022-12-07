@@ -230,7 +230,7 @@ struct snapimage *snapimage_create(struct diff_area *diff_area,
 		goto fail_cleanup_disk;
 	}
 
-	wake_up_process(snapimage->submit_task);
+	wake_up_process(snapimage->worker);
 
 	return snapimage;
 

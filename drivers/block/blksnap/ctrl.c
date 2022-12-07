@@ -290,7 +290,6 @@ static int ioctl_snapshot_wait_event(unsigned long arg)
 	karg = kzalloc(sizeof(struct blk_snap_snapshot_event), GFP_KERNEL);
 	if (!karg)
 		return -ENOMEM;
-	memory_object_inc(memory_object_blk_snap_snapshot_event);
 
 	/* Copy only snapshot ID */
 	if (copy_from_user(&karg->id,
