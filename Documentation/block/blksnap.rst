@@ -135,8 +135,8 @@ overwritten and stores them in the difference storage.  When reading from
 a snapshot image, reading is performed either from the original device or
 from the difference storage.
 
-Change tracker
---------------
+Change tracking
+---------------
 
 A change tracker map is created for each block device.  One byte
 of this map corresponds to one block.  The block size is set by the

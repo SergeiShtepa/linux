@@ -179,7 +179,7 @@ static void tracker_release_work(struct work_struct *work)
 	} while (tracker);
 }
 
-static void tracker_detach_cb(struct kref *kref)
+static void tracker_release_cb(struct kref *kref)
 {
 	struct bdev_filter *flt = container_of(kref, struct bdev_filter, kref);
 	struct tracker *tracker = container_of(flt, struct tracker, flt);
@@ -193,7 +193,7 @@ static void tracker_detach_cb(struct kref *kref)
 
 static const struct bdev_filter_operations tracker_fops = {
 	.submit_bio_cb = tracker_submit_bio_cb,
-	.detach_cb = tracker_detach_cb
+	.release_cb = tracker_release_cb
 };
 
 static int tracker_filter_attach(struct block_device *bdev,

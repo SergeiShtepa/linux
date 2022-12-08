@@ -1550,18 +1550,19 @@ struct io_comp_batch {
 #define DEFINE_IO_COMP_BATCH(name)	struct io_comp_batch name = { }
 
 /**
- * struct bdev_filter_operations - List of callback functions for the filter.
+ * struct bdev_filter_operations - Callback functions for the filter.
  *
  * @submit_bio_cb:
- *	A callback function for bio processing.
- * @detach_cb:
+ *	A callback function for I/O unit handling.
+ * @release_cb:
  *	A callback function to disable the filter when removing a block
  *	device from the system.
  */
 struct bdev_filter_operations {
 	bool (*submit_bio_cb)(struct bio *bio);
-	void (*detach_cb)(struct kref *kref);
+	void (*release_cb)(struct kref *kref);
 };
+
 /**
  * struct bdev_filter - Block device filter.
  *
@@ -1575,6 +1576,7 @@ struct bdev_filter {
 	struct kref kref;
 	const struct bdev_filter_operations *fops;
 };
+
 /**
  * bdev_filter_init - Initialization of the filter structure.
  * @flt:
@@ -1590,9 +1592,12 @@ static inline void bdev_filter_init(struct bdev_filter *flt,
 };
 
 /**
- * bdev_filter_get - Incremnent reference counter.
+ * bdev_filter_get - Increment reference counter.
  * @flt:
  *	Pointer to the &struct bdev_filter.
+ *
+ * Allows to ensure that the filter will not be released as long as there are
+ * references to it.
  */
 static inline void bdev_filter_get(struct bdev_filter *flt)
 {
@@ -1600,13 +1605,15 @@ static inline void bdev_filter_get(struct bdev_filter *flt)
 }
 
 /**
- * bdev_filter_put - Decrement reference counter and detach filter.
+ * bdev_filter_put - Decrement reference counter.
  * @flt:
  *	Pointer to the &struct bdev_filter.
+ *
+ * Decrement the reference counter, and if 0, release filter.
  */
 static inline void bdev_filter_put(struct bdev_filter *flt)
 {
-	kref_put(&flt->kref, flt->fops->detach_cb);
+	kref_put(&flt->kref, flt->fops->release_cb);
 };
 
 int bdev_filter_attach(struct block_device *bdev, struct bdev_filter *flt);

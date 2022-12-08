@@ -1096,20 +1096,19 @@ void bdev_statx_dioalign(struct inode *inode, struct kstat *stat)
 }
 
 /**
- * bdev_filter_attach - Attach a filter to the original block device.
+ * bdev_filter_attach - Attach the filter to the original block device.
  * @bdev:
  *	Block device.
  * @flt:
- *	Pointer to the filter structure.
+ *	Filter that needs to be attached to the block device.
  *
- * Before adding a filter, it is necessary to initialize &struct bdev_filter.
+ * Before adding a filter, it is necessary to initialize &struct bdev_filter
+ * using a bdev_filter_init() function.
  *
  * The bdev_filter_detach() function allows to detach the filter from the block
  * device.
  *
- * Return:
- * 0 - OK
- * -EALREADY - a filter with this name already exists
+ * Return: 0 if succeeded, or -EALREADY if the filter already exists.
  */
 int bdev_filter_attach(struct block_device *bdev,
 				     struct bdev_filter *flt)
@@ -1132,15 +1131,13 @@ int bdev_filter_attach(struct block_device *bdev,
 EXPORT_SYMBOL(bdev_filter_attach);
 
 /**
- * bdev_filter_detach - Detach a filter from the block device.
+ * bdev_filter_detach - Detach the filter from the block device.
  * @bdev:
  *	Block device.
  *
  * The filter should be added using the bdev_filter_attach() function.
  *
- * Return:
- * 0 - OK
- * -ENOENT - the filter was not found in the linked list
+ * Return: 0 if succeeded, or -ENOENT if the filter was not found.
  */
 int bdev_filter_detach(struct block_device *bdev)
 {
