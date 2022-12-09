@@ -678,9 +678,24 @@ void submit_bio_noacct_nocheck(struct bio *bio)
 	 * to collect a list of requests submited by a ->submit_bio method while
 	 * it is active, and then process them after it returned.
 	 */
-	if (current->bio_list)
+	if (current->bio_list) {
 		bio_list_add(&current->bio_list[0], bio);
-	else if (!bio->bi_bdev->bd_disk->fops->submit_bio)
+		return;
+	}
+
+	if (bio->bi_bdev->bd_filter && !bio_flagged(bio, BIO_FILTERED)) {
+		bool pass;
+
+		pass = bio->bi_bdev->bd_filter->fops->submit_bio_cb(bio);
+		bio_set_flag(bio, BIO_FILTERED);
+		if (!pass) {
+			bio->bi_status = BLK_STS_OK;
+			bio_endio(bio);
+			return;
+		}
+	}
+
+	if (!bio->bi_bdev->bd_disk->fops->submit_bio)
 		__submit_bio_noacct_mq(bio);
 	else
 		__submit_bio_noacct(bio);
