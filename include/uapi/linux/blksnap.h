@@ -14,14 +14,14 @@ enum blk_snap_ioctl {
 	 */
 	blk_snap_ioctl_version,
 	/*
-	 * Change tracking Contols
+	 * Change tracking Controls
 	 */
 	blk_snap_ioctl_tracker_remove,
 	blk_snap_ioctl_tracker_collect,
 	blk_snap_ioctl_tracker_read_cbt_map,
 	blk_snap_ioctl_tracker_mark_dirty_blocks,
 	/*
-	 * Snapshot contols
+	 * Snapshot controls
 	 */
 	blk_snap_ioctl_snapshot_create,
 	blk_snap_ioctl_snapshot_destroy,
