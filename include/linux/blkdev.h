@@ -1529,4 +1529,47 @@ struct io_comp_batch {
 
 #define DEFINE_IO_COMP_BATCH(name)	struct io_comp_batch name = { }
 
+/**
+ * struct blkfilter_operations - Callback functions for the filter.
+ *
+ * @submit_bio:
+ *	A callback function for I/O unit handling.
+ * @release:
+ *	A callback function to disable the filter when removing a block
+ *	device from the system.
+ */
+struct blkfilter_operations {
+	int (*attach)(struct block_device *bdev, bool is_frozen);
+	void (*detach)(struct block_device *bdev, bool is_frozen);
+	int (*ctl)(struct block_device *bdev, const unsigned int cmd,
+		   __u8 __user *buf, __u32 *plen);
+	bool (*submit_bio)(struct bio *bio);
+};
+
+/**
+ * struct blkfilter - Block device filter.
+ *
+ * @kref:
+ *	Kernel reference counter.
+ * @fops:
+ *	The pointer to &struct blkfilter_operations with callback
+ *	functions for the filter.
+ */
+struct blkfilter {
+	refcount_t refcount;
+	struct completion can_unreg;
+	struct list_head link;
+	const char *name;
+	const struct blkfilter_operations *fops;
+};
+
+int blkfilter_attach(struct block_device *bdev, const char *name);
+int blkfilter_detach(struct block_device *bdev, const char *name);
+int blkfilter_control(struct block_device *bdev, const char *name,
+		      const unsigned int cmd, __u8 __user *buf, __u32 *plen);
+
+int blkfilter_register(const char *name,
+		       const struct blkfilter_operations *fops);
+void blkfilter_unregister(const char *name);
+
 #endif /* _LINUX_BLKDEV_H */
