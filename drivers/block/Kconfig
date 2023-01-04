@@ -416,4 +416,6 @@ config BLK_DEV_UBLK
 
 source "drivers/block/rnbd/Kconfig"
 
+source "drivers/block/blksnap/Kconfig"
+
 endif # BLK_DEV
