@@ -462,6 +462,24 @@ static int blkdev_bszset(struct block_device *bdev, fmode_t mode,
 	return ret;
 }
 
+static int blkfilter_ioctl(struct block_device *bdev,
+			     struct blkfilter_ctl __user *argp)
+{
+	struct blkfilter_ctl ctl;
+
+	if (copy_from_user(&ctl, argp, sizeof(ctl)))
+		return -EFAULT;
+
+	if (ctl.cmd == BLKFILTER_CMD_ATTACH)
+		return blkfilter_attach(bdev, ctl.name);
+
+	if (ctl.cmd == BLKFILTER_CMD_DETACH)
+		return blkfilter_detach(bdev, ctl.name);
+
+	return blkfilter_control(bdev, ctl.name, ctl.cmd - BLKFILTER_CMD_CTL,
+				 ctl.opt, &ctl.optlen);
+}
+
 /*
  * Common commands that are handled the same way on native and compat
  * user space. Note the separate arg/argp parameters that are needed
@@ -546,6 +564,8 @@ static int blkdev_common_ioctl(struct file *file, fmode_t mode, unsigned cmd,
 		return blkdev_pr_preempt(bdev, argp, true);
 	case IOC_PR_CLEAR:
 		return blkdev_pr_clear(bdev, argp);
+	case BLKFILTER:
+		return blkfilter_ioctl(bdev, argp);
 	default:
 		return -ENOIOCTLCMD;
 	}
