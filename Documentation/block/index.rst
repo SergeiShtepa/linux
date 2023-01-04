@@ -10,6 +10,8 @@ Block
    bfq-iosched
    biovecs
    blk-mq
+   blkfilter
+   blksnap
    capability
    cmdline-partition
    data-integrity
