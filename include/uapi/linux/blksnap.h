@@ -23,7 +23,6 @@ enum blkfilter_ctl_blksnap {
 	blkfilter_ctl_blksnap_snapshotinfo,
 };
 
-
 /**
  * blkfilter_ctl_blksnap_cbtinfo - Get CBT information
  */
@@ -67,6 +66,11 @@ struct blksnap_uuid {
 	__u8 b[UUID_SIZE];
 };
 
+struct blksnap_bdev {
+	__u32 major;
+	__u32 minor;
+}
+;
 /**
  * struct blksnap_cbt_info - Information about change tracking for a block
  *	device.
@@ -106,7 +110,7 @@ struct blksnap_cbtinfo {
 struct blksnap_cbtmap {
 	__u32 offset;
 	__u32 length;
-	__u8 buf[0];
+	__u8 buffer[0];
 };
 
 /**
@@ -168,8 +172,6 @@ struct blksnap_snapshotinfo {
 	__u8 image[IMAGE_DISK_NAME_LEN];
 };
 
-
-
 /**
  * DOC: Interface for managing snapshots
  *
@@ -181,6 +183,8 @@ enum blksnap_ioctl {
 	blksnap_ioctl_snapshot_destroy,
 	blksnap_ioctl_snapshot_append_storage,
 	blksnap_ioctl_snapshot_take,
+	blksnap_ioctl_snapshot_collect,
+	blksnap_ioctl_tracker_collect,
 	blksnap_ioctl_snapshot_wait_event,
 };
 
@@ -294,6 +298,78 @@ struct blksnap_snapshot_append_storage {
 	     struct blksnap_uuid)
 
 /**
+ * struct blksnap_snapshot_collect - Argument for the
+ *	&IOCTL_BLKSNAP_SNAPSHOT_COLLECT control.
+ * @count:
+ *	Size of &blksnap_snapshot_collect.ids in the number of 16-byte UUID.
+ * @ids:
+ *	Pointer to the array with the snapshot ID for output.
+ */
+struct blksnap_snapshot_collect {
+	__u32 count;
+	struct blksnap_uuid *ids;
+};
+
+/**
+ * define IOCTL_BLKSNAP_SNAPSHOT_COLLECT - Get collection of created snapshots.
+ *
+ * Multiple snapshots can be created at the same time. This allows for one
+ * system to create backups for different data with a independent schedules.
+ *
+ * If in &blksnap_snapshot_collect.count is less than required to store the
+ * &blksnap_snapshot_collect.ids, the array is not filled, and the ioctl
+ * returns the required count for &blksnap_snapshot_collect.ids.
+ *
+ * So, it is recommended to call the ioctl twice. The first call with an null
+ * pointer &blksnap_snapshot_collect.ids and a zero value in
+ * &blksnap_snapshot_collect.count. It will set the required array size in
+ * &blksnap_snapshot_collect.count. The second call with a pointer
+ * &blksnap_snapshot_collect.ids to an array of the required size will allow to
+ * get collection of active snapshots.
+ *
+ * Return: 0 if succeeded, -ENODATA if there is not enough space in the array
+ * to store collection of active snapshots, or negative errno otherwise.
+ */
+#define IOCTL_BLKSNAP_SNAPSHOT_COLLECT						\
+	_IOW(BLKSNAP, blksnap_ioctl_snapshot_collect,				\
+	     struct blksnap_snapshot_collect)
+
+/**
+ * struct blksnap_tracker_collect - Argument for the
+ *	&IOCTL_BLKSNAP_TRACKER_COLLECT control.
+ * @count:
+ *	Size of &blksnap_snapshot_collect.ids in the number of 16-byte UUID.
+ * @ids:
+ *	Pointer to the array with the block device ID for output.
+ */
+struct blksnap_tracker_collect {
+	__u32 count;
+	struct blksnap_bdev *ids;
+};
+
+/**
+ * define IOCTL_BLKSNAP_TRACKER_COLLECT - Get collection of tracked block
+ *	device.
+ *
+ * If in &blksnap_tracker_collect.count is less than required to store the
+ * &blksnap_tracker_collect.ids, the array is not filled, and the ioctl
+ * returns the required count for &blksnap_tracker_collect.ids.
+ *
+ * So, it is recommended to call the ioctl twice. The first call with an null
+ * pointer &blksnap_tracker_collect.ids and a zero value in
+ * &blksnap_tracker_collect.count. It will set the required array size in
+ * &blksnap_tracker_collect.count. The second call with a pointer
+ * &blksnap_tracker_collect.ids to an array of the required size will allow to
+ * get collection of tracked block devices.
+ *
+ * Return: 0 if succeeded, -ENODATA if there is not enough space in the array
+ * to store collection of tracked block devices, or negative errno otherwise.
+ */
+#define IOCTL_BLKSNAP_TRACKER_COLLECT						\
+	_IOW(BLKSNAP, blksnap_ioctl_tracker_collect,				\
+	     struct blksnap_tracker_collect)
+
+/**
  * enum blksnap_event_codes - Variants of event codes.
  *
  * @blksnap_event_code_low_free_space:
@@ -371,8 +447,7 @@ struct blksnap_event_low_free_space {
  *	Error code.
  */
 struct blksnap_event_corrupted {
-	__u32 orig_dev_id_mj;
-	__u32 orig_dev_id_mn;
+	struct blksnap_bdev dev_id;
 	__s32 err_code;
 };
 
