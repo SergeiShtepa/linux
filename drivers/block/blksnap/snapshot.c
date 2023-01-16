@@ -3,6 +3,7 @@
 
 #include <linux/slab.h>
 #include <linux/sched/mm.h>
+#include <linux/build_bug.h>
 #include <uapi/linux/blksnap.h>
 #include "snapshot.h"
 #include "tracker.h"

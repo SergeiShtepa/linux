@@ -5,6 +5,7 @@
 #include <linux/sched/mm.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
+#include <linux/build_bug.h>
 #include <uapi/linux/blksnap.h>
 #include "chunk.h"
 #include "diff_io.h"
