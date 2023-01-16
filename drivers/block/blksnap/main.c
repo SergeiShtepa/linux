@@ -3,6 +3,7 @@
 
 #include <linux/module.h>
 #include <linux/miscdevice.h>
+#include <linux/build_bug.h>
 #include <uapi/linux/blksnap.h>
 #include "snapimage.h"
 #include "snapshot.h"

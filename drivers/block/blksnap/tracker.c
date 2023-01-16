@@ -4,6 +4,7 @@
 #include <linux/slab.h>
 #include <linux/blk-mq.h>
 #include <linux/sched/mm.h>
+#include <linux/build_bug.h>
 #include <uapi/linux/blksnap.h>
 #include "tracker.h"
 #include "cbt_map.h"
