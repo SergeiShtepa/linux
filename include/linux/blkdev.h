@@ -36,6 +36,7 @@ struct blk_flush_queue;
 struct kiocb;
 struct pr_ops;
 struct rq_qos;
+struct blkfilter;
 struct blk_queue_stats;
 struct blk_stat_callback;
 struct blk_crypto_profile;
@@ -1540,37 +1541,34 @@ struct io_comp_batch {
  *	device from the system.
  */
 struct blkfilter_operations {
-	int (*attach)(struct block_device *bdev, bool is_frozen);
-	void (*detach)(struct block_device *bdev, bool is_frozen);
-	int (*ctl)(struct block_device *bdev, const unsigned int cmd,
+	struct list_head entry;
+	const char *name;
+	struct module *owner;
+	struct blkfilter *(*attach)(struct block_device *bdev);
+	void (*detach)(struct blkfilter *flt);
+	int (*ctl)(struct blkfilter *flt, const unsigned int cmd,
 		   __u8 __user *buf, __u32 *plen);
 	bool (*submit_bio)(struct bio *bio);
 };
 
+int blkfilter_register(struct blkfilter_operations *ops);
+void blkfilter_unregister(struct blkfilter_operations *ops);
+
+
 /**
  * struct blkfilter - Block device filter.
  *
- * @kref:
- *	Kernel reference counter.
- * @fops:
+ * @ops:
  *	The pointer to &struct blkfilter_operations with callback
  *	functions for the filter.
  */
 struct blkfilter {
-	refcount_t refcount;
-	struct completion can_unreg;
-	struct list_head link;
-	const char *name;
-	const struct blkfilter_operations *fops;
+	const struct blkfilter_operations *ops;
 };
 
 int blkfilter_attach(struct block_device *bdev, const char *name);
 int blkfilter_detach(struct block_device *bdev, const char *name);
 int blkfilter_control(struct block_device *bdev, const char *name,
 		      const unsigned int cmd, __u8 __user *buf, __u32 *plen);
-
-int blkfilter_register(const char *name,
-		       const struct blkfilter_operations *fops);
-void blkfilter_unregister(const char *name);
 
 #endif /* _LINUX_BLKDEV_H */

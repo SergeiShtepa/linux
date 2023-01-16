@@ -38,6 +38,7 @@ struct snapimage;
  * and to the difference area.
  */
 struct tracker {
+	struct blkfilter filter;
 	struct list_head link;
         struct kref kref;
 	dev_t dev_id;
@@ -49,7 +50,7 @@ struct tracker {
         struct snapimage *snapimage;
 
         bool is_frozen;
-        bool is_active;
+	struct work_struct release_work;
 };
 
 int tracker_init(void);
