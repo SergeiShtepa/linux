@@ -12,9 +12,6 @@
 #include "snapimage.h"
 #include "snapshot.h"
 
-LIST_HEAD(tracker_list);
-DEFINE_SPINLOCK(tracker_list_lock);
-
 static inline void __tracker_free(struct tracker *tracker)
 {
 	if (!tracker)
@@ -38,33 +35,10 @@ void tracker_free(struct kref *kref)
 	__tracker_free(container_of(kref, struct tracker, kref));
 }
 
-static inline struct tracker *__tracker_find(dev_t dev_id)
-{
-	struct tracker *tracker;
-
-	if (!list_empty(&tracker_list))
-		list_for_each_entry(tracker, &tracker_list, link)
-			if (tracker->dev_id == dev_id)
-				return tracker;
-
-	return NULL;
-}
-
-static inline struct tracker *tracker_find(dev_t dev_id)
-{
-	struct tracker *tracker = NULL;
-
-	spin_lock(&tracker_list_lock);
-	tracker = __tracker_find(dev_id);
-	if (!tracker->is_active)
-		tracker = NULL;
-	spin_unlock(&tracker_list_lock);
-
-	return tracker;
-}
-
 static bool tracker_submit_bio(struct bio *bio)
 {
+	struct blkfilter *flt = bio->bi_bdev->bd_filter;
+	struct tracker *tracker = container_of(flt, struct tracker, filter);
 	struct bio_list bio_list_on_stack[2] = { };
 	struct bio *new_bio;
 	int err;
@@ -72,9 +46,8 @@ static bool tracker_submit_bio(struct bio *bio)
 	sector_t count = bio_sectors(bio);
 	unsigned int current_flag;
 	bool is_nowait = !!(bio->bi_opf & REQ_NOWAIT);
-	struct tracker *tracker = tracker_find(bio->bi_bdev->bd_dev);
 
-	if (!tracker || !op_is_write(bio_op(bio)) || !count)
+	if (!op_is_write(bio_op(bio)) || !count)
 		return false;
 
 	sector = bio->bi_iter.bi_sector;
@@ -135,7 +108,9 @@ static bool tracker_submit_bio(struct bio *bio)
 	return false;
 }
 
-static int tracker_attach(struct block_device *bdev, bool is_frozen)
+static struct blkfilter_operations tracker_ops;
+
+static struct blkfilter *tracker_attach(struct block_device *bdev)
 {
 	struct tracker *tracker = NULL;
 	struct cbt_map *cbt_map;
@@ -143,34 +118,20 @@ static int tracker_attach(struct block_device *bdev, bool is_frozen)
 	pr_debug("Creating tracker for device [%u:%u]\n", MAJOR(bdev->bd_dev),
 		 MINOR(bdev->bd_dev));
 
-	if (!is_frozen) {
-		/*
-		 * If the file system has not been frozen, we have to attach a
-		 * filter. This means that when the filter was attached, the
-		 * state of the file system was not consistent.
-		 * If the file system cannot be frozen, it is possible that it
-		 * is damaged and requires repair. For such a file system, we
-		 * still need to create a snapshot and perform a backup for
-		 * subsequent repair during recovery.
-		 */
-		pr_warn("The filter attach to the device [%u:%u] when it was unfrozen\n",
-			MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
-	}
-
 	cbt_map = cbt_map_create(bdev);
 	if (!cbt_map) {
 		pr_err("Failed to create CBT map for device [%u:%u]\n",
 		       MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 	}
 
 	tracker = kzalloc(sizeof(struct tracker), GFP_KERNEL);
 	if (tracker == NULL) {
 		cbt_map_destroy(cbt_map);
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 	}
 
-	INIT_LIST_HEAD(&tracker->link);
+	tracker->filter.ops = &tracker_ops;
 	tracker->dev_id = bdev->bd_dev;
 	atomic_set(&tracker->snapshot_is_taken, false);
 	tracker->cbt_map = cbt_map;
@@ -178,65 +139,23 @@ static int tracker_attach(struct block_device *bdev, bool is_frozen)
 	tracker->snapimage =  NULL;
 	tracker->is_frozen = false;
 
-	spin_lock(&tracker_list_lock);
-	tracker->is_active = true;
-	list_add_tail(&tracker->link, &tracker_list);
-	spin_unlock(&tracker_list_lock);
-
 	pr_debug("New tracker for device [%u:%u] was created\n",
 		 MAJOR(tracker->dev_id), MINOR(tracker->dev_id));
 
-	return 0;
+	return &tracker->filter;
 }
 
-static void tracker_release_fn(
-	__attribute__ ((unused)) struct work_struct *work)
+static void tracker_release_work(struct work_struct *work)
 {
-	struct tracker *tracker;
-
-	do {
-		tracker = NULL;
-
-		spin_lock(&tracker_list_lock);
-		if (!list_empty(&tracker_list)) {
-			struct tracker *entry;
-
-			list_for_each_entry(entry, &tracker_list, link) {
-				if (!entry->is_active) {
-					tracker = entry;
-					list_del(&tracker->link);
-					break;
-				}
-			}
-		}
-		spin_unlock(&tracker_list_lock);
-
-		tracker_put(tracker);
-	} while (tracker);
+	tracker_put(container_of(work, struct tracker, release_work));
 }
-DECLARE_WORK(tracker_release_worker, tracker_release_fn);
 
-static void tracker_detach(struct block_device *bdev, bool is_frozen)
+static void tracker_detach(struct blkfilter *flt)
 {
-	struct tracker *tracker;
+	struct tracker *tracker = container_of(flt, struct tracker, filter);
 
-	if (!is_frozen) {
-		/*
-		 * It is assumed that if the filter no longer wants to filter
-		 * I/O units on a block device, then it does not matter at all
-		 * what state the file system is in.
-		 */
-		pr_warn("The filter detach from the device [%u:%u] when it was unfrozen\n",
-			MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
-	}
-
-	spin_lock(&tracker_list_lock);
-	tracker = __tracker_find(bdev->bd_dev);
-	if (tracker)
-		tracker->is_active = false;
-	spin_unlock(&tracker_list_lock);
-
-	queue_work(system_wq, &tracker_release_worker);
+	INIT_WORK(&tracker->release_work, tracker_release_work);
+	queue_work(system_wq, &tracker->release_work);
 }
 
 static int ctl_cbtinfo(struct tracker *tracker, __u8 __user *buf, __u32 *plen)
@@ -355,14 +274,10 @@ static int (*const ctl_table[])(struct tracker *tracker,
 	ctl_snapshotinfo,
 };
 
-static int tracker_ctl(struct block_device *bdev, const unsigned int cmd,
+static int tracker_ctl(struct blkfilter *flt, const unsigned int cmd,
 		       __u8 __user *buf, __u32 *plen)
 {
-	struct tracker *tracker;
-
-	tracker = tracker_find(bdev->bd_dev);
-	if (!tracker)
-		return -ENOENT;
+	struct tracker *tracker = container_of(flt, struct tracker, filter);
 
 	if (cmd > (sizeof(ctl_table) / sizeof(ctl_table[0])))
 		return -ENOTTY;
@@ -370,11 +285,13 @@ static int tracker_ctl(struct block_device *bdev, const unsigned int cmd,
 	return ctl_table[cmd](tracker, buf, plen);
 }
 
-static const struct blkfilter_operations tracker_fops = {
-	.submit_bio = tracker_submit_bio,
-	.attach = tracker_attach,
-	.detach = tracker_detach,
-	.ctl = tracker_ctl,
+static struct blkfilter_operations tracker_ops = {
+	.name		= "blksnap",
+	.owner		= THIS_MODULE,
+	.attach		= tracker_attach,
+	.detach		= tracker_detach,
+	.ctl		= tracker_ctl,
+	.submit_bio	= tracker_submit_bio,
 };
 
 int tracker_take_snapshot(struct tracker *tracker)
@@ -495,26 +412,10 @@ int tracker_collect(unsigned int *pcount, struct blksnap_bdev __user *id_array)
 
 int tracker_init(void)
 {
-	return blkfilter_register("blksnap", &tracker_fops);
+	return blkfilter_register(&tracker_ops);
 }
 
 void tracker_done(void)
 {
-	struct tracker *tracker;
-
-	pr_debug("Cleanup trackers\n");
-	do {
-		spin_lock(&tracker_list_lock);
-		tracker = list_first_entry_or_null(&tracker_list,
-						  struct tracker, link);
-		if (tracker) {
-			tracker->is_active = false;
-			list_del(&tracker->link);
-		}
-		spin_unlock(&tracker_list_lock);
-
-		tracker_put(tracker);
-	} while (tracker);
-
-	blkfilter_unregister("blksnap");
+	blkfilter_unregister(&tracker_ops);
 }
