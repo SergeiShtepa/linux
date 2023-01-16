@@ -380,6 +380,44 @@ int snapshot_take(const uuid_t *id)
 	return ret;
 }
 
+int snapshot_collect(unsigned int *pcount,
+		     struct blksnap_uuid __user *id_array)
+{
+	int ret = 0;
+	int inx = 0;
+	struct snapshot *s;
+
+	pr_debug("Collect snapshots\n");
+
+	down_read(&snapshots_lock);
+	if (list_empty(&snapshots))
+		goto out;
+
+	if (!id_array) {
+		list_for_each_entry(s, &snapshots, link)
+			inx++;
+		goto out;
+	}
+
+	list_for_each_entry(s, &snapshots, link) {
+		if (inx >= *pcount) {
+			ret = -ENODATA;
+			goto out;
+		}
+
+		if (copy_to_user(id_array[inx].b, &s->id.b, sizeof(uuid_t))) {
+			pr_err("Unable to collect snapshots: failed to copy data to user buffer\n");
+			goto out;
+		}
+
+		inx++;
+	}
+out:
+	up_read(&snapshots_lock);
+	*pcount = inx;
+	return ret;
+}
+
 struct event *snapshot_wait_event(const uuid_t *id, unsigned long timeout_ms)
 {
 	struct snapshot *snapshot;
