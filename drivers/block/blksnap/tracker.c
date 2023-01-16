@@ -283,8 +283,8 @@ static int ctl_cbtmap(struct tracker *tracker, __u8 __user *buf, __u32 *plen)
 	if (copy_from_user(&arg, buf, sizeof(arg)))
 		return -ENODATA;
 
-	readed = cbt_map_read_to_user(cbt_map, buf + sizeof(arg),
-				      arg.offset, arg.length);
+	readed = cbt_map_read_to_user(cbt_map, arg.buffer, arg.offset,
+				      arg.length);
 	*plen = sizeof(arg) + readed;
 
 	return 0;
@@ -437,6 +437,60 @@ void tracker_release_snapshot(struct tracker *tracker)
 		diff_area_free(tracker->diff_area);
 		tracker->diff_area = NULL;
 	}
+}
+
+int tracker_collect(unsigned int *pcount, struct blksnap_bdev __user *id_array)
+{
+	int ret = 0;
+	int inx = 0;
+	struct tracker *tr = NULL;
+	struct blksnap_bdev *ids;
+
+	pr_debug("Collect trackers\n");
+
+	spin_lock(&tracker_list_lock);
+	if (list_empty(&tracker_list)) {
+		spin_unlock(&tracker_list_lock);
+		*pcount = 0;
+		return 0;
+	}
+
+	if (!id_array) {
+		list_for_each_entry(tr, &tracker_list, link)
+			inx++;
+		spin_unlock(&tracker_list_lock);
+		*pcount = inx;
+		return 0;
+	}
+	spin_unlock(&tracker_list_lock);
+
+	ids = kcalloc(*pcount, sizeof(struct blksnap_bdev), GFP_KERNEL);
+	if (ids)
+		return -ENOMEM;
+
+	spin_lock(&tracker_list_lock);
+	list_for_each_entry(tr, &tracker_list, link) {
+		if (inx >= *pcount) {
+			ret = -ENODATA;
+			break;
+		}
+		ids[inx].major = MAJOR(tr->dev_id);
+		ids[inx].minor = MINOR(tr->dev_id);
+		inx++;
+	}
+	spin_unlock(&tracker_list_lock);
+
+	if (!ret) {
+		unsigned long sz = inx * sizeof(struct blksnap_bdev);
+
+		if (copy_to_user(id_array, ids, sz)) {
+			pr_err("Unable to collect trackers: failed to copy data to user buffer\n");
+			ret = -EINVAL;
+		}
+	}
+	kfree(tr);
+	*pcount = inx;
+	return ret;
 }
 
 int tracker_init(void)

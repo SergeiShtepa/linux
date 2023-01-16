@@ -68,4 +68,6 @@ static inline void tracker_get(struct tracker *tracker)
 int tracker_take_snapshot(struct tracker *tracker);
 void tracker_release_snapshot(struct tracker *tracker);
 
+int tracker_collect(unsigned int *pcount, struct blksnap_bdev __user *id_array);
+
 #endif /* __BLKSNAP_TRACKER_H */
