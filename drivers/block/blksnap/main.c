@@ -187,26 +187,6 @@ static int ioctl_snapshot_collect(unsigned long arg)
 	return ret;
 }
 
-static int ioctl_tracker_collect(unsigned long arg)
-{
-	int ret;
-	struct blksnap_tracker_collect karg;
-
-	if (copy_from_user(&karg, (void *)arg, sizeof(karg))) {
-		pr_err("Unable to collect tracked block device: invalid user buffer\n");
-		return -ENODATA;
-	}
-
-	ret = tracker_collect(&karg.count, karg.ids);
-
-	if (copy_to_user((void *)arg, &karg, sizeof(karg))) {
-		pr_err("Unable to collect tracked block device: invalid user buffer\n");
-		return -ENODATA;
-	}
-
-	return ret;
-}
-
 static int ioctl_snapshot_wait_event(unsigned long arg)
 {
 	int ret = 0;
@@ -261,7 +241,7 @@ static int (*const blksnap_ioctl_table[])(unsigned long arg) = {
 	ioctl_snapshot_append_storage,
 	ioctl_snapshot_take,
 	ioctl_snapshot_collect,
-	ioctl_tracker_collect,
+	//ioctl_tracker_collect,
 	ioctl_snapshot_wait_event,
 };
 
