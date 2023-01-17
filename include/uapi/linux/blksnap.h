@@ -184,7 +184,6 @@ enum blksnap_ioctl {
 	blksnap_ioctl_snapshot_append_storage,
 	blksnap_ioctl_snapshot_take,
 	blksnap_ioctl_snapshot_collect,
-	blksnap_ioctl_tracker_collect,
 	blksnap_ioctl_snapshot_wait_event,
 };
 
@@ -333,41 +332,6 @@ struct blksnap_snapshot_collect {
 #define IOCTL_BLKSNAP_SNAPSHOT_COLLECT						\
 	_IOW(BLKSNAP, blksnap_ioctl_snapshot_collect,				\
 	     struct blksnap_snapshot_collect)
-
-/**
- * struct blksnap_tracker_collect - Argument for the
- *	&IOCTL_BLKSNAP_TRACKER_COLLECT control.
- * @count:
- *	Size of &blksnap_snapshot_collect.ids in the number of 16-byte UUID.
- * @ids:
- *	Pointer to the array with the block device ID for output.
- */
-struct blksnap_tracker_collect {
-	__u32 count;
-	struct blksnap_bdev *ids;
-};
-
-/**
- * define IOCTL_BLKSNAP_TRACKER_COLLECT - Get collection of tracked block
- *	device.
- *
- * If in &blksnap_tracker_collect.count is less than required to store the
- * &blksnap_tracker_collect.ids, the array is not filled, and the ioctl
- * returns the required count for &blksnap_tracker_collect.ids.
- *
- * So, it is recommended to call the ioctl twice. The first call with an null
- * pointer &blksnap_tracker_collect.ids and a zero value in
- * &blksnap_tracker_collect.count. It will set the required array size in
- * &blksnap_tracker_collect.count. The second call with a pointer
- * &blksnap_tracker_collect.ids to an array of the required size will allow to
- * get collection of tracked block devices.
- *
- * Return: 0 if succeeded, -ENODATA if there is not enough space in the array
- * to store collection of tracked block devices, or negative errno otherwise.
- */
-#define IOCTL_BLKSNAP_TRACKER_COLLECT						\
-	_IOW(BLKSNAP, blksnap_ioctl_tracker_collect,				\
-	     struct blksnap_tracker_collect)
 
 /**
  * enum blksnap_event_codes - Variants of event codes.
