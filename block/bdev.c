@@ -1146,7 +1146,7 @@ int blkfilter_attach(struct block_device *bdev, const char *name)
 	struct blkfilter_operations *ops;
 	struct blkfilter *flt;
 	int ret;
-	
+
 	ops = blkfilter_find_get(name);
 	if (!ops)
 		return -ENOENT;
@@ -1154,14 +1154,14 @@ int blkfilter_attach(struct block_device *bdev, const char *name)
 	ret = freeze_bdev(bdev);
 	if (ret)
 		goto out_put_module;
-
 	blk_mq_freeze_queue(bdev->bd_queue);
+
 	if (bdev->bd_filter) {
 		ret = -EBUSY;
 		goto out_unfreeze;
 	}
 
-	flt = flt->ops->attach(bdev);
+	flt = ops->attach(bdev);
 	if (IS_ERR(flt)) {
 		ret = PTR_ERR(flt);
 		goto out_unfreeze;
