@@ -145,17 +145,11 @@ static struct blkfilter *tracker_attach(struct block_device *bdev)
 	return &tracker->filter;
 }
 
-static void tracker_release_work(struct work_struct *work)
-{
-	tracker_put(container_of(work, struct tracker, release_work));
-}
-
 static void tracker_detach(struct blkfilter *flt)
 {
 	struct tracker *tracker = container_of(flt, struct tracker, filter);
 
-	INIT_WORK(&tracker->release_work, tracker_release_work);
-	queue_work(system_wq, &tracker->release_work);
+	tracker_put(tracker);
 }
 
 static int ctl_cbtinfo(struct tracker *tracker, __u8 __user *buf, __u32 *plen)

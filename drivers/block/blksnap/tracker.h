@@ -50,7 +50,6 @@ struct tracker {
         struct snapimage *snapimage;
 
         bool is_frozen;
-	struct work_struct release_work;
 };
 
 int tracker_init(void);
