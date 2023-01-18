@@ -1542,13 +1542,13 @@ struct io_comp_batch {
  */
 struct blkfilter_operations {
 	struct list_head entry;
-	const char *name;
 	struct module *owner;
-	struct blkfilter *(*attach)(struct block_device *bdev);
-	void (*detach)(struct blkfilter *flt);
-	int (*ctl)(struct blkfilter *flt, const unsigned int cmd,
+	const char *name;
+	struct blkfilter * const (*attach)(struct block_device *bdev);
+	void const (*detach)(struct blkfilter *flt);
+	int const (*ctl)(struct blkfilter *flt, const unsigned int cmd,
 		   __u8 __user *buf, __u32 *plen);
-	bool (*submit_bio)(struct bio *bio);
+	bool const (*submit_bio)(struct bio *bio);
 };
 
 int blkfilter_register(struct blkfilter_operations *ops);
