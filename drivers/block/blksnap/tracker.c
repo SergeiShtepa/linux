@@ -132,6 +132,8 @@ static struct blkfilter *tracker_attach(struct block_device *bdev)
 	}
 
 	tracker->filter.ops = &tracker_ops;
+	INIT_LIST_HEAD(&tracker->link);
+	kref_init(&tracker->kref);
 	tracker->dev_id = bdev->bd_dev;
 	atomic_set(&tracker->snapshot_is_taken, false);
 	tracker->cbt_map = cbt_map;
