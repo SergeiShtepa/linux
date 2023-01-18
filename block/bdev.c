@@ -441,7 +441,7 @@ int blkfilter_detach(struct block_device *bdev, const char *name)
 		goto out_unfreeze;
 	}
 	ops = flt->ops;
-	if (name && strcmp(ops->name, name) == 0) {
+	if (name && strncmp(ops->name, name, BLKFILTER_NAME_LENGTH) != 0) {
 		error = -EINVAL;
 		goto out_unfreeze;
 	}
@@ -1130,7 +1130,7 @@ static inline struct blkfilter_operations *blkfilter_find_get(const char *name)
 
 	spin_lock(&blkfilters_lock);
 	list_for_each_entry(ops, &blkfilters, entry) {
-		if (strcmp(ops->name, name) == 0) {
+		if (strncmp(ops->name, name, BLKFILTER_NAME_LENGTH) == 0) {
 			found = ops;
 			break;
 		}
@@ -1187,7 +1187,7 @@ int blkfilter_control(struct block_device *bdev, const char *name,
 		return ret;
 
 	flt = bdev->bd_filter;
-	if (!flt || strcmp(flt->ops->name, name) != 0) {
+	if (!flt || strncmp(flt->ops->name, name, BLKFILTER_NAME_LENGTH) != 0) {
 		ret = -ENOENT;
 		goto out_queue_exit;
 	}
