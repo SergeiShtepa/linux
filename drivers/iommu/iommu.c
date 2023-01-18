@@ -3185,15 +3185,13 @@ EXPORT_SYMBOL_GPL(iommu_group_claim_dma_owner);
  */
 int iommu_device_claim_dma_owner(struct device *dev, void *owner)
 {
-	struct iommu_group *group;
+	struct iommu_group *group = iommu_group_get(dev);
 	int ret = 0;
 
-	if (WARN_ON(!owner))
-		return -EINVAL;
-
-	group = iommu_group_get(dev);
 	if (!group)
 		return -ENODEV;
+	if (WARN_ON(!owner))
+		return -EINVAL;
 
 	mutex_lock(&group->mutex);
 	if (group->owner_cnt) {

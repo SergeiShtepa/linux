@@ -695,7 +695,6 @@ intel_vgpu_shadow_mm_pin(struct intel_vgpu_workload *workload)
 
 	if (workload->shadow_mm->type != INTEL_GVT_MM_PPGTT ||
 	    !workload->shadow_mm->ppgtt_mm.shadowed) {
-		intel_vgpu_unpin_mm(workload->shadow_mm);
 		gvt_vgpu_err("workload shadow ppgtt isn't ready\n");
 		return -EINVAL;
 	}
@@ -866,8 +865,7 @@ pick_next_workload(struct intel_gvt *gvt, struct intel_engine_cs *engine)
 		goto out;
 	}
 
-	if (!test_bit(INTEL_VGPU_STATUS_ACTIVE,
-		      scheduler->current_vgpu->status) ||
+	if (!scheduler->current_vgpu->active ||
 	    list_empty(workload_q_head(scheduler->current_vgpu, engine)))
 		goto out;
 

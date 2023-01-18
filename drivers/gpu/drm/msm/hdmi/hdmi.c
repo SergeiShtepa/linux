@@ -532,19 +532,11 @@ static int msm_hdmi_dev_probe(struct platform_device *pdev)
 
 	ret = devm_pm_runtime_enable(&pdev->dev);
 	if (ret)
-		goto err_put_phy;
+		return ret;
 
 	platform_set_drvdata(pdev, hdmi);
 
-	ret = component_add(&pdev->dev, &msm_hdmi_ops);
-	if (ret)
-		goto err_put_phy;
-
-	return 0;
-
-err_put_phy:
-	msm_hdmi_put_phy(hdmi);
-	return ret;
+	return component_add(&pdev->dev, &msm_hdmi_ops);
 }
 
 static int msm_hdmi_dev_remove(struct platform_device *pdev)

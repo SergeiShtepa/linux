@@ -23,30 +23,12 @@ static void rxrpc_clean_up_connection(struct work_struct *work);
 static void rxrpc_set_service_reap_timer(struct rxrpc_net *rxnet,
 					 unsigned long reap_at);
 
-void rxrpc_poke_conn(struct rxrpc_connection *conn, enum rxrpc_conn_trace why)
-{
-	struct rxrpc_local *local = conn->local;
-	bool busy;
-
-	if (WARN_ON_ONCE(!local))
-		return;
-
-	spin_lock_bh(&local->lock);
-	busy = !list_empty(&conn->attend_link);
-	if (!busy) {
-		rxrpc_get_connection(conn, why);
-		list_add_tail(&conn->attend_link, &local->conn_attend_q);
-	}
-	spin_unlock_bh(&local->lock);
-	rxrpc_wake_up_io_thread(local);
-}
-
 static void rxrpc_connection_timer(struct timer_list *timer)
 {
 	struct rxrpc_connection *conn =
 		container_of(timer, struct rxrpc_connection, timer);
 
-	rxrpc_poke_conn(conn, rxrpc_conn_get_poke_timer);
+	rxrpc_queue_conn(conn, rxrpc_conn_queue_timer);
 }
 
 /*
@@ -67,7 +49,6 @@ struct rxrpc_connection *rxrpc_alloc_connection(struct rxrpc_net *rxnet,
 		INIT_WORK(&conn->destructor, rxrpc_clean_up_connection);
 		INIT_LIST_HEAD(&conn->proc_link);
 		INIT_LIST_HEAD(&conn->link);
-		mutex_init(&conn->security_lock);
 		skb_queue_head_init(&conn->rx_queue);
 		conn->rxnet = rxnet;
 		conn->security = &rxrpc_no_security;
@@ -101,10 +82,10 @@ struct rxrpc_connection *rxrpc_find_client_connection_rcu(struct rxrpc_local *lo
 
 	_enter(",%x", sp->hdr.cid & RXRPC_CIDMASK);
 
-	/* Look up client connections by connection ID alone as their
-	 * IDs are unique for this machine.
+	/* Look up client connections by connection ID alone as their IDs are
+	 * unique for this machine.
 	 */
-	conn = idr_find(&local->conn_ids, sp->hdr.cid >> RXRPC_CIDSHIFT);
+	conn = idr_find(&rxrpc_client_conn_ids, sp->hdr.cid >> RXRPC_CIDSHIFT);
 	if (!conn || refcount_read(&conn->ref) == 0) {
 		_debug("no conn");
 		goto not_found;
@@ -158,7 +139,7 @@ void __rxrpc_disconnect_call(struct rxrpc_connection *conn,
 
 	_enter("%d,%x", conn->debug_id, call->cid);
 
-	if (chan->call == call) {
+	if (rcu_access_pointer(chan->call) == call) {
 		/* Save the result of the call so that we can repeat it if necessary
 		 * through the channel, whilst disposing of the actual call record.
 		 */
@@ -178,9 +159,12 @@ void __rxrpc_disconnect_call(struct rxrpc_connection *conn,
 			break;
 		}
 
+		/* Sync with rxrpc_conn_retransmit(). */
+		smp_wmb();
 		chan->last_call = chan->call_id;
 		chan->call_id = chan->call_counter;
-		chan->call = NULL;
+
+		rcu_assign_pointer(chan->call, NULL);
 	}
 
 	_leave("");
@@ -194,9 +178,6 @@ void rxrpc_disconnect_call(struct rxrpc_call *call)
 {
 	struct rxrpc_connection *conn = call->conn;
 
-	set_bit(RXRPC_CALL_DISCONNECTED, &call->flags);
-	rxrpc_see_call(call, rxrpc_call_see_disconnected);
-
 	call->peer->cong_ssthresh = call->cong_ssthresh;
 
 	if (!hlist_unhashed(&call->error_link)) {
@@ -205,17 +186,18 @@ void rxrpc_disconnect_call(struct rxrpc_call *call)
 		spin_unlock(&call->peer->lock);
 	}
 
-	if (rxrpc_is_client_call(call)) {
-		rxrpc_disconnect_client_call(call->bundle, call);
-	} else {
-		__rxrpc_disconnect_call(conn, call);
-		conn->idle_timestamp = jiffies;
-		if (atomic_dec_and_test(&conn->active))
-			rxrpc_set_service_reap_timer(conn->rxnet,
-						     jiffies + rxrpc_connection_expiry);
-	}
+	if (rxrpc_is_client_call(call))
+		return rxrpc_disconnect_client_call(conn->bundle, call);
 
-	rxrpc_put_call(call, rxrpc_call_put_io_thread);
+	spin_lock(&conn->bundle->channel_lock);
+	__rxrpc_disconnect_call(conn, call);
+	spin_unlock(&conn->bundle->channel_lock);
+
+	set_bit(RXRPC_CALL_DISCONNECTED, &call->flags);
+	conn->idle_timestamp = jiffies;
+	if (atomic_dec_and_test(&conn->active))
+		rxrpc_set_service_reap_timer(conn->rxnet,
+					     jiffies + rxrpc_connection_expiry);
 }
 
 /*
@@ -311,10 +293,10 @@ static void rxrpc_clean_up_connection(struct work_struct *work)
 		container_of(work, struct rxrpc_connection, destructor);
 	struct rxrpc_net *rxnet = conn->rxnet;
 
-	ASSERT(!conn->channels[0].call &&
-	       !conn->channels[1].call &&
-	       !conn->channels[2].call &&
-	       !conn->channels[3].call);
+	ASSERT(!rcu_access_pointer(conn->channels[0].call) &&
+	       !rcu_access_pointer(conn->channels[1].call) &&
+	       !rcu_access_pointer(conn->channels[2].call) &&
+	       !rcu_access_pointer(conn->channels[3].call));
 	ASSERT(list_empty(&conn->cache_link));
 
 	del_timer_sync(&conn->timer);
@@ -465,6 +447,7 @@ void rxrpc_destroy_all_connections(struct rxrpc_net *rxnet)
 	_enter("");
 
 	atomic_dec(&rxnet->nr_conns);
+	rxrpc_destroy_all_client_connections(rxnet);
 
 	del_timer_sync(&rxnet->service_conn_reap_timer);
 	rxrpc_queue_work(&rxnet->service_conn_reaper);

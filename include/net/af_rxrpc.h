@@ -15,7 +15,6 @@ struct key;
 struct sock;
 struct socket;
 struct rxrpc_call;
-enum rxrpc_abort_reason;
 
 enum rxrpc_interruptibility {
 	RXRPC_INTERRUPTIBLE,	/* Call is interruptible */
@@ -56,7 +55,7 @@ int rxrpc_kernel_send_data(struct socket *, struct rxrpc_call *,
 int rxrpc_kernel_recv_data(struct socket *, struct rxrpc_call *,
 			   struct iov_iter *, size_t *, bool, u32 *, u16 *);
 bool rxrpc_kernel_abort_call(struct socket *, struct rxrpc_call *,
-			     u32, int, enum rxrpc_abort_reason);
+			     u32, int, const char *);
 void rxrpc_kernel_end_call(struct socket *, struct rxrpc_call *);
 void rxrpc_kernel_get_peer(struct socket *, struct rxrpc_call *,
 			   struct sockaddr_rxrpc *);

@@ -17,65 +17,11 @@
 #include "ar-internal.h"
 
 /*
- * Set the completion state on an aborted connection.
- */
-static bool rxrpc_set_conn_aborted(struct rxrpc_connection *conn, struct sk_buff *skb,
-				   s32 abort_code, int err,
-				   enum rxrpc_call_completion compl)
-{
-	bool aborted = false;
-
-	if (conn->state != RXRPC_CONN_ABORTED) {
-		spin_lock(&conn->state_lock);
-		if (conn->state != RXRPC_CONN_ABORTED) {
-			conn->abort_code = abort_code;
-			conn->error	 = err;
-			conn->completion = compl;
-			/* Order the abort info before the state change. */
-			smp_store_release(&conn->state, RXRPC_CONN_ABORTED);
-			set_bit(RXRPC_CONN_DONT_REUSE, &conn->flags);
-			set_bit(RXRPC_CONN_EV_ABORT_CALLS, &conn->events);
-			aborted = true;
-		}
-		spin_unlock(&conn->state_lock);
-	}
-
-	return aborted;
-}
-
-/*
- * Mark a socket buffer to indicate that the connection it's on should be aborted.
- */
-int rxrpc_abort_conn(struct rxrpc_connection *conn, struct sk_buff *skb,
-		     s32 abort_code, int err, enum rxrpc_abort_reason why)
-{
-	struct rxrpc_skb_priv *sp = rxrpc_skb(skb);
-
-	if (rxrpc_set_conn_aborted(conn, skb, abort_code, err,
-				   RXRPC_CALL_LOCALLY_ABORTED)) {
-		trace_rxrpc_abort(0, why, sp->hdr.cid, sp->hdr.callNumber,
-				  sp->hdr.seq, abort_code, err);
-		rxrpc_poke_conn(conn, rxrpc_conn_get_poke_abort);
-	}
-	return -EPROTO;
-}
-
-/*
- * Mark a connection as being remotely aborted.
- */
-static bool rxrpc_input_conn_abort(struct rxrpc_connection *conn,
-				   struct sk_buff *skb)
-{
-	return rxrpc_set_conn_aborted(conn, skb, skb->priority, -ECONNABORTED,
-				      RXRPC_CALL_REMOTELY_ABORTED);
-}
-
-/*
  * Retransmit terminal ACK or ABORT of the previous call.
  */
-void rxrpc_conn_retransmit_call(struct rxrpc_connection *conn,
-				struct sk_buff *skb,
-				unsigned int channel)
+static void rxrpc_conn_retransmit_call(struct rxrpc_connection *conn,
+				       struct sk_buff *skb,
+				       unsigned int channel)
 {
 	struct rxrpc_skb_priv *sp = skb ? rxrpc_skb(skb) : NULL;
 	struct rxrpc_channel *chan;
@@ -100,7 +46,9 @@ void rxrpc_conn_retransmit_call(struct rxrpc_connection *conn,
 	/* If the last call got moved on whilst we were waiting to run, just
 	 * ignore this packet.
 	 */
-	call_id = chan->last_call;
+	call_id = READ_ONCE(chan->last_call);
+	/* Sync with __rxrpc_disconnect_call() */
+	smp_rmb();
 	if (skb && call_id != sp->hdr.callNumber)
 		return;
 
@@ -117,12 +65,9 @@ void rxrpc_conn_retransmit_call(struct rxrpc_connection *conn,
 	iov[2].iov_base	= &ack_info;
 	iov[2].iov_len	= sizeof(ack_info);
 
-	serial = atomic_inc_return(&conn->serial);
-
 	pkt.whdr.epoch		= htonl(conn->proto.epoch);
 	pkt.whdr.cid		= htonl(conn->proto.cid | channel);
 	pkt.whdr.callNumber	= htonl(call_id);
-	pkt.whdr.serial		= htonl(serial);
 	pkt.whdr.seq		= 0;
 	pkt.whdr.type		= chan->last_type;
 	pkt.whdr.flags		= conn->out_clientflag;
@@ -159,15 +104,31 @@ void rxrpc_conn_retransmit_call(struct rxrpc_connection *conn,
 		iov[0].iov_len += sizeof(pkt.ack);
 		len += sizeof(pkt.ack) + 3 + sizeof(ack_info);
 		ioc = 3;
+		break;
 
+	default:
+		return;
+	}
+
+	/* Resync with __rxrpc_disconnect_call() and check that the last call
+	 * didn't get advanced whilst we were filling out the packets.
+	 */
+	smp_rmb();
+	if (READ_ONCE(chan->last_call) != call_id)
+		return;
+
+	serial = atomic_inc_return(&conn->serial);
+	pkt.whdr.serial = htonl(serial);
+
+	switch (chan->last_type) {
+	case RXRPC_PACKET_TYPE_ABORT:
+		break;
+	case RXRPC_PACKET_TYPE_ACK:
 		trace_rxrpc_tx_ack(chan->call_debug_id, serial,
 				   ntohl(pkt.ack.firstPacket),
 				   ntohl(pkt.ack.serial),
 				   pkt.ack.reason, 0);
 		break;
-
-	default:
-		return;
 	}
 
 	ret = kernel_sendmsg(conn->local->socket, &msg, iov, ioc, len);
@@ -185,23 +146,115 @@ void rxrpc_conn_retransmit_call(struct rxrpc_connection *conn,
 /*
  * pass a connection-level abort onto all calls on that connection
  */
-static void rxrpc_abort_calls(struct rxrpc_connection *conn)
+static void rxrpc_abort_calls(struct rxrpc_connection *conn,
+			      enum rxrpc_call_completion compl,
+			      rxrpc_serial_t serial)
 {
 	struct rxrpc_call *call;
 	int i;
 
 	_enter("{%d},%x", conn->debug_id, conn->abort_code);
 
+	spin_lock(&conn->bundle->channel_lock);
+
 	for (i = 0; i < RXRPC_MAXCALLS; i++) {
-		call = conn->channels[i].call;
-		if (call)
-			rxrpc_set_call_completion(call,
-						  conn->completion,
+		call = rcu_dereference_protected(
+			conn->channels[i].call,
+			lockdep_is_held(&conn->bundle->channel_lock));
+		if (call) {
+			if (compl == RXRPC_CALL_LOCALLY_ABORTED)
+				trace_rxrpc_abort(call->debug_id,
+						  "CON", call->cid,
+						  call->call_id, 0,
 						  conn->abort_code,
 						  conn->error);
+			else
+				trace_rxrpc_rx_abort(call, serial,
+						     conn->abort_code);
+			rxrpc_set_call_completion(call, compl,
+						  conn->abort_code,
+						  conn->error);
+		}
 	}
 
+	spin_unlock(&conn->bundle->channel_lock);
 	_leave("");
+}
+
+/*
+ * generate a connection-level abort
+ */
+static int rxrpc_abort_connection(struct rxrpc_connection *conn,
+				  int error, u32 abort_code)
+{
+	struct rxrpc_wire_header whdr;
+	struct msghdr msg;
+	struct kvec iov[2];
+	__be32 word;
+	size_t len;
+	u32 serial;
+	int ret;
+
+	_enter("%d,,%u,%u", conn->debug_id, error, abort_code);
+
+	/* generate a connection-level abort */
+	spin_lock(&conn->state_lock);
+	if (conn->state >= RXRPC_CONN_REMOTELY_ABORTED) {
+		spin_unlock(&conn->state_lock);
+		_leave(" = 0 [already dead]");
+		return 0;
+	}
+
+	conn->error = error;
+	conn->abort_code = abort_code;
+	conn->state = RXRPC_CONN_LOCALLY_ABORTED;
+	set_bit(RXRPC_CONN_DONT_REUSE, &conn->flags);
+	spin_unlock(&conn->state_lock);
+
+	msg.msg_name	= &conn->peer->srx.transport;
+	msg.msg_namelen	= conn->peer->srx.transport_len;
+	msg.msg_control	= NULL;
+	msg.msg_controllen = 0;
+	msg.msg_flags	= 0;
+
+	whdr.epoch	= htonl(conn->proto.epoch);
+	whdr.cid	= htonl(conn->proto.cid);
+	whdr.callNumber	= 0;
+	whdr.seq	= 0;
+	whdr.type	= RXRPC_PACKET_TYPE_ABORT;
+	whdr.flags	= conn->out_clientflag;
+	whdr.userStatus	= 0;
+	whdr.securityIndex = conn->security_ix;
+	whdr._rsvd	= 0;
+	whdr.serviceId	= htons(conn->service_id);
+
+	word		= htonl(conn->abort_code);
+
+	iov[0].iov_base	= &whdr;
+	iov[0].iov_len	= sizeof(whdr);
+	iov[1].iov_base	= &word;
+	iov[1].iov_len	= sizeof(word);
+
+	len = iov[0].iov_len + iov[1].iov_len;
+
+	serial = atomic_inc_return(&conn->serial);
+	rxrpc_abort_calls(conn, RXRPC_CALL_LOCALLY_ABORTED, serial);
+	whdr.serial = htonl(serial);
+
+	ret = kernel_sendmsg(conn->local->socket, &msg, iov, 2, len);
+	if (ret < 0) {
+		trace_rxrpc_tx_fail(conn->debug_id, serial, ret,
+				    rxrpc_tx_point_conn_abort);
+		_debug("sendmsg failed: %d", ret);
+		return -EAGAIN;
+	}
+
+	trace_rxrpc_tx_packet(conn->debug_id, &whdr, rxrpc_tx_point_conn_abort);
+
+	conn->peer->last_tx_at = ktime_get_seconds();
+
+	_leave(" = 0");
+	return 0;
 }
 
 /*
@@ -210,9 +263,14 @@ static void rxrpc_abort_calls(struct rxrpc_connection *conn)
  */
 static void rxrpc_call_is_secure(struct rxrpc_call *call)
 {
-	if (call && __rxrpc_call_state(call) == RXRPC_CALL_SERVER_SECURING) {
-		rxrpc_set_call_state(call, RXRPC_CALL_SERVER_RECV_REQUEST);
-		rxrpc_notify_socket(call);
+	_enter("%p", call);
+	if (call) {
+		write_lock(&call->state_lock);
+		if (call->state == RXRPC_CALL_SERVER_SECURING) {
+			call->state = RXRPC_CALL_SERVER_RECV_REQUEST;
+			rxrpc_notify_socket(call);
+		}
+		write_unlock(&call->state_lock);
 	}
 }
 
@@ -220,22 +278,44 @@ static void rxrpc_call_is_secure(struct rxrpc_call *call)
  * connection-level Rx packet processor
  */
 static int rxrpc_process_event(struct rxrpc_connection *conn,
-			       struct sk_buff *skb)
+			       struct sk_buff *skb,
+			       u32 *_abort_code)
 {
 	struct rxrpc_skb_priv *sp = rxrpc_skb(skb);
-	int ret;
+	int loop, ret;
 
-	if (conn->state == RXRPC_CONN_ABORTED)
+	if (conn->state >= RXRPC_CONN_REMOTELY_ABORTED) {
+		_leave(" = -ECONNABORTED [%u]", conn->state);
 		return -ECONNABORTED;
+	}
 
 	_enter("{%d},{%u,%%%u},", conn->debug_id, sp->hdr.type, sp->hdr.serial);
 
 	switch (sp->hdr.type) {
+	case RXRPC_PACKET_TYPE_DATA:
+	case RXRPC_PACKET_TYPE_ACK:
+		rxrpc_conn_retransmit_call(conn, skb,
+					   sp->hdr.cid & RXRPC_CHANNELMASK);
+		return 0;
+
+	case RXRPC_PACKET_TYPE_BUSY:
+		/* Just ignore BUSY packets for now. */
+		return 0;
+
+	case RXRPC_PACKET_TYPE_ABORT:
+		conn->error = -ECONNABORTED;
+		conn->abort_code = skb->priority;
+		conn->state = RXRPC_CONN_REMOTELY_ABORTED;
+		set_bit(RXRPC_CONN_DONT_REUSE, &conn->flags);
+		rxrpc_abort_calls(conn, RXRPC_CALL_REMOTELY_ABORTED, sp->hdr.serial);
+		return -ECONNABORTED;
+
 	case RXRPC_PACKET_TYPE_CHALLENGE:
-		return conn->security->respond_to_challenge(conn, skb);
+		return conn->security->respond_to_challenge(conn, skb,
+							    _abort_code);
 
 	case RXRPC_PACKET_TYPE_RESPONSE:
-		ret = conn->security->verify_response(conn, skb);
+		ret = conn->security->verify_response(conn, skb, _abort_code);
 		if (ret < 0)
 			return ret;
 
@@ -244,25 +324,27 @@ static int rxrpc_process_event(struct rxrpc_connection *conn,
 		if (ret < 0)
 			return ret;
 
+		spin_lock(&conn->bundle->channel_lock);
 		spin_lock(&conn->state_lock);
-		if (conn->state == RXRPC_CONN_SERVICE_CHALLENGING)
-			conn->state = RXRPC_CONN_SERVICE;
-		spin_unlock(&conn->state_lock);
 
-		if (conn->state == RXRPC_CONN_SERVICE) {
-			/* Offload call state flipping to the I/O thread.  As
-			 * we've already received the packet, put it on the
-			 * front of the queue.
-			 */
-			skb->mark = RXRPC_SKB_MARK_SERVICE_CONN_SECURED;
-			rxrpc_get_skb(skb, rxrpc_skb_get_conn_secured);
-			skb_queue_head(&conn->local->rx_queue, skb);
-			rxrpc_wake_up_io_thread(conn->local);
+		if (conn->state == RXRPC_CONN_SERVICE_CHALLENGING) {
+			conn->state = RXRPC_CONN_SERVICE;
+			spin_unlock(&conn->state_lock);
+			for (loop = 0; loop < RXRPC_MAXCALLS; loop++)
+				rxrpc_call_is_secure(
+					rcu_dereference_protected(
+						conn->channels[loop].call,
+						lockdep_is_held(&conn->bundle->channel_lock)));
+		} else {
+			spin_unlock(&conn->state_lock);
 		}
+
+		spin_unlock(&conn->bundle->channel_lock);
 		return 0;
 
 	default:
-		WARN_ON_ONCE(1);
+		trace_rxrpc_rx_eproto(NULL, sp->hdr.serial,
+				      tracepoint_string("bad_conn_pkt"));
 		return -EPROTO;
 	}
 }
@@ -272,9 +354,26 @@ static int rxrpc_process_event(struct rxrpc_connection *conn,
  */
 static void rxrpc_secure_connection(struct rxrpc_connection *conn)
 {
-	if (conn->security->issue_challenge(conn) < 0)
-		rxrpc_abort_conn(conn, NULL, RX_CALL_DEAD, -ENOMEM,
-				 rxrpc_abort_nomem);
+	u32 abort_code;
+	int ret;
+
+	_enter("{%d}", conn->debug_id);
+
+	ASSERT(conn->security_ix != 0);
+
+	if (conn->security->issue_challenge(conn) < 0) {
+		abort_code = RX_CALL_DEAD;
+		ret = -ENOMEM;
+		goto abort;
+	}
+
+	_leave("");
+	return;
+
+abort:
+	_debug("abort %d, %d", ret, abort_code);
+	rxrpc_abort_connection(conn, ret, abort_code);
+	_leave(" [aborted]");
 }
 
 /*
@@ -296,7 +395,9 @@ again:
 		if (!test_bit(RXRPC_CONN_FINAL_ACK_0 + channel, &conn->flags))
 			continue;
 
-		ack_at = chan->final_ack_at;
+		smp_rmb(); /* vs rxrpc_disconnect_client_call */
+		ack_at = READ_ONCE(chan->final_ack_at);
+
 		if (time_before(j, ack_at) && !force) {
 			if (time_before(ack_at, next_j)) {
 				next_j = ack_at;
@@ -323,27 +424,47 @@ again:
 static void rxrpc_do_process_connection(struct rxrpc_connection *conn)
 {
 	struct sk_buff *skb;
+	u32 abort_code = RX_PROTOCOL_ERROR;
 	int ret;
 
 	if (test_and_clear_bit(RXRPC_CONN_EV_CHALLENGE, &conn->events))
 		rxrpc_secure_connection(conn);
 
+	/* Process delayed ACKs whose time has come. */
+	if (conn->flags & RXRPC_CONN_FINAL_ACK_MASK)
+		rxrpc_process_delayed_final_acks(conn, false);
+
 	/* go through the conn-level event packets, releasing the ref on this
 	 * connection that each one has when we've finished with it */
 	while ((skb = skb_dequeue(&conn->rx_queue))) {
 		rxrpc_see_skb(skb, rxrpc_skb_see_conn_work);
-		ret = rxrpc_process_event(conn, skb);
+		ret = rxrpc_process_event(conn, skb, &abort_code);
 		switch (ret) {
+		case -EPROTO:
+		case -EKEYEXPIRED:
+		case -EKEYREJECTED:
+			goto protocol_error;
 		case -ENOMEM:
 		case -EAGAIN:
-			skb_queue_head(&conn->rx_queue, skb);
-			rxrpc_queue_conn(conn, rxrpc_conn_queue_retry_work);
-			break;
+			goto requeue_and_leave;
+		case -ECONNABORTED:
 		default:
 			rxrpc_free_skb(skb, rxrpc_skb_put_conn_work);
 			break;
 		}
 	}
+
+	return;
+
+requeue_and_leave:
+	skb_queue_head(&conn->rx_queue, skb);
+	return;
+
+protocol_error:
+	if (rxrpc_abort_connection(conn, ret, abort_code) < 0)
+		goto requeue_and_leave;
+	rxrpc_free_skb(skb, rxrpc_skb_put_conn_work);
+	return;
 }
 
 void rxrpc_process_connection(struct work_struct *work)
@@ -377,59 +498,44 @@ static void rxrpc_post_packet_to_conn(struct rxrpc_connection *conn,
 /*
  * Input a connection-level packet.
  */
-bool rxrpc_input_conn_packet(struct rxrpc_connection *conn, struct sk_buff *skb)
+int rxrpc_input_conn_packet(struct rxrpc_connection *conn, struct sk_buff *skb)
 {
 	struct rxrpc_skb_priv *sp = rxrpc_skb(skb);
 
+	if (conn->state >= RXRPC_CONN_REMOTELY_ABORTED) {
+		_leave(" = -ECONNABORTED [%u]", conn->state);
+		return -ECONNABORTED;
+	}
+
+	_enter("{%d},{%u,%%%u},", conn->debug_id, sp->hdr.type, sp->hdr.serial);
+
 	switch (sp->hdr.type) {
+	case RXRPC_PACKET_TYPE_DATA:
+	case RXRPC_PACKET_TYPE_ACK:
+		rxrpc_conn_retransmit_call(conn, skb,
+					   sp->hdr.cid & RXRPC_CHANNELMASK);
+		return 0;
+
 	case RXRPC_PACKET_TYPE_BUSY:
 		/* Just ignore BUSY packets for now. */
-		return true;
+		return 0;
 
 	case RXRPC_PACKET_TYPE_ABORT:
-		if (rxrpc_is_conn_aborted(conn))
-			return true;
-		rxrpc_input_conn_abort(conn, skb);
-		rxrpc_abort_calls(conn);
-		return true;
+		conn->error = -ECONNABORTED;
+		conn->abort_code = skb->priority;
+		conn->state = RXRPC_CONN_REMOTELY_ABORTED;
+		set_bit(RXRPC_CONN_DONT_REUSE, &conn->flags);
+		rxrpc_abort_calls(conn, RXRPC_CALL_REMOTELY_ABORTED, sp->hdr.serial);
+		return -ECONNABORTED;
 
 	case RXRPC_PACKET_TYPE_CHALLENGE:
 	case RXRPC_PACKET_TYPE_RESPONSE:
-		if (rxrpc_is_conn_aborted(conn)) {
-			if (conn->completion == RXRPC_CALL_LOCALLY_ABORTED)
-				rxrpc_send_conn_abort(conn);
-			return true;
-		}
 		rxrpc_post_packet_to_conn(conn, skb);
-		return true;
+		return 0;
 
 	default:
-		WARN_ON_ONCE(1);
-		return true;
+		trace_rxrpc_rx_eproto(NULL, sp->hdr.serial,
+				      tracepoint_string("bad_conn_pkt"));
+		return -EPROTO;
 	}
-}
-
-/*
- * Input a connection event.
- */
-void rxrpc_input_conn_event(struct rxrpc_connection *conn, struct sk_buff *skb)
-{
-	unsigned int loop;
-
-	if (test_and_clear_bit(RXRPC_CONN_EV_ABORT_CALLS, &conn->events))
-		rxrpc_abort_calls(conn);
-
-	switch (skb->mark) {
-	case RXRPC_SKB_MARK_SERVICE_CONN_SECURED:
-		if (conn->state != RXRPC_CONN_SERVICE)
-			break;
-
-		for (loop = 0; loop < RXRPC_MAXCALLS; loop++)
-			rxrpc_call_is_secure(conn->channels[loop].call);
-		break;
-	}
-
-	/* Process delayed ACKs whose time has come. */
-	if (conn->flags & RXRPC_CONN_FINAL_ACK_MASK)
-		rxrpc_process_delayed_final_acks(conn, false);
 }

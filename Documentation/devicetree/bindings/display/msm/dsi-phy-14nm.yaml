@@ -39,6 +39,7 @@ required:
   - compatible
   - reg
   - reg-names
+  - vcca-supply
 
 unevaluatedProperties: false
 
