@@ -11,7 +11,6 @@
 
 struct cbt_map;
 struct diff_area;
-struct snapimage;
 
 /**
  * struct tracker - Tracker for a block device.
@@ -31,7 +30,7 @@ struct snapimage;
  *	Pointer to a change block tracker map.
  * @diff_area:
  *	Pointer to a difference area.
- * @snapimage:
+ * @snap_disk:
  *
  * The goal of the tracker is to handle I/O unit. The tracker detectes
  * the range of sectors that will change and transmits them to the CBT map
@@ -47,7 +46,7 @@ struct tracker {
 
 	struct cbt_map *cbt_map;
 	struct diff_area *diff_area;
-        struct snapimage *snapimage;
+        struct gendisk *snap_disk;
 
         bool is_frozen;
 	struct work_struct release_work;

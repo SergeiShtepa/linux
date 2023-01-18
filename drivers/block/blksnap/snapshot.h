@@ -14,7 +14,6 @@
 
 struct tracker;
 struct diff_storage;
-struct snapimage;
 /**
  * struct snapshot - Snapshot structure.
  * @link:
@@ -28,14 +27,8 @@ struct snapimage;
  *	Flag that the snapshot was taken.
  * @diff_storage:
  *	A pointer to the difference storage of this snapshot.
- * @count:
- *	The number of block devices in the snapshot. This number
- *	corresponds to the size of arrays of pointers to trackers
- *	and snapshot images.
- * @tracker_array:
- *	Array of pointers to block device trackers.
- * @snapimage_array:
- *	Array of pointers to images of snapshots of block devices.
+ * @trackers:
+ *	List of block device trackers.
  *
  * A snapshot corresponds to a single backup session and provides snapshot
  * images for multiple block devices. Several backup sessions can be

@@ -136,7 +136,6 @@ static struct blkfilter *tracker_attach(struct block_device *bdev)
 	atomic_set(&tracker->snapshot_is_taken, false);
 	tracker->cbt_map = cbt_map;
 	tracker->diff_area = NULL;
-	tracker->snapimage =  NULL;
 	tracker->is_frozen = false;
 
 	pr_debug("New tracker for device [%u:%u] was created\n",
@@ -258,8 +257,8 @@ static int ctl_snapshotinfo(struct tracker *tracker,
 	else
 		arg.error_code = 0;
 
-	if (tracker->snapimage)
-		strncpy(arg.image, tracker->snapimage->disk->disk_name, IMAGE_DISK_NAME_LEN);
+	if (tracker->snap_disk)
+		strncpy(arg.image, tracker->snap_disk->disk_name, IMAGE_DISK_NAME_LEN);
 
 	*plen = sizeof(arg);
 	return ret;
@@ -345,10 +344,7 @@ void tracker_release_snapshot(struct tracker *tracker)
 
 	blk_mq_unfreeze_queue(tracker->diff_area->orig_bdev->bd_queue);
 
-	if (tracker->snapimage) {
-		snapimage_free(tracker->snapimage);
-		tracker->snapimage = NULL;
-	}
+	snapimage_free(tracker);
 
 	if (tracker->diff_area) {
 		diff_area_free(tracker->diff_area);
