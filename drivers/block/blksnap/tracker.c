@@ -332,15 +332,16 @@ int tracker_take_snapshot(struct tracker *tracker)
 
 void tracker_release_snapshot(struct tracker *tracker)
 {
-	blk_mq_freeze_queue(tracker->diff_area->orig_bdev->bd_queue);
+	if (tracker->diff_area) {
+		blk_mq_freeze_queue(tracker->diff_area->orig_bdev->bd_queue);
 
-	pr_debug("Tracker for device [%u:%u] release snapshot\n",
-		 MAJOR(tracker->dev_id), MINOR(tracker->dev_id));
+		pr_debug("Tracker for device [%u:%u] release snapshot\n",
+			 MAJOR(tracker->dev_id), MINOR(tracker->dev_id));
 
-	atomic_set(&tracker->snapshot_is_taken, false);
+		atomic_set(&tracker->snapshot_is_taken, false);
 
-	blk_mq_unfreeze_queue(tracker->diff_area->orig_bdev->bd_queue);
-
+		blk_mq_unfreeze_queue(tracker->diff_area->orig_bdev->bd_queue);
+	}
 	if (tracker->snapimage) {
 		snapimage_free(tracker->snapimage);
 		tracker->snapimage = NULL;
