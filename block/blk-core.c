@@ -700,7 +700,7 @@ void submit_bio_noacct_nocheck(struct bio *bio)
 
 	if (bio->bi_bdev->bd_filter && !bio_flagged(bio, BIO_FILTERED)) {
 		bio_set_flag(bio, BIO_FILTERED);
-		if (bio->bi_bdev->bd_filter->ops->submit_bio(bio))
+		if (bio->bi_bdev->bd_filter->acc->ops->submit_bio(bio))
 			return;
 	}
 
