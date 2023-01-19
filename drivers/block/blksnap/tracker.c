@@ -108,7 +108,7 @@ static bool tracker_submit_bio(struct bio *bio)
 	return false;
 }
 
-static struct blkfilter_operations tracker_ops;
+static struct blkfilter_account tracker_acc;
 
 static struct blkfilter *tracker_attach(struct block_device *bdev)
 {
@@ -131,7 +131,7 @@ static struct blkfilter *tracker_attach(struct block_device *bdev)
 		return ERR_PTR(-ENOMEM);
 	}
 
-	tracker->filter.ops = &tracker_ops;
+	tracker->filter.acc = &tracker_acc;
 	INIT_LIST_HEAD(&tracker->link);
 	kref_init(&tracker->kref);
 	tracker->dev_id = bdev->bd_dev;
@@ -280,13 +280,17 @@ static int tracker_ctl(struct blkfilter *flt, const unsigned int cmd,
 	return ctl_table[cmd](tracker, buf, plen);
 }
 
-static struct blkfilter_operations tracker_ops = {
-	.name		= "blksnap",
-	.owner		= THIS_MODULE,
+const static struct blkfilter_operations tracker_ops = {
 	.attach		= tracker_attach,
 	.detach		= tracker_detach,
 	.ctl		= tracker_ctl,
 	.submit_bio	= tracker_submit_bio,
+};
+
+static struct blkfilter_account tracker_acc = {
+	.name		= "blksnap",
+	.owner		= THIS_MODULE,
+	.ops		= &tracker_ops,
 };
 
 int tracker_take_snapshot(struct tracker *tracker)
@@ -351,10 +355,10 @@ void tracker_release_snapshot(struct tracker *tracker)
 
 int tracker_init(void)
 {
-	return blkfilter_register(&tracker_ops);
+	return blkfilter_register(&tracker_acc);
 }
 
 void tracker_done(void)
 {
-	blkfilter_unregister(&tracker_ops);
+	blkfilter_unregister(&tracker_acc);
 }

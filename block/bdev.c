@@ -430,7 +430,7 @@ static void init_once(void *data)
 
 int blkfilter_detach(struct block_device *bdev, const char *name)
 {
-	const struct blkfilter_operations *ops;
+	const struct blkfilter_account *acc;
 	struct blkfilter *flt;
 	int error = 0;
 
@@ -440,17 +440,18 @@ int blkfilter_detach(struct block_device *bdev, const char *name)
 		error = -ENOENT;
 		goto out_unfreeze;
 	}
-	ops = flt->ops;
-	if (name && strncmp(ops->name, name, BLKFILTER_NAME_LENGTH) != 0) {
+	acc = flt->acc;
+	if (name && strncmp(acc->name, name, BLKFILTER_NAME_LENGTH) != 0) {
 		error = -EINVAL;
 		goto out_unfreeze;
 	}
 
 	bdev->bd_filter = NULL;
-	ops->detach(flt);
-	module_put(ops->owner);
+	acc->ops->detach(flt);
+	module_put(acc->owner);
 out_unfreeze:
 	blk_mq_unfreeze_queue(bdev->bd_queue);
+
 	return error;
 }
 
@@ -1124,31 +1125,32 @@ void bdev_statx_dioalign(struct inode *inode, struct kstat *stat)
 	blkdev_put_no_open(bdev);
 }
 
-static inline struct blkfilter_operations *blkfilter_find_get(const char *name)
+static inline struct blkfilter_account *blkfilter_find_get(const char *name)
 {
-	struct blkfilter_operations *ops, *found = NULL;
+	struct blkfilter_account *acc, *found = NULL;
 
 	spin_lock(&blkfilters_lock);
-	list_for_each_entry(ops, &blkfilters, entry) {
-		if (strncmp(ops->name, name, BLKFILTER_NAME_LENGTH) == 0) {
-			found = ops;
+	list_for_each_entry(acc, &blkfilters, link) {
+		if (strncmp(acc->name, name, BLKFILTER_NAME_LENGTH) == 0) {
+			found = acc;
 			break;
 		}
 	}
 	if (found && !try_module_get(found->owner))
 		found = NULL;
 	spin_unlock(&blkfilters_lock);
+
 	return found;
 }
 
 int blkfilter_attach(struct block_device *bdev, const char *name)
 {
-	struct blkfilter_operations *ops;
+	struct blkfilter_account *acc;
 	struct blkfilter *flt;
 	int ret;
 
-	ops = blkfilter_find_get(name);
-	if (!ops)
+	acc = blkfilter_find_get(name);
+	if (!acc)
 		return -ENOENT;
 
 	ret = freeze_bdev(bdev);
@@ -1161,18 +1163,19 @@ int blkfilter_attach(struct block_device *bdev, const char *name)
 		goto out_unfreeze;
 	}
 
-	flt = ops->attach(bdev);
+	flt = acc->ops->attach(bdev);
 	if (IS_ERR(flt)) {
 		ret = PTR_ERR(flt);
 		goto out_unfreeze;
 	}
+	flt->acc = acc;
 	bdev->bd_filter = flt;
 
 out_unfreeze:
 	blk_mq_unfreeze_queue(bdev->bd_queue);
 	thaw_bdev(bdev);
 out_put_module:
-	module_put(ops->owner);
+	module_put(acc->owner);
 	return ret;
 }
 
@@ -1187,13 +1190,13 @@ int blkfilter_control(struct block_device *bdev, const char *name,
 		return ret;
 
 	flt = bdev->bd_filter;
-	if (!flt || strncmp(flt->ops->name, name, BLKFILTER_NAME_LENGTH) != 0) {
+	if (!flt || strncmp(flt->acc->name, name, BLKFILTER_NAME_LENGTH) != 0) {
 		ret = -ENOENT;
 		goto out_queue_exit;
 	}
 
-	if (flt->ops->ctl)
-		ret = flt->ops->ctl(flt, cmd, buf, plen);
+	if (flt->acc->ops->ctl)
+		ret = flt->acc->ops->ctl(flt, cmd, buf, plen);
 	else
 		ret = -ENOTTY;
 
@@ -1205,21 +1208,27 @@ out_queue_exit:
 /**
  * blkfilter_register() -
  */
-int blkfilter_register(struct blkfilter_operations *ops)
+int blkfilter_register(struct blkfilter_account *new_acc)
 {
-	struct blkfilter_operations *n;
+	struct blkfilter_account *acc;
 	int ret = 0;
 
 	spin_lock(&blkfilters_lock);
-	list_for_each_entry(n, &blkfilters, entry) {
-		if (n == ops) {
+	list_for_each_entry(acc, &blkfilters, link) {
+		if (new_acc == acc) {
 			ret = -EALREADY;
-			goto out_unlock;
+			break;
+		}
+		if (strncmp(new_acc->name, acc->name,
+			    BLKFILTER_NAME_LENGTH) == 0) {
+			ret = -EBUSY;
+			break;
 		}
 	}
-	list_add_tail(&ops->entry, &blkfilters);
-out_unlock:
+	if (!ret)
+		list_add_tail(&new_acc->link, &blkfilters);
 	spin_unlock(&blkfilters_lock);
+
 	return ret;
 }
 EXPORT_SYMBOL_GPL(blkfilter_register);
@@ -1227,10 +1236,15 @@ EXPORT_SYMBOL_GPL(blkfilter_register);
 /**
  *
  */
-void blkfilter_unregister(struct blkfilter_operations *ops)
+void blkfilter_unregister(struct blkfilter_account *acc)
 {
+	if (acc->owner && (module_refcount(acc->owner) != -1)) {
+		pr_err("The filter can be unregistered when the module is unloading");
+		return;
+	}
+
 	spin_lock(&blkfilters_lock);
-	list_del(&ops->entry);
+	list_del(&acc->link);
 	spin_unlock(&blkfilters_lock);
 }
 EXPORT_SYMBOL_GPL(blkfilter_unregister);

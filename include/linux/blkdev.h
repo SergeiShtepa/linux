@@ -1541,19 +1541,21 @@ struct io_comp_batch {
  *	device from the system.
  */
 struct blkfilter_operations {
-	struct list_head entry;
+	struct blkfilter * (*attach)(struct block_device *bdev);
+	void (*detach)(struct blkfilter *flt);
+	int (*ctl)(struct blkfilter *flt, const unsigned int cmd,
+		   __u8 __user *buf, __u32 *plen);
+	bool (*submit_bio)(struct bio *bio);
+};
+struct blkfilter_account {
+	struct list_head link;
 	struct module *owner;
 	const char *name;
-	struct blkfilter * const (*attach)(struct block_device *bdev);
-	void const (*detach)(struct blkfilter *flt);
-	int const (*ctl)(struct blkfilter *flt, const unsigned int cmd,
-		   __u8 __user *buf, __u32 *plen);
-	bool const (*submit_bio)(struct bio *bio);
+	const struct blkfilter_operations *ops;
 };
 
-int blkfilter_register(struct blkfilter_operations *ops);
-void blkfilter_unregister(struct blkfilter_operations *ops);
-
+int blkfilter_register(struct blkfilter_account *acc);
+void blkfilter_unregister(struct blkfilter_account *acc);
 
 /**
  * struct blkfilter - Block device filter.
@@ -1563,7 +1565,7 @@ void blkfilter_unregister(struct blkfilter_operations *ops);
  *	functions for the filter.
  */
 struct blkfilter {
-	const struct blkfilter_operations *ops;
+	const struct blkfilter_account *acc;
 };
 
 int blkfilter_attach(struct block_device *bdev, const char *name);
