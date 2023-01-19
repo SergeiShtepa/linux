@@ -1168,6 +1168,7 @@ int blkfilter_attach(struct block_device *bdev, const char *name)
 		ret = PTR_ERR(flt);
 		goto out_unfreeze;
 	}
+
 	flt->acc = acc;
 	bdev->bd_filter = flt;
 
@@ -1175,7 +1176,8 @@ out_unfreeze:
 	blk_mq_unfreeze_queue(bdev->bd_queue);
 	thaw_bdev(bdev);
 out_put_module:
-	module_put(acc->owner);
+	if (ret)
+		module_put(acc->owner);
 	return ret;
 }
 
@@ -1238,10 +1240,8 @@ EXPORT_SYMBOL_GPL(blkfilter_register);
  */
 void blkfilter_unregister(struct blkfilter_account *acc)
 {
-	if (acc->owner && (module_refcount(acc->owner) != -1)) {
-		pr_err("The filter can be unregistered when the module is unloading");
-		return;
-	}
+	WARN(acc->owner && (module_refcount(acc->owner) != -1),
+	     "The filter should be unregistered when the module is unloading");
 
 	spin_lock(&blkfilters_lock);
 	list_del(&acc->link);
