@@ -1159,7 +1159,10 @@ int blkfilter_attach(struct block_device *bdev, const char *name)
 	blk_mq_freeze_queue(bdev->bd_queue);
 
 	if (bdev->bd_filter) {
-		ret = -EBUSY;
+		if (bdev->bd_filter->acc == acc) {
+			ret = -EALREADY;
+		else
+			ret = -EBUSY;
 		goto out_unfreeze;
 	}
 
