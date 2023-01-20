@@ -182,8 +182,10 @@ int diff_io_do(struct diff_io *diff_io, struct diff_region *diff_region,
 	while ((bio = bio_list_pop(&bio_list_head)))
 		submit_bio_noacct(bio);
 
-	if (diff_io->is_sync_io)
+	if (diff_io->is_sync_io) {
+		WARN_ON_ONCE(current->bio_list);
 		wait_for_completion_io(&diff_io->notify.sync.completion);
+	}
 
 	return 0;
 fail:

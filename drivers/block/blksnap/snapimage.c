@@ -22,11 +22,20 @@ static void snapimage_submit_bio(struct bio *bio)
 	struct diff_area_image_ctx io_ctx;
 	struct bio_vec bvec;
 	struct bvec_iter iter;
+	struct bio_list *current_bio_list;
 
 	if (diff_area_is_corrupted(diff_area)) {
 		bio_io_error(bio);
 		return;
 	}
+
+	/*
+	 * Store bio_list for current thread in stack.
+	 * This allows to implement an algorithm for reading
+	 * from the snapshot image synchronously.
+	 */
+	current_bio_list = current->bio_list;
+	current->bio_list = NULL;
 
 	diff_area_throttling_io(diff_area);
 	diff_area_image_ctx_init(&io_ctx, diff_area, op_is_write(bio_op(bio)));
@@ -38,6 +47,11 @@ static void snapimage_submit_bio(struct bio *bio)
 			break;
 	}
 	diff_area_image_ctx_done(&io_ctx);
+
+	/*
+	 * Restore bio_list for current thread.
+	 */
+	current->bio_list = current_bio_list;
 	bio_endio(bio);
 }
 
