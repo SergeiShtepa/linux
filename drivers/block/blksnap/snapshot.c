@@ -373,10 +373,10 @@ int snapshot_take(const uuid_t *id)
 	snapshot_put(snapshot);
 
 	if (ret)
-		pr_info("Snapshot was taken successfully\n");
-	else
 		pr_err("Unable to take snapshot %pUb\n", &snapshot->id);
-
+	else
+		pr_info("Snapshot %pUb was taken successfully\n",
+			&snapshot->id);
 	return ret;
 }
 

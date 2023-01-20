@@ -145,8 +145,10 @@ static int ioctl_snapshot_append_storage(unsigned long arg)
 	}
 
 	bdev_path = strndup_user(karg.bdev_path, karg.bdev_path_size);
-	if (IS_ERR(bdev_path))
+	if (IS_ERR(bdev_path)) {
+		pr_err("Unable to append difference storage: invalid block device name buffer\n");
 		return PTR_ERR(bdev_path);
+	}
 
 	ret = snapshot_append_storage((uuid_t *)karg.id.b, bdev_path,
 				       karg.ranges, karg.count);
