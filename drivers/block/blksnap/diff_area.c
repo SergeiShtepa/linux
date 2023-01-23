@@ -462,14 +462,6 @@ static inline void diff_area_image_put_chunk(struct chunk *chunk, bool is_write)
 	chunk_schedule_caching(chunk);
 }
 
-void diff_area_image_ctx_done(struct diff_area_image_ctx *io_ctx)
-{
-	if (!io_ctx->chunk)
-		return;
-
-	diff_area_image_put_chunk(io_ctx->chunk, io_ctx->is_write);
-}
-
 static int diff_area_load_chunk_from_storage(struct diff_area *diff_area,
 					     struct chunk *chunk)
 {
@@ -489,26 +481,11 @@ static int diff_area_load_chunk_from_storage(struct diff_area *diff_area,
 }
 
 static struct chunk *
-diff_area_image_context_get_chunk(struct diff_area_image_ctx *io_ctx,
-				  sector_t sector)
+diff_area_image_context_get_chunk(struct diff_area *diff_area, sector_t sector)
 {
-	int ret;
-	struct chunk *chunk;
-	struct diff_area *diff_area = io_ctx->diff_area;
 	unsigned long new_chunk_number = chunk_number(diff_area, sector);
-
-	chunk = io_ctx->chunk;
-	if (chunk) {
-		if (chunk->number == new_chunk_number)
-			return chunk;
-
-		/*
-		 * If the sector falls into a new chunk, then we release
-		 * the old chunk.
-		 */
-		diff_area_image_put_chunk(chunk, io_ctx->is_write);
-		io_ctx->chunk = NULL;
-	}
+	struct chunk *chunk;
+	int ret;
 
 	/* Take a next chunk. */
 	chunk = xa_load(&diff_area->chunk_map, new_chunk_number);
@@ -547,7 +524,6 @@ diff_area_image_context_get_chunk(struct diff_area_image_ctx *io_ctx,
 	} else
 		diff_area_take_chunk_from_cache(diff_area, chunk);
 
-	io_ctx->chunk = chunk;
 	return chunk;
 
 fail_unlock_chunk:
@@ -562,56 +538,41 @@ static inline sector_t diff_area_chunk_start(struct diff_area *diff_area,
 	return (sector_t)(chunk->number) << diff_area->chunk_shift;
 }
 
-/*
- * Implements copying data from the chunk to bio_vec when reading or from
- * bio_vec to the chunk when writing.
- */
-blk_status_t diff_area_image_io(struct diff_area_image_ctx *io_ctx,
-				const struct bio_vec *bvec, sector_t *pos)
+int diff_area_rw_chunk(struct bio *bio, struct diff_area *diff_area)
 {
-	unsigned int bv_len = bvec->bv_len;
-	struct iov_iter iter;
+	bool is_write = op_is_write(bio_op(bio));
+	sector_t pos = bio->bi_iter.bi_sector;
+	unsigned int buff_offset;
+	struct chunk *chunk;
 
-	iov_iter_bvec(&iter, io_ctx->is_write ? WRITE : READ, bvec, 1, bv_len);
+	chunk = diff_area_image_context_get_chunk(diff_area, pos);
+	if (IS_ERR(chunk))
+		return PTR_ERR(chunk);
 
-	while (bv_len) {
-		struct diff_buffer_iter diff_buffer_iter;
-		struct chunk *chunk;
-		size_t buff_offset;
+	buff_offset = (pos - chunk_sector(chunk)) << SECTOR_SHIFT;
+	while (buff_offset < chunk->diff_buffer->size) {
+		struct bio_vec bvec = bio_iter_iovec(bio, bio->bi_iter);
+		unsigned int page_offset = offset_in_page(buff_offset);
+		struct page *page;
+		void *vaddr;
+		unsigned int len;
 
-		chunk = diff_area_image_context_get_chunk(io_ctx, *pos);
-		if (IS_ERR(chunk))
-			return BLK_STS_IOERR;
+		page = chunk->diff_buffer->pages[buff_offset >> PAGE_SHIFT];
+		vaddr = page_address(page) + page_offset;
+		len = min3(bvec.bv_len,
+			(unsigned int)chunk->diff_buffer->size - buff_offset,
+			(unsigned int)PAGE_SIZE - page_offset);
 
-		buff_offset = (size_t)(*pos - chunk_sector(chunk))
-				<< SECTOR_SHIFT;
-		while (bv_len &&
-		       diff_buffer_iter_get(chunk->diff_buffer, buff_offset,
-					    &diff_buffer_iter)) {
-			size_t sz;
+		if (is_write)
+			memcpy_from_bvec(vaddr, &bvec);
+		else
+			memcpy_to_bvec(&bvec, vaddr);
 
-			if (io_ctx->is_write)
-				sz = copy_page_from_iter(
-					diff_buffer_iter.page,
-					diff_buffer_iter.offset,
-					diff_buffer_iter.bytes,
-					&iter);
-			else
-				sz = copy_page_to_iter(
-					diff_buffer_iter.page,
-					diff_buffer_iter.offset,
-					diff_buffer_iter.bytes,
-					&iter);
-			if (!sz)
-				return BLK_STS_IOERR;
-
-			buff_offset += sz;
-			*pos += (sz >> SECTOR_SHIFT);
-			bv_len -= sz;
-		}
+		buff_offset += len;
+		bio_advance(bio, len);
 	}
-
-	return BLK_STS_OK;
+	diff_area_image_put_chunk(chunk, is_write);
+	return 0;
 }
 
 static inline void diff_area_event_corrupted(struct diff_area *diff_area)

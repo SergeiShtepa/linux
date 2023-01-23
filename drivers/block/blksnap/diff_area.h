@@ -132,34 +132,8 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
 
 int diff_area_wait(struct diff_area *diff_area, sector_t sector, sector_t count,
 		   const bool is_nowait);
-/**
- * struct diff_area_image_ctx - The context for processing an io request to
- *	the snapshot image.
- * @diff_area:
- *	Pointer to &struct diff_area for the current snapshot image.
- * @is_write:
- *	Distinguishes between the behavior of reading or writing when
- *	processing a request.
- * @chunk:
- *	Current chunk.
- */
-struct diff_area_image_ctx {
-	struct diff_area *diff_area;
-	bool is_write;
-	struct chunk *chunk;
-};
 
-static inline void diff_area_image_ctx_init(struct diff_area_image_ctx *io_ctx,
-					    struct diff_area *diff_area,
-					    bool is_write)
-{
-	io_ctx->diff_area = diff_area;
-	io_ctx->is_write = is_write;
-	io_ctx->chunk = NULL;
-};
-void diff_area_image_ctx_done(struct diff_area_image_ctx *io_ctx);
-blk_status_t diff_area_image_io(struct diff_area_image_ctx *io_ctx,
-				const struct bio_vec *bvec, sector_t *pos);
+int diff_area_rw_chunk(struct bio *bio, struct diff_area *diff_area);
 
 void diff_area_throttling_io(struct diff_area *diff_area);
 

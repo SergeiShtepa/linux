@@ -29,44 +29,6 @@ struct diff_buffer {
 	struct page *pages[0];
 };
 
-/**
- * struct diff_buffer_iter - Iterator for &struct diff_buffer.
- * @page:
- *      A pointer to the current page.
- * @offset:
- *      The offset in bytes in the current page.
- * @bytes:
- *      The number of bytes that can be read or written from the current page.
- *
- * It is convenient to use when copying data from or to &struct bio_vec.
- */
-struct diff_buffer_iter {
-	struct page *page;
-	size_t offset;
-	size_t bytes;
-};
-
-static inline bool diff_buffer_iter_get(struct diff_buffer *diff_buffer,
-					size_t buff_offset,
-					struct diff_buffer_iter *iter)
-{
-	if (diff_buffer->size <= buff_offset)
-		return false;
-
-	iter->page = diff_buffer->pages[buff_offset >> PAGE_SHIFT];
-	iter->offset = (size_t)(buff_offset & (PAGE_SIZE - 1));
-	/*
-	 * The size cannot exceed the size of the page, taking into account
-	 * the offset in this page.
-	 * But at the same time it is unacceptable to go beyond the allocated
-	 * buffer.
-	 */
-	iter->bytes = min_t(size_t, (PAGE_SIZE - iter->offset),
-			    (diff_buffer->size - buff_offset));
-
-	return true;
-};
-
 struct diff_buffer *diff_buffer_take(struct diff_area *diff_area,
 				     const bool is_nowait);
 void diff_buffer_release(struct diff_area *diff_area,
