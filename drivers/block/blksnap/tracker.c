@@ -252,7 +252,6 @@ static int ctl_snapshotinfo(struct tracker *tracker,
 			    __u8 __user *buf, __u32 *plen)
 {
 	struct blksnap_snapshotinfo arg = {0};
-	int ret = 0;
 
 	if (*plen < sizeof(arg))
 		return -EINVAL;
@@ -269,8 +268,11 @@ static int ctl_snapshotinfo(struct tracker *tracker,
 	if (tracker->snap_disk)
 		strncpy(arg.image, tracker->snap_disk->disk_name, IMAGE_DISK_NAME_LEN);
 
+	if (copy_to_user(buf, &arg, sizeof(arg)))
+		return -ENODATA;
+
 	*plen = sizeof(arg);
-	return ret;
+	return 0;
 }
 
 static int (*const ctl_table[])(struct tracker *tracker,
