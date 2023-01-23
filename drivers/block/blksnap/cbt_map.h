@@ -86,8 +86,4 @@ int cbt_map_set(struct cbt_map *cbt_map, sector_t sector_start,
 int cbt_map_set_both(struct cbt_map *cbt_map, sector_t sector_start,
 		     sector_t sector_cnt);
 
-int cbt_map_mark_dirty_blocks(struct cbt_map *cbt_map,
-			      struct blksnap_sectors *block_ranges,
-			      unsigned int count);
-
 #endif /* __BLKSNAP_CBT_MAP_H */

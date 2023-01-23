@@ -199,7 +199,7 @@ static int ctl_cbtmap(struct tracker *tracker, __u8 __user *buf, __u32 *plen)
 		return -ENODATA;
 
 	if (copy_to_user(arg.buffer, cbt_map->read_map + arg.offset,
-			 min((cbt_map->blk_count - arg.offset), arg.length)))
+			 min_t(unsigned int, cbt_map->blk_count - arg.offset, arg.length)))
 		return -EINVAL;
 
 	*plen = 0;
@@ -209,6 +209,7 @@ static int ctl_cbtdirty(struct tracker *tracker, __u8 __user *buf, __u32 *plen)
 {
 	struct cbt_map *cbt_map = tracker->cbt_map;
 	struct blksnap_cbtdirty arg;
+	unsigned int inx;
 
 	if (!cbt_map)
 		return -ESRCH;
@@ -219,9 +220,19 @@ static int ctl_cbtdirty(struct tracker *tracker, __u8 __user *buf, __u32 *plen)
 	if (copy_from_user(&arg, buf, sizeof(arg)))
 		return -ENODATA;
 
+	for (inx=0; inx < arg.count; inx++) {
+		struct blksnap_sectors range;
+		int ret;
+
+		if (copy_from_user(&range, arg.dirty_sectors, sizeof(range)))
+			return -ENODATA;
+
+		ret = cbt_map_set_both(cbt_map, range.offset, range.count);
+		if (ret)
+			return ret;
+	}
 	*plen = 0;
-	return cbt_map_mark_dirty_blocks(cbt_map, arg.dirty_sectors_array,
-					 arg.count);
+	return 0;
 }
 static int ctl_snapshotadd(struct tracker *tracker,
 			   __u8 __user *buf, __u32 *plen)

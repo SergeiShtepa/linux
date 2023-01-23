@@ -219,21 +219,3 @@ int cbt_map_set_both(struct cbt_map *cbt_map, sector_t sector_start,
 
 	return res;
 }
-
-int cbt_map_mark_dirty_blocks(struct cbt_map *cbt_map,
-			      struct blksnap_sectors *blksnap_sectors,
-			      unsigned int count)
-{
-	int inx;
-	int ret = 0;
-
-	for (inx = 0; inx < count; inx++) {
-		ret = cbt_map_set_both(cbt_map,
-				       blksnap_sectors[inx].offset,
-				       blksnap_sectors[inx].count);
-		if (ret)
-			break;
-	}
-
-	return ret;
-}
