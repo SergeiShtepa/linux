@@ -183,7 +183,6 @@ static int ctl_cbtmap(struct tracker *tracker, __u8 __user *buf, __u32 *plen)
 {
 	struct cbt_map *cbt_map = tracker->cbt_map;
 	struct blksnap_cbtmap arg;
-	size_t readed;
 
 	if (!cbt_map)
 		return -ESRCH;
@@ -199,10 +198,11 @@ static int ctl_cbtmap(struct tracker *tracker, __u8 __user *buf, __u32 *plen)
 	if (copy_from_user(&arg, buf, sizeof(arg)))
 		return -ENODATA;
 
-	readed = cbt_map_read_to_user(cbt_map, arg.buffer, arg.offset,
-				      arg.length);
-	*plen = sizeof(arg) + readed;
+	if (copy_to_user(arg.buffer, cbt_map->read_map + arg.offset,
+			 min((cbt_map->blk_count - arg.offset), arg.length)))
+		return -EINVAL;
 
+	*plen = 0;
 	return 0;
 }
 static int ctl_cbtdirty(struct tracker *tracker, __u8 __user *buf, __u32 *plen)

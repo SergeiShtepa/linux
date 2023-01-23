@@ -220,27 +220,6 @@ int cbt_map_set_both(struct cbt_map *cbt_map, sector_t sector_start,
 	return res;
 }
 
-size_t cbt_map_read_to_user(struct cbt_map *cbt_map, char __user *user_buff,
-			    size_t offset, size_t size)
-{
-	size_t readed = 0;
-	size_t left_size;
-	size_t real_size = min((cbt_map->blk_count - offset), size);
-
-
-	left_size = copy_to_user(user_buff, cbt_map->read_map, real_size);
-
-	if (left_size == 0)
-		readed = real_size;
-	else {
-		pr_err("Not all CBT data was read. Left [%zu] bytes\n",
-		       left_size);
-		readed = real_size - left_size;
-	}
-
-	return readed;
-}
-
 int cbt_map_mark_dirty_blocks(struct cbt_map *cbt_map,
 			      struct blksnap_sectors *blksnap_sectors,
 			      unsigned int count)
