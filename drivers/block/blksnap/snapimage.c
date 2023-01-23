@@ -18,10 +18,6 @@ static void snapimage_submit_bio(struct bio *bio)
 {
 	struct tracker *tracker = bio->bi_bdev->bd_disk->private_data;
 	struct diff_area *diff_area = tracker->diff_area;
-	sector_t pos = bio->bi_iter.bi_sector;
-	struct diff_area_image_ctx io_ctx;
-	struct bio_vec bvec;
-	struct bvec_iter iter;
 	struct bio_list *current_bio_list;
 
 	if (diff_area_is_corrupted(diff_area)) {
@@ -38,15 +34,12 @@ static void snapimage_submit_bio(struct bio *bio)
 	current->bio_list = NULL;
 
 	diff_area_throttling_io(diff_area);
-	diff_area_image_ctx_init(&io_ctx, diff_area, op_is_write(bio_op(bio)));
-	bio_for_each_segment(bvec, bio, iter) {
-		blk_status_t st;
-
-		st = diff_area_image_io(&io_ctx, &bvec, &pos);
-		if (unlikely(st != BLK_STS_OK))
+	while (bio->bi_iter.bi_size) {
+		if (diff_area_rw_chunk(bio, diff_area) < 0) {
+			bio->bi_status = BLK_STS_IOERR;
 			break;
+		}
 	}
-	diff_area_image_ctx_done(&io_ctx);
 
 	/*
 	 * Restore bio_list for current thread.
