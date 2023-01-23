@@ -282,7 +282,7 @@ static int tracker_ctl(struct blkfilter *flt, const unsigned int cmd,
 	return ctl_table[cmd](tracker, buf, plen);
 }
 
-const static struct blkfilter_operations tracker_ops = {
+static const struct blkfilter_operations tracker_ops = {
 	.attach		= tracker_attach,
 	.detach		= tracker_detach,
 	.ctl		= tracker_ctl,
