@@ -32,14 +32,10 @@ struct chunk;
  * @caches_lock:
  *	This spinlock guarantees consistency of the linked lists of chunk
  *	caches.
- * @read_cache_queue:
- *	Queue for the read cache.
- * @read_cache_count:
- *	The number of chunks in the read cache.
- * @write_cache_queue:
- *	Queue for the write cache.
+ * @cache_queue:
+ *	Queue for the cache.
  * @write_cache_count:
- *	The number of chunks in the write cache.
+ *	The number of chunks in the cache.
  * @cache_release_work:
  *	The workqueue work item. This worker limits the number of chunks
  *	that store their data in RAM.
@@ -99,10 +95,8 @@ struct diff_area {
 	struct xarray chunk_map;
 
 	spinlock_t caches_lock;
-	struct list_head read_cache_queue;
-	atomic_t read_cache_count;
-	struct list_head write_cache_queue;
-	atomic_t write_cache_count;
+	struct list_head cache_queue;
+	atomic_t cache_count;
 	struct work_struct cache_release_work;
 
 	spinlock_t free_diff_buffers_lock;
@@ -133,8 +127,8 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
 int diff_area_wait(struct diff_area *diff_area, sector_t sector, sector_t count,
 		   const bool is_nowait);
 
-int diff_area_rw_chunk(struct bio *bio, struct diff_area *diff_area);
-
+int diff_area_preload(struct diff_area *diff_area, struct bio *bio);
+int diff_area_rw_chunk(struct diff_area *diff_area, struct bio *bio);
 void diff_area_throttling_io(struct diff_area *diff_area);
 
 #endif /* __BLKSNAP_DIFF_AREA_H */

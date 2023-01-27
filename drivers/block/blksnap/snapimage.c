@@ -16,36 +16,46 @@
 
 static void snapimage_submit_bio(struct bio *bio)
 {
+	int ret = 0;
 	struct tracker *tracker = bio->bi_bdev->bd_disk->private_data;
 	struct diff_area *diff_area = tracker->diff_area;
-	struct bio_list *current_bio_list;
+	struct bio_list *old_bio_list;
+	struct bio_list bio_list[2] = { };
+	struct bio *new_bio;
 
 	if (diff_area_is_corrupted(diff_area)) {
 		bio_io_error(bio);
 		return;
 	}
 
-	/*
-	 * Store bio_list for current thread in stack.
-	 * This allows to implement an algorithm for reading
-	 * from the snapshot image synchronously.
-	 */
-	current_bio_list = current->bio_list;
-	current->bio_list = NULL;
-
 	diff_area_throttling_io(diff_area);
-	while (bio->bi_iter.bi_size) {
-		if (diff_area_rw_chunk(bio, diff_area) < 0) {
-			bio->bi_status = BLK_STS_IOERR;
-			break;
-		}
+
+	bio_list_init(&bio_list[0]);
+	old_bio_list = current->bio_list;
+	current->bio_list = bio_list;
+
+	ret = diff_area_preload(diff_area, bio);
+	if (ret)
+		goto fail;
+
+	current->bio_list = NULL;
+	while ((new_bio = bio_list_pop(&bio_list[0])))
+		submit_bio_noacct(new_bio);
+
+	ret = diff_area_rw_chunk(diff_area, bio);
+
+fail:
+	current->bio_list = old_bio_list;
+
+	if (likely(!ret))
+		bio_endio(bio);
+	else {
+		if (ret == -EAGAIN)
+			bio_wouldblock_error(bio);
+		else
+			bio_io_error(bio);
 	}
 
-	/*
-	 * Restore bio_list for current thread.
-	 */
-	current->bio_list = current_bio_list;
-	bio_endio(bio);
 }
 
 const struct block_device_operations bd_ops = {
