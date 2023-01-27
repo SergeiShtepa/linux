@@ -17,7 +17,7 @@ void chunk_diff_buffer_release(struct chunk *chunk)
 	if (unlikely(!chunk->diff_buffer))
 		return;
 
-	pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
+	//pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
 
 	chunk_state_unset(chunk, CHUNK_ST_BUFFER_READY);
 	diff_buffer_release(chunk->diff_area, chunk->diff_buffer);
@@ -43,7 +43,7 @@ void chunk_schedule_caching(struct chunk *chunk)
 	int in_cache_count = 0;
 	struct diff_area *diff_area = chunk->diff_area;
 
-	pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
+	//pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
 	might_sleep();
 
 	spin_lock(&diff_area->caches_lock);
@@ -86,7 +86,7 @@ static void chunk_notify_load_orig(void *ctx)
 		chunk_store_failed(chunk, error);
 		goto out;
 	}
-	pr_debug("DEBUG! %s original loaded chunk #%lu\n", __func__, chunk->number);
+	//pr_debug("DEBUG! %s original loaded chunk #%lu\n", __func__, chunk->number);
 	if (likely(chunk_state_check(chunk, CHUNK_ST_LOADING))) {
 		chunk_state_unset(chunk, CHUNK_ST_LOADING);
 		chunk_state_set(chunk, CHUNK_ST_BUFFER_READY);
@@ -120,7 +120,7 @@ static void chunk_notify_load_diff(void *ctx)
 			up(&chunk->lock);
 		}
 		else if (chunk_state_check(chunk, CHUNK_ST_LOADING)) {
-			pr_debug("DEBUG! %s diff loaded chunk #%lu\n", __func__, chunk->number);
+			//pr_debug("DEBUG! %s diff loaded chunk #%lu\n", __func__, chunk->number);
 			chunk_state_unset(chunk, CHUNK_ST_LOADING);
 			chunk_state_set(chunk, CHUNK_ST_BUFFER_READY);
 
