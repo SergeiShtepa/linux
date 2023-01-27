@@ -134,7 +134,6 @@ static inline bool chunk_state_check(struct chunk *chunk, int st)
 struct chunk *chunk_alloc(struct diff_area *diff_area, unsigned long number);
 void chunk_free(struct chunk *chunk);
 
-int chunk_schedule_storing(struct chunk *chunk, const bool is_nowait);
 void chunk_diff_buffer_release(struct chunk *chunk);
 void chunk_store_failed(struct chunk *chunk, int error);
 
@@ -143,7 +142,6 @@ void chunk_schedule_caching(struct chunk *chunk);
 /* Asynchronous operations are used to implement the COW algorithm. */
 int chunk_async_store_diff(struct chunk *chunk, const bool is_nowait);
 int chunk_async_load_orig(struct chunk *chunk, const bool is_nowait);
-int chunk_async_cow(struct chunk *chunk, const bool is_nowait);
 int chunk_async_load_diff(struct chunk *chunk, const bool is_nowait);
 
 #endif /* __BLKSNAP_CHUNK_H */

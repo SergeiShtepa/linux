@@ -114,16 +114,14 @@ void diff_area_free(struct diff_area *diff_area)
 	kfree(diff_area);
 }
 
-static inline struct chunk *
-get_chunk_from_cache_and_write_lock(spinlock_t *caches_lock,
-				    struct list_head *cache_queue,
-				    atomic_t *cache_count)
+static struct chunk *diff_area_lock_and_get_chunk_from_cache(
+					struct diff_area *diff_area)
 {
 	struct chunk *iter;
 	struct chunk *chunk = NULL;
 
-	spin_lock(caches_lock);
-	list_for_each_entry(iter, cache_queue, cache_link) {
+	spin_lock(&diff_area->caches_lock);
+	list_for_each_entry(iter, &diff_area->cache_queue, cache_link) {
 		if (!down_trylock(&iter->lock)) {
 			if (atomic_read(&iter->diff_buffer_holder) == 0) {
 				chunk = iter;
@@ -137,10 +135,10 @@ get_chunk_from_cache_and_write_lock(spinlock_t *caches_lock,
 		 */
 	}
 	if (likely(chunk)) {
-		atomic_dec(cache_count);
+		atomic_dec(&diff_area->cache_count);
 		list_del_init(&chunk->cache_link);
 	}
-	spin_unlock(caches_lock);
+	spin_unlock(&diff_area->caches_lock);
 
 	if (chunk)
 		pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
@@ -148,40 +146,13 @@ get_chunk_from_cache_and_write_lock(spinlock_t *caches_lock,
 	return chunk;
 }
 
-static struct chunk *
-diff_area_get_chunk_from_cache_and_write_lock(struct diff_area *diff_area)
-{
-	struct chunk *chunk;
-
-	if (atomic_read(&diff_area->read_cache_count) >
-	    chunk_maximum_in_cache) {
-		chunk = get_chunk_from_cache_and_write_lock(
-			&diff_area->caches_lock, &diff_area->read_cache_queue,
-			&diff_area->read_cache_count);
-		if (chunk)
-			return chunk;
-	}
-
-	if (atomic_read(&diff_area->write_cache_count) >
-	    chunk_maximum_in_cache) {
-		chunk = get_chunk_from_cache_and_write_lock(
-			&diff_area->caches_lock, &diff_area->write_cache_queue,
-			&diff_area->write_cache_count);
-		if (chunk)
-			return chunk;
-	}
-
-	return NULL;
-}
-
 static void diff_area_cache_release(struct diff_area *diff_area)
 {
 	int ret;
 	struct chunk *chunk;
 
-	while (!diff_area_is_corrupted(diff_area) &&
-	       (chunk = diff_area_get_chunk_from_cache_and_write_lock(
-			diff_area))) {
+	while ((atomic_read(&diff_area->cache_count) > chunk_maximum_in_cache) &&
+	       (chunk = diff_area_lock_and_get_chunk_from_cache(diff_area))) {
 
 		pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
 		/*
@@ -195,20 +166,47 @@ static void diff_area_cache_release(struct diff_area *diff_area)
 			continue;
 		}
 
-		if (chunk_state_check(chunk, CHUNK_ST_DIRTY)) {
-			if ((ret = chunk_schedule_storing(chunk, false)))
-				chunk_store_failed(chunk, ret);
-		} else {
+		/*
+		 * Skip storing data into the diff storage if it is already
+		 * stored there and there is no flag DIRTY.
+ 		 */
+		if (chunk_state_check(chunk, CHUNK_ST_STORE_READY) &&
+		    !chunk_state_check(chunk, CHUNK_ST_DIRTY)) {
 			chunk_diff_buffer_release(chunk);
 			up(&chunk->lock);
+			continue;
 		}
+
+		if (diff_area_is_corrupted(diff_area)) {
+			chunk_store_failed(chunk, 0);
+			continue;
+		}
+
+		if (!chunk->diff_region) {
+			struct diff_region *diff_region;
+
+			diff_region = diff_storage_new_region(
+				diff_area->diff_storage,
+				diff_area_chunk_sectors(diff_area));
+
+			if (IS_ERR(diff_region)) {
+				pr_debug("Cannot get store for chunk #%ld\n",
+					 chunk->number);
+				chunk_store_failed(chunk, PTR_ERR(diff_region));
+				continue;
+			}
+			chunk->diff_region = diff_region;
+		}
+		ret = chunk_async_store_diff(chunk, false);
+		if (ret)
+			chunk_store_failed(chunk, ret);
 	}
 }
 
 static void diff_area_cache_release_work(struct work_struct *work)
 {
-	struct diff_area *diff_area =
-		container_of(work, struct diff_area, cache_release_work);
+	struct diff_area *diff_area = container_of(
+		work, struct diff_area, cache_release_work);
 
 	diff_area_cache_release(diff_area);
 }
@@ -247,10 +245,8 @@ struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
 	xa_init(&diff_area->chunk_map);
 
 	spin_lock_init(&diff_area->caches_lock);
-	INIT_LIST_HEAD(&diff_area->read_cache_queue);
-	atomic_set(&diff_area->read_cache_count, 0);
-	INIT_LIST_HEAD(&diff_area->write_cache_queue);
-	atomic_set(&diff_area->write_cache_count, 0);
+	INIT_LIST_HEAD(&diff_area->cache_queue);
+	atomic_set(&diff_area->cache_count, 0);
 	INIT_WORK(&diff_area->cache_release_work, diff_area_cache_release_work);
 
 	spin_lock_init(&diff_area->free_diff_buffers_lock);
@@ -301,21 +297,6 @@ struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
 	return diff_area;
 }
 
-static void diff_area_take_chunk_from_cache(struct diff_area *diff_area,
-					    struct chunk *chunk)
-{
-	spin_lock(&diff_area->caches_lock);
-	if (!list_is_first(&chunk->cache_link, &chunk->cache_link)) {
-		list_del_init(&chunk->cache_link);
-
-		if (chunk_state_check(chunk, CHUNK_ST_DIRTY))
-			atomic_dec(&diff_area->write_cache_count);
-		else
-			atomic_dec(&diff_area->read_cache_count);
-	}
-	spin_unlock(&diff_area->caches_lock);
-}
-
 /*
  * Implements the copy-on-write mechanism.
  */
@@ -348,48 +329,38 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
 				return ret;
 		}
 
-		if (chunk_state_check(chunk, CHUNK_ST_FAILED | CHUNK_ST_DIRTY |
-						     CHUNK_ST_STORE_READY)) {
+		if (chunk_state_check(chunk, CHUNK_ST_FAILED |
+			CHUNK_ST_BUFFER_READY | CHUNK_ST_STORE_READY)) {
 			/*
 			 * The chunk has already been:
-			 * - Failed, when the snapshot is corrupted
-			 * - Overwritten in the snapshot image
-			 * - Already stored in the diff storage
+			 * - failed, when the snapshot is corrupted
+			 * - read into the buffer
+			 * - stored into the diff storage
+			 * In this case, we do not change the chunk.
 			 */
 			up(&chunk->lock);
 			continue;
 		}
 
-		if (unlikely(chunk_state_check(
-			    chunk, CHUNK_ST_LOADING | CHUNK_ST_STORING))) {
+		if (unlikely(chunk_state_check(chunk,
+			CHUNK_ST_LOADING | CHUNK_ST_STORING))) {
+
 			pr_err("Invalid chunk state\n");
 			ret = -EFAULT;
 			goto fail_unlock_chunk;
 		}
 
-		if (chunk_state_check(chunk, CHUNK_ST_BUFFER_READY)) {
-			diff_area_take_chunk_from_cache(diff_area, chunk);
-			/*
-			 * The chunk has already been read, but now we need
-			 * to store it to diff_storage.
-			 */
-			ret = chunk_schedule_storing(chunk, is_nowait);
-			if (unlikely(ret))
-				goto fail_unlock_chunk;
-		} else {
-			diff_buffer =
-				diff_buffer_take(chunk->diff_area, is_nowait);
-			if (IS_ERR(diff_buffer)) {
-				ret = PTR_ERR(diff_buffer);
-				goto fail_unlock_chunk;
-			}
-			WARN(chunk->diff_buffer, "Chunks buffer has been lost");
-			chunk->diff_buffer = diff_buffer;
-
-			ret = chunk_async_cow(chunk, is_nowait);
-			if (unlikely(ret))
-				goto fail_unlock_chunk;
+		diff_buffer = diff_buffer_take(chunk->diff_area, is_nowait);
+		if (IS_ERR(diff_buffer)) {
+			ret = PTR_ERR(diff_buffer);
+			goto fail_unlock_chunk;
 		}
+		WARN(chunk->diff_buffer, "Chunks buffer has been lost");
+		chunk->diff_buffer = diff_buffer;
+
+		ret = chunk_async_load_orig(chunk, is_nowait);
+		if (unlikely(ret))
+			goto fail_unlock_chunk;
 	}
 
 	return ret;
@@ -428,24 +399,17 @@ int diff_area_wait(struct diff_area *diff_area, sector_t sector, sector_t count,
 		}
 
 		if (chunk_state_check(chunk, CHUNK_ST_FAILED)) {
-			/*
-			 * The chunk has already been:
-			 * - Failed, when the snapshot is corrupted
-			 * - Overwritten in the snapshot image
-			 * - Already stored in the diff storage
-			 */
 			up(&chunk->lock);
 			ret = -EFAULT;
 			break;
 		}
 
-		if (chunk_state_check(chunk, CHUNK_ST_BUFFER_READY |
-				      CHUNK_ST_DIRTY | CHUNK_ST_STORE_READY)) {
+		if (chunk_state_check(chunk,
+			CHUNK_ST_BUFFER_READY | CHUNK_ST_STORE_READY)) {
 			/*
 			 * The chunk has already been:
-			 * - Read
-			 * - Overwritten in the snapshot image
-			 * - Already stored in the diff storage
+			 * - read from original device
+			 * - stored into the diff storage
 			 */
 			up(&chunk->lock);
 			continue;
