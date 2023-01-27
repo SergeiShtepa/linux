@@ -103,15 +103,15 @@ static inline struct diff_io *diff_io_new_sync_write(void)
 	return diff_io_new_sync(true);
 };
 
-struct diff_io *diff_io_new_async(bool is_write, bool is_nowait,
+struct diff_io *diff_io_new_async(bool is_write, const bool is_nowait,
 				  void (*notify_cb)(void *ctx), void *ctx);
 static inline struct diff_io *
-diff_io_new_async_read(void (*notify_cb)(void *ctx), void *ctx, bool is_nowait)
+diff_io_new_async_read(void (*notify_cb)(void *ctx), void *ctx, const bool is_nowait)
 {
 	return diff_io_new_async(false, is_nowait, notify_cb, ctx);
 };
 static inline struct diff_io *
-diff_io_new_async_write(void (*notify_cb)(void *ctx), void *ctx, bool is_nowait)
+diff_io_new_async_write(void (*notify_cb)(void *ctx), void *ctx, const bool is_nowait)
 {
 	return diff_io_new_async(true, is_nowait, notify_cb, ctx);
 };

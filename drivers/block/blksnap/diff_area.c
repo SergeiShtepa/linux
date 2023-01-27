@@ -125,8 +125,10 @@ get_chunk_from_cache_and_write_lock(spinlock_t *caches_lock,
 	spin_lock(caches_lock);
 	list_for_each_entry(iter, cache_queue, cache_link) {
 		if (!down_trylock(&iter->lock)) {
-			chunk = iter;
-			break;
+			if (atomic_read(&iter->diff_buffer_holder) == 0) {
+				chunk = iter;
+				break;
+			}
 		}
 		/*
 		 * If it is not possible to lock a chunk for writing,
@@ -139,6 +141,9 @@ get_chunk_from_cache_and_write_lock(spinlock_t *caches_lock,
 		list_del_init(&chunk->cache_link);
 	}
 	spin_unlock(caches_lock);
+
+	if (chunk)
+		pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
 
 	return chunk;
 }
@@ -171,11 +176,14 @@ diff_area_get_chunk_from_cache_and_write_lock(struct diff_area *diff_area)
 
 static void diff_area_cache_release(struct diff_area *diff_area)
 {
+	int ret;
 	struct chunk *chunk;
 
 	while (!diff_area_is_corrupted(diff_area) &&
 	       (chunk = diff_area_get_chunk_from_cache_and_write_lock(
 			diff_area))) {
+
+		pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
 		/*
 		 * There cannot be a chunk in the cache whose buffer is
 		 * not ready.
@@ -188,9 +196,7 @@ static void diff_area_cache_release(struct diff_area *diff_area)
 		}
 
 		if (chunk_state_check(chunk, CHUNK_ST_DIRTY)) {
-			int ret = chunk_schedule_storing(chunk, false);
-
-			if (ret)
+			if ((ret = chunk_schedule_storing(chunk, false)))
 				chunk_store_failed(chunk, ret);
 		} else {
 			chunk_diff_buffer_release(chunk);
@@ -380,7 +386,7 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
 			WARN(chunk->diff_buffer, "Chunks buffer has been lost");
 			chunk->diff_buffer = diff_buffer;
 
-			ret = chunk_async_load_orig(chunk, is_nowait);
+			ret = chunk_async_cow(chunk, is_nowait);
 			if (unlikely(ret))
 				goto fail_unlock_chunk;
 		}
@@ -449,25 +455,12 @@ int diff_area_wait(struct diff_area *diff_area, sector_t sector, sector_t count,
 	return ret;
 }
 
-static inline void diff_area_image_put_chunk(struct chunk *chunk, bool is_write)
-{
-	if (is_write) {
-		/*
-		 * Since the chunk was taken to perform writing,
-		 * we mark it as dirty.
-		 */
-		chunk_state_set(chunk, CHUNK_ST_DIRTY);
-	}
-
-	chunk_schedule_caching(chunk);
-}
-
-static int diff_area_load_chunk_from_storage(struct diff_area *diff_area,
-					     struct chunk *chunk)
+static int diff_area_load_chunk(struct diff_area *diff_area,
+				struct chunk *chunk, const bool is_nowait)
 {
 	struct diff_buffer *diff_buffer;
 
-	diff_buffer = diff_buffer_take(diff_area, false);
+	diff_buffer = diff_buffer_take(diff_area, is_nowait);
 	if (IS_ERR(diff_buffer))
 		return PTR_ERR(diff_buffer);
 
@@ -475,26 +468,30 @@ static int diff_area_load_chunk_from_storage(struct diff_area *diff_area,
 	chunk->diff_buffer = diff_buffer;
 
 	if (chunk_state_check(chunk, CHUNK_ST_STORE_READY))
-		return chunk_load_diff(chunk);
+		return chunk_async_load_diff(chunk, is_nowait);
 
-	return chunk_load_orig(chunk);
+	return chunk_async_load_orig(chunk, is_nowait);
 }
 
-static struct chunk *
-diff_area_image_context_get_chunk(struct diff_area *diff_area, sector_t sector)
+static struct chunk *diff_area_image_get_chunk(
+	struct diff_area *diff_area, sector_t sector, const bool is_nowait)
 {
 	unsigned long new_chunk_number = chunk_number(diff_area, sector);
 	struct chunk *chunk;
 	int ret;
 
-	/* Take a next chunk. */
 	chunk = xa_load(&diff_area->chunk_map, new_chunk_number);
 	if (unlikely(!chunk))
 		return ERR_PTR(-EINVAL);
 
-	ret = down_killable(&chunk->lock);
-	if (ret)
-		return ERR_PTR(ret);
+	if (is_nowait) {
+		if (down_trylock(&chunk->lock))
+			return ERR_PTR(-EAGAIN);
+	} else {
+		ret = down_killable(&chunk->lock);
+		if (ret)
+			return ERR_PTR(ret);
+	}
 
 	if (unlikely(chunk_state_check(chunk, CHUNK_ST_FAILED))) {
 		pr_err("Chunk #%ld corrupted\n", chunk->number);
@@ -509,21 +506,6 @@ diff_area_image_context_get_chunk(struct diff_area *diff_area, sector_t sector)
 		goto fail_unlock_chunk;
 	}
 
-	/*
-	 * If there is already data in the buffer, then nothing needs to be loaded.
-	 * Otherwise, the chunk needs to be loaded from the original device or
-	 * from the difference storage.
-	 */
-	if (!chunk_state_check(chunk, CHUNK_ST_BUFFER_READY)) {
-		ret = diff_area_load_chunk_from_storage(diff_area, chunk);
-		if (unlikely(ret))
-			goto fail_unlock_chunk;
-
-		/* Set the flag that the buffer contains the required data. */
-		chunk_state_set(chunk, CHUNK_ST_BUFFER_READY);
-	} else
-		diff_area_take_chunk_from_cache(diff_area, chunk);
-
 	return chunk;
 
 fail_unlock_chunk:
@@ -532,46 +514,103 @@ fail_unlock_chunk:
 	return ERR_PTR(ret);
 }
 
-static inline sector_t diff_area_chunk_start(struct diff_area *diff_area,
-					     struct chunk *chunk)
+int diff_area_preload(struct diff_area *diff_area, struct bio *bio)
 {
-	return (sector_t)(chunk->number) << diff_area->chunk_shift;
+	int ret = 0;
+	struct chunk *chunk;
+	sector_t pos = bio->bi_iter.bi_sector;
+	sector_t last = bio->bi_iter.bi_sector +
+		(round_up(bio->bi_iter.bi_size, SECTOR_SIZE) >> SECTOR_SHIFT);
+	bool is_nowait = !!(bio->bi_opf & REQ_NOWAIT);
+
+	pr_debug("DEBUG! %s [%llu - %llu)", __func__, pos, last);
+
+	while (pos < last) {
+		chunk = diff_area_image_get_chunk(diff_area, pos, is_nowait);
+		if (IS_ERR(chunk))
+			return PTR_ERR(chunk);
+
+
+		pos = chunk_sector(chunk) + chunk->sector_count;
+		/*
+		 * If there is already data in the buffer, then nothing needs to be loaded.
+		 * Otherwise, the chunk needs to be loaded from the original device or
+		 * from the difference storage.
+		 */
+		atomic_inc(&chunk->diff_buffer_holder);
+		if (!chunk_state_check(chunk, CHUNK_ST_BUFFER_READY)) {
+			pr_debug("DEBUG! %s - load chunk #%lu\n", __func__, chunk->number);
+			ret = diff_area_load_chunk(diff_area, chunk, is_nowait);
+			if (unlikely(ret)) {
+				up(&chunk->lock);
+				break;
+			}
+		} else
+			up(&chunk->lock);
+	}
+
+	return ret;
 }
 
-int diff_area_rw_chunk(struct bio *bio, struct diff_area *diff_area)
+int diff_area_rw_chunk(struct diff_area *diff_area, struct bio *bio)
 {
-	bool is_write = op_is_write(bio_op(bio));
+	bool is_nowait = !!(bio->bi_opf & REQ_NOWAIT);
+	struct chunk *chunk = NULL;
 	sector_t pos = bio->bi_iter.bi_sector;
-	unsigned int buff_offset;
-	struct chunk *chunk;
+	struct bio_vec bvec;
+	struct bvec_iter iter;
 
-	chunk = diff_area_image_context_get_chunk(diff_area, pos);
-	if (IS_ERR(chunk))
-		return PTR_ERR(chunk);
+	pr_debug("DEBUG! %s pos %llu", __func__, pos);
 
-	buff_offset = (pos - chunk_sector(chunk)) << SECTOR_SHIFT;
-	while (buff_offset < chunk->diff_buffer->size) {
-		struct bio_vec bvec = bio_iter_iovec(bio, bio->bi_iter);
-		unsigned int page_offset = offset_in_page(buff_offset);
-		struct page *page;
-		void *vaddr;
-		unsigned int len;
+	bio_for_each_segment(bvec, bio, iter) {
+		unsigned int bvec_ofs = 0;
 
-		page = chunk->diff_buffer->pages[buff_offset >> PAGE_SHIFT];
-		vaddr = page_address(page) + page_offset;
-		len = min3(bvec.bv_len,
-			(unsigned int)chunk->diff_buffer->size - buff_offset,
-			(unsigned int)PAGE_SIZE - page_offset);
+		while (bvec_ofs < bvec.bv_len) {
+			size_t buff_offset;
+			struct page *page;
+			unsigned int len;
 
-		if (is_write)
-			memcpy_from_bvec(vaddr, &bvec);
-		else
-			memcpy_to_bvec(&bvec, vaddr);
+			if (!chunk) {
+				chunk = diff_area_image_get_chunk(diff_area, pos, is_nowait);
+				if (IS_ERR(chunk))
+					return PTR_ERR(chunk);
+			}
 
-		buff_offset += len;
-		bio_advance(bio, len);
+			/*DEBUG checking*/
+			BUG_ON(!chunk->diff_buffer);
+			BUG_ON(!chunk_state_check(chunk, CHUNK_ST_BUFFER_READY));
+
+			buff_offset = (pos - chunk_sector(chunk)) << SECTOR_SHIFT;
+			/*DEBUG*/
+			BUG_ON((buff_offset >> PAGE_SHIFT) >= chunk->diff_buffer->page_count);
+
+			page = chunk->diff_buffer->pages[buff_offset >> PAGE_SHIFT];
+			len = min3((size_t)(bvec.bv_len - bvec_ofs),
+				chunk->diff_buffer->size - buff_offset,
+				PAGE_SIZE - offset_in_page(buff_offset));
+
+			if (op_is_write(bio_op(bio))) /* from bio to buffer */
+				memcpy_page(page, offset_in_page(buff_offset), bvec.bv_page, bvec.bv_offset + bvec_ofs, len);
+			else /* from buffer to bio */
+				memcpy_page(bvec.bv_page, bvec.bv_offset + bvec_ofs, page, offset_in_page(buff_offset), len);
+
+			bvec_ofs += len;
+			pos += (len >> SECTOR_SHIFT);
+
+			if ((chunk_sector(chunk) + chunk->sector_count) <= pos) {
+				atomic_dec(&chunk->diff_buffer_holder);
+				up(&chunk->lock);
+				chunk = NULL;
+			}
+
+		}
 	}
-	diff_area_image_put_chunk(chunk, is_write);
+	pr_debug("DEBUG! %s last %llu", __func__, pos);
+	if (chunk) {
+		atomic_dec(&chunk->diff_buffer_holder);
+		up(&chunk->lock);
+	}
+
 	return 0;
 }
 

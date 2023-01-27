@@ -45,7 +45,7 @@ static void diff_io_endio(struct bio *bio)
 	bio_put(bio);
 }
 
-static inline struct diff_io *diff_io_new(bool is_write, bool is_nowait)
+static inline struct diff_io *diff_io_new(bool is_write, const bool is_nowait)
 {
 	struct diff_io *diff_io;
 	gfp_t gfp_mask = is_nowait ? (GFP_NOIO | GFP_NOWAIT) : GFP_NOIO;
@@ -74,7 +74,7 @@ struct diff_io *diff_io_new_sync(bool is_write)
 	return diff_io;
 }
 
-struct diff_io *diff_io_new_async(bool is_write, bool is_nowait,
+struct diff_io *diff_io_new_async(bool is_write, const bool is_nowait,
 				  void (*notify_cb)(void *ctx), void *ctx)
 {
 	struct diff_io *diff_io;
@@ -111,6 +111,7 @@ static inline unsigned short calc_page_count(sector_t sectors)
 int diff_io_do(struct diff_io *diff_io, struct diff_region *diff_region,
 	       struct diff_buffer *diff_buffer, const bool is_nowait)
 {
+	int ret = 0;
 	struct bio *bio;
 	struct bio_list bio_list_head = BIO_EMPTY_LIST;
 	struct page **current_page_ptr;
@@ -147,8 +148,10 @@ int diff_io_do(struct diff_io *diff_io, struct diff_region *diff_region,
 
 		bio = bio_alloc_bioset(diff_region->bdev, nr_iovecs,
 				       opf | op_flags,  gfp, &diff_io_bioset);
-		if (unlikely(!bio))
+		if (unlikely(!bio)) {
+			ret = -EAGAIN;
 			goto fail;
+		}
 
 		bio_set_flag(bio, BIO_FILTERED);
 		bio->bi_end_io = diff_io_endio;
@@ -178,18 +181,25 @@ int diff_io_do(struct diff_io *diff_io, struct diff_region *diff_region,
 		processed += offset;
 	}
 
-	/* sumbit all bios */
-	while ((bio = bio_list_pop(&bio_list_head)))
-		submit_bio_noacct(bio);
+	if (current->bio_list) {
+		if (unlikely(diff_io->is_sync_io)) {
+			ret = -EPERM;
+			goto fail;
+		}
 
-	if (diff_io->is_sync_io) {
-		WARN_ON_ONCE(current->bio_list);
-		wait_for_completion_io(&diff_io->notify.sync.completion);
+		while ((bio = bio_list_pop(&bio_list_head)))
+			bio_list_add(&current->bio_list[0], bio);
+	} else {
+		while ((bio = bio_list_pop(&bio_list_head)))
+			submit_bio_noacct(bio);
+
+		if (diff_io->is_sync_io)
+			wait_for_completion_io(&diff_io->notify.sync.completion);
 	}
 
 	return 0;
 fail:
 	while ((bio = bio_list_pop(&bio_list_head)))
 		bio_put(bio);
-	return -EAGAIN;
+	return ret;
 }
