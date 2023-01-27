@@ -140,8 +140,8 @@ static struct chunk *diff_area_lock_and_get_chunk_from_cache(
 	}
 	spin_unlock(&diff_area->caches_lock);
 
-	if (chunk)
-		pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
+	//if (chunk)
+	//	pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
 
 	return chunk;
 }
@@ -154,7 +154,7 @@ static void diff_area_cache_release(struct diff_area *diff_area)
 	while ((atomic_read(&diff_area->cache_count) > chunk_maximum_in_cache) &&
 	       (chunk = diff_area_lock_and_get_chunk_from_cache(diff_area))) {
 
-		pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
+		//pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
 		/*
 		 * There cannot be a chunk in the cache whose buffer is
 		 * not ready.
@@ -487,7 +487,7 @@ int diff_area_preload(struct diff_area *diff_area, struct bio *bio)
 		(round_up(bio->bi_iter.bi_size, SECTOR_SIZE) >> SECTOR_SHIFT);
 	bool is_nowait = !!(bio->bi_opf & REQ_NOWAIT);
 
-	pr_debug("DEBUG! %s [%llu - %llu)", __func__, pos, last);
+	//pr_debug("DEBUG! %s [%llu - %llu)", __func__, pos, last);
 
 	while (pos < last) {
 		chunk = diff_area_image_get_chunk(diff_area, pos, is_nowait);
@@ -503,7 +503,7 @@ int diff_area_preload(struct diff_area *diff_area, struct bio *bio)
 		 */
 		atomic_inc(&chunk->diff_buffer_holder);
 		if (!chunk_state_check(chunk, CHUNK_ST_BUFFER_READY)) {
-			pr_debug("DEBUG! %s - load chunk #%lu\n", __func__, chunk->number);
+			//pr_debug("DEBUG! %s - load chunk #%lu\n", __func__, chunk->number);
 			ret = diff_area_load_chunk(diff_area, chunk, is_nowait);
 			if (unlikely(ret)) {
 				up(&chunk->lock);
@@ -524,7 +524,7 @@ int diff_area_rw_chunk(struct diff_area *diff_area, struct bio *bio)
 	struct bio_vec bvec;
 	struct bvec_iter iter;
 
-	pr_debug("DEBUG! %s pos %llu", __func__, pos);
+	//pr_debug("DEBUG! %s pos %llu", __func__, pos);
 
 	bio_for_each_segment(bvec, bio, iter) {
 		unsigned int bvec_ofs = 0;
@@ -541,12 +541,12 @@ int diff_area_rw_chunk(struct diff_area *diff_area, struct bio *bio)
 			}
 
 			/*DEBUG checking*/
-			BUG_ON(!chunk->diff_buffer);
-			BUG_ON(!chunk_state_check(chunk, CHUNK_ST_BUFFER_READY));
+			//BUG_ON(!chunk->diff_buffer);
+			//BUG_ON(!chunk_state_check(chunk, CHUNK_ST_BUFFER_READY));
 
 			buff_offset = (pos - chunk_sector(chunk)) << SECTOR_SHIFT;
 			/*DEBUG*/
-			BUG_ON((buff_offset >> PAGE_SHIFT) >= chunk->diff_buffer->page_count);
+			//BUG_ON((buff_offset >> PAGE_SHIFT) >= chunk->diff_buffer->page_count);
 
 			page = chunk->diff_buffer->pages[buff_offset >> PAGE_SHIFT];
 			len = min3((size_t)(bvec.bv_len - bvec_ofs),
@@ -569,7 +569,7 @@ int diff_area_rw_chunk(struct diff_area *diff_area, struct bio *bio)
 
 		}
 	}
-	pr_debug("DEBUG! %s last %llu", __func__, pos);
+	//pr_debug("DEBUG! %s last %llu", __func__, pos);
 	if (chunk) {
 		atomic_dec(&chunk->diff_buffer_holder);
 		up(&chunk->lock);
