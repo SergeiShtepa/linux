@@ -420,11 +420,11 @@ int diff_area_wait(struct diff_area *diff_area, sector_t sector, sector_t count,
 }
 
 static int diff_area_load_chunk(struct diff_area *diff_area,
-				struct chunk *chunk, const bool is_nowait)
+				struct chunk *chunk)
 {
 	struct diff_buffer *diff_buffer;
 
-	diff_buffer = diff_buffer_take(diff_area, is_nowait);
+	diff_buffer = diff_buffer_take(diff_area, false);
 	if (IS_ERR(diff_buffer))
 		return PTR_ERR(diff_buffer);
 
@@ -432,13 +432,13 @@ static int diff_area_load_chunk(struct diff_area *diff_area,
 	chunk->diff_buffer = diff_buffer;
 
 	if (chunk_state_check(chunk, CHUNK_ST_STORE_READY))
-		return chunk_async_load_diff(chunk, is_nowait);
+		return chunk_async_load_diff(chunk, false);
 
-	return chunk_async_load_orig(chunk, is_nowait);
+	return chunk_async_load_orig(chunk, false);
 }
 
 static struct chunk *diff_area_image_get_chunk(
-	struct diff_area *diff_area, sector_t sector, const bool is_nowait)
+	struct diff_area *diff_area, sector_t sector)
 {
 	unsigned long new_chunk_number = chunk_number(diff_area, sector);
 	struct chunk *chunk;
@@ -448,14 +448,9 @@ static struct chunk *diff_area_image_get_chunk(
 	if (unlikely(!chunk))
 		return ERR_PTR(-EINVAL);
 
-	if (is_nowait) {
-		if (down_trylock(&chunk->lock))
-			return ERR_PTR(-EAGAIN);
-	} else {
-		ret = down_killable(&chunk->lock);
-		if (ret)
-			return ERR_PTR(ret);
-	}
+	ret = down_killable(&chunk->lock);
+	if (ret)
+		return ERR_PTR(ret);
 
 	if (unlikely(chunk_state_check(chunk, CHUNK_ST_FAILED))) {
 		pr_err("Chunk #%ld corrupted\n", chunk->number);
@@ -478,22 +473,23 @@ fail_unlock_chunk:
 	return ERR_PTR(ret);
 }
 
-int diff_area_preload(struct diff_area *diff_area, struct bio *bio)
+void diff_area_preload(struct image_rw_ctx *image_rw_ctx)
 {
-	int ret = 0;
 	struct chunk *chunk;
+	struct bio *bio = image_rw_ctx->bio;
+	struct diff_area *diff_area = image_rw_ctx->diff_area;
 	sector_t pos = bio->bi_iter.bi_sector;
 	sector_t last = bio->bi_iter.bi_sector +
 		(round_up(bio->bi_iter.bi_size, SECTOR_SIZE) >> SECTOR_SHIFT);
-	bool is_nowait = !!(bio->bi_opf & REQ_NOWAIT);
 
 	//pr_debug("DEBUG! %s [%llu - %llu)", __func__, pos, last);
 
 	while (pos < last) {
-		chunk = diff_area_image_get_chunk(diff_area, pos, is_nowait);
-		if (IS_ERR(chunk))
-			return PTR_ERR(chunk);
-
+		chunk = diff_area_image_get_chunk(diff_area, pos);
+		if (IS_ERR(chunk)) {
+			atomic_inc(&image_rw_ctx->error_cnt);
+			break;
+		}
 
 		pos = chunk_sector(chunk) + chunk->sector_count;
 		/*
@@ -504,21 +500,22 @@ int diff_area_preload(struct diff_area *diff_area, struct bio *bio)
 		atomic_inc(&chunk->diff_buffer_holder);
 		if (!chunk_state_check(chunk, CHUNK_ST_BUFFER_READY)) {
 			//pr_debug("DEBUG! %s - load chunk #%lu\n", __func__, chunk->number);
-			ret = diff_area_load_chunk(diff_area, chunk, is_nowait);
-			if (unlikely(ret)) {
+			if (unlikely(diff_area_load_chunk(diff_area, chunk))) {
+				atomic_inc(&image_rw_ctx->error_cnt);
 				up(&chunk->lock);
 				break;
+			} else {
+				chunk->image_rw_ctx = image_rw_ctx;
+				kref_get(&chunk->image_rw_ctx->kref);
 			}
 		} else
 			up(&chunk->lock);
 	}
-
-	return ret;
 }
 
-int diff_area_rw_chunk(struct diff_area *diff_area, struct bio *bio)
+static inline void __diff_area_rw_chunk(struct diff_area *diff_area,
+					struct bio *bio)
 {
-	bool is_nowait = !!(bio->bi_opf & REQ_NOWAIT);
 	struct chunk *chunk = NULL;
 	sector_t pos = bio->bi_iter.bi_sector;
 	struct bio_vec bvec;
@@ -535,9 +532,11 @@ int diff_area_rw_chunk(struct diff_area *diff_area, struct bio *bio)
 			unsigned int len;
 
 			if (!chunk) {
-				chunk = diff_area_image_get_chunk(diff_area, pos, is_nowait);
-				if (IS_ERR(chunk))
-					return PTR_ERR(chunk);
+				chunk = diff_area_image_get_chunk(diff_area, pos);
+				if (IS_ERR(chunk)) {
+					bio_io_error(bio);
+					return;
+				}
 			}
 
 			/*DEBUG checking*/
@@ -575,7 +574,19 @@ int diff_area_rw_chunk(struct diff_area *diff_area, struct bio *bio)
 		up(&chunk->lock);
 	}
 
-	return 0;
+	bio_endio(bio);
+}
+
+void diff_area_rw_chunk(struct kref *kref)
+{
+	struct image_rw_ctx *ctx = container_of(kref, struct image_rw_ctx, kref);
+
+	if (unlikely(atomic_read(&ctx->error_cnt)))
+		bio_io_error(ctx->bio);
+	else
+		__diff_area_rw_chunk(ctx->diff_area, ctx->bio);
+
+	kfree(ctx);
 }
 
 static inline void diff_area_event_corrupted(struct diff_area *diff_area)

@@ -72,66 +72,42 @@ void chunk_schedule_caching(struct chunk *chunk)
 		queue_work(system_wq, &diff_area->cache_release_work);
 }
 
-static void chunk_notify_load_orig(void *ctx)
+static void chunk_notify_load(void *ctx)
 {
 	struct chunk *chunk = ctx;
+	struct image_rw_ctx *image_rw_ctx = chunk->image_rw_ctx;
 	int error = chunk->diff_io->error;
+
+	might_sleep();
 
 	diff_io_free(chunk->diff_io);
 	chunk->diff_io = NULL;
-
-	might_sleep();
+	chunk->image_rw_ctx = NULL;
 
 	if (unlikely(error)) {
+		atomic_inc(&image_rw_ctx->error_cnt);
 		chunk_store_failed(chunk, error);
-		goto out;
-	}
-	//pr_debug("DEBUG! %s original loaded chunk #%lu\n", __func__, chunk->number);
-	if (likely(chunk_state_check(chunk, CHUNK_ST_LOADING))) {
-		chunk_state_unset(chunk, CHUNK_ST_LOADING);
-		chunk_state_set(chunk, CHUNK_ST_BUFFER_READY);
-		chunk_schedule_caching(chunk);
 	} else {
-		if (chunk_state_check(chunk, CHUNK_ST_FAILED))
-			pr_err("Chunk in a failed state\n");
-		else
-			pr_err("invalid chunk state 0x%x\n", atomic_read(&chunk->state));
-		up(&chunk->lock);
-	}
-out:
-	atomic_dec(&chunk->diff_area->pending_io_count);
-}
-
-static void chunk_notify_load_diff(void *ctx)
-{
-	struct chunk *chunk = ctx;
-	int error = chunk->diff_io->error;
-
-	diff_io_free(chunk->diff_io);
-	chunk->diff_io = NULL;
-
-	might_sleep();
-
-	if (unlikely(error))
-		chunk_store_failed(chunk, error);
-	else {
-		if (unlikely(chunk_state_check(chunk, CHUNK_ST_FAILED))) {
-			pr_err("Chunk in a failed state\n");
-			up(&chunk->lock);
-		}
-		else if (chunk_state_check(chunk, CHUNK_ST_LOADING)) {
-			//pr_debug("DEBUG! %s diff loaded chunk #%lu\n", __func__, chunk->number);
+		//pr_debug("DEBUG! %s original loaded chunk #%lu\n", __func__, chunk->number);
+		if (likely(chunk_state_check(chunk, CHUNK_ST_LOADING))) {
 			chunk_state_unset(chunk, CHUNK_ST_LOADING);
 			chunk_state_set(chunk, CHUNK_ST_BUFFER_READY);
-
 			chunk_schedule_caching(chunk);
+		} else {
+			if (chunk_state_check(chunk, CHUNK_ST_FAILED))
+				pr_err("Chunk in a failed state\n");
+			else
+				pr_err("invalid chunk state 0x%x\n", atomic_read(&chunk->state));
+			up(&chunk->lock);
 		}
 	}
+	if (image_rw_ctx)
+		kref_put(&image_rw_ctx->kref, diff_area_rw_chunk);
 
 	atomic_dec(&chunk->diff_area->pending_io_count);
 }
 
-static void chunk_notify_store_diff(void *ctx)
+static void chunk_notify_store(void *ctx)
 {
 	struct chunk *chunk = ctx;
 	int error = chunk->diff_io->error;
@@ -210,8 +186,7 @@ int chunk_async_store_diff(struct chunk *chunk, const bool is_nowait)
 		 "The chunk already in the cache"))
 		return -EINVAL;
 
-	diff_io = diff_io_new_async_write(chunk_notify_store_diff,
-					  chunk, is_nowait);
+	diff_io = diff_io_new_async_write(chunk_notify_store, chunk, is_nowait);
 	if (unlikely(!diff_io)) {
 		if (is_nowait)
 			return -EAGAIN;
@@ -248,7 +223,7 @@ int chunk_async_load_orig(struct chunk *chunk, const bool is_nowait)
 		.count = chunk->sector_count,
 	};
 
-	diff_io = diff_io_new_async_read(chunk_notify_load_orig, chunk, is_nowait);
+	diff_io = diff_io_new_async_read(chunk_notify_load, chunk, is_nowait);
 	if (unlikely(!diff_io)) {
 		if (is_nowait)
 			return -EAGAIN;
@@ -283,7 +258,7 @@ int chunk_async_load_diff(struct chunk *chunk, const bool is_nowait)
 		 "The chunk already in the cache"))
 		return -EINVAL;
 
-	diff_io = diff_io_new_async_read(chunk_notify_load_diff,
+	diff_io = diff_io_new_async_read(chunk_notify_load,
 					 chunk, is_nowait);
 	if (unlikely(!diff_io)) {
 		if (is_nowait)

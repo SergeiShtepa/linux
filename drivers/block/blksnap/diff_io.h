@@ -24,39 +24,6 @@ struct diff_region {
 };
 
 /**
- * struct diff_io_sync - Structure for notification about completion of
- *	synchronous I/O.
- * @completion:
- *	Indicates that the request has been processed.
- *
- * Allows to wait for completion of the I/O operation in the
- * current thread.
- */
-struct diff_io_sync {
-	struct completion completion;
-};
-
-/**
- * struct diff_io_async - Structure for notification about completion of
- *	asynchronous I/O.
- * @work:
- *	The &struct work_struct allows to schedule execution of an I/O operation
- *	in a separate process.
- * @notify_cb:
- *	A pointer to the callback function that will be executed when
- *	the I/O execution is completed.
- * @ctx:
- *	The context for the callback function &notify_cb.
- *
- * Allows to schedule execution of an I/O operation.
- */
-struct diff_io_async {
-	struct work_struct work;
-	void (*notify_cb)(void *ctx);
-	void *ctx;
-};
-
-/**
  * struct diff_io - Structure for I/O maintenance.
  * @error:
  *	Zero if the I/O operation is successful, or an error code if it fails.
@@ -64,11 +31,14 @@ struct diff_io_async {
  *      The count of I/O units in request.
  * @is_write:
  *	Indicates that a write operation is being performed.
- * @is_sync_io:
- *	Indicates that the operation is being performed synchronously.
- * @notify:
- *	This union may contain the diff_io_sync or diff_io_async structure
- *	for synchronous or asynchronous request.
+ * @work:
+ *      The &struct work_struct allows to schedule execution of an I/O operation
+ *      in a separate process.
+ * @notify_cb:
+ *      A pointer to the callback function that will be executed when
+ *      the I/O execution is completed.
+ * @ctx:
+ *      The context for the callback function &notify_cb.
  *
  * The request to perform an I/O operation is executed for a region of sectors.
  * Such a region may contain several bios. It is necessary to notify about the
@@ -78,11 +48,10 @@ struct diff_io {
 	int error;
 	atomic_t bio_count;
 	bool is_write;
-	bool is_sync_io;
-	union {
-		struct diff_io_sync sync;
-		struct diff_io_async async;
-	} notify;
+
+        struct work_struct work;
+        void (*notify_cb)(void *ctx);
+        void *ctx;
 };
 
 int diff_io_init(void);
@@ -93,25 +62,16 @@ static inline void diff_io_free(struct diff_io *diff_io)
 	kfree(diff_io);
 }
 
-struct diff_io *diff_io_new_sync(bool is_write);
-static inline struct diff_io *diff_io_new_sync_read(void)
-{
-	return diff_io_new_sync(false);
-};
-static inline struct diff_io *diff_io_new_sync_write(void)
-{
-	return diff_io_new_sync(true);
-};
-
 struct diff_io *diff_io_new_async(bool is_write, const bool is_nowait,
-				  void (*notify_cb)(void *ctx), void *ctx);
-static inline struct diff_io *
-diff_io_new_async_read(void (*notify_cb)(void *ctx), void *ctx, const bool is_nowait)
+        void (*notify_cb)(void *ctx), void *ctx);
+
+static inline struct diff_io *diff_io_new_async_read(
+        void (*notify_cb)(void *ctx), void *ctx, const bool is_nowait)
 {
 	return diff_io_new_async(false, is_nowait, notify_cb, ctx);
 };
-static inline struct diff_io *
-diff_io_new_async_write(void (*notify_cb)(void *ctx), void *ctx, const bool is_nowait)
+static inline struct diff_io *diff_io_new_async_write(
+        void (*notify_cb)(void *ctx), void *ctx, const bool is_nowait)
 {
 	return diff_io_new_async(true, is_nowait, notify_cb, ctx);
 };
