@@ -63,6 +63,16 @@ enum chunk_st {
 };
 
 /**
+ * struct image_rw_ctx - Snapshot image bio processing context.
+ */
+struct image_rw_ctx {
+	struct kref kref;
+	struct diff_area *diff_area;
+	struct bio *bio;
+	atomic_t error_cnt;
+};
+
+/**
  * struct chunk - Minimum data storage unit.
  *
  * @cache_link:
@@ -114,6 +124,7 @@ struct chunk {
 	struct diff_buffer *diff_buffer;
 	struct diff_region *diff_region;
 	struct diff_io *diff_io;
+	struct image_rw_ctx *image_rw_ctx;
 };
 
 static inline void chunk_state_set(struct chunk *chunk, int st)

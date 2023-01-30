@@ -21,11 +21,11 @@ void diff_io_done(void)
 
 static void diff_io_notify_cb(struct work_struct *work)
 {
-	struct diff_io_async *async =
-		container_of(work, struct diff_io_async, work);
+	struct diff_io *diff_io;
 
+	diff_io = container_of(work, struct diff_io, work);
 	might_sleep();
-	async->notify_cb(async->ctx);
+	diff_io->notify_cb(diff_io->ctx);
 }
 
 static void diff_io_endio(struct bio *bio)
@@ -35,12 +35,8 @@ static void diff_io_endio(struct bio *bio)
 	if (bio->bi_status != BLK_STS_OK)
 		diff_io->error = -EIO;
 
-	if (atomic_dec_and_test(&diff_io->bio_count)) {
-		if (diff_io->is_sync_io)
-			complete(&diff_io->notify.sync.completion);
-		else
-			queue_work(system_wq, &diff_io->notify.async.work);
-	}
+	if (atomic_dec_and_test(&diff_io->bio_count))
+		queue_work(system_wq, &diff_io->work);
 
 	bio_put(bio);
 }
@@ -61,18 +57,6 @@ static inline struct diff_io *diff_io_new(bool is_write, const bool is_nowait)
 	return diff_io;
 }
 
-struct diff_io *diff_io_new_sync(bool is_write)
-{
-	struct diff_io *diff_io;
-
-	diff_io = diff_io_new(is_write, false);
-	if (unlikely(!diff_io))
-		return NULL;
-
-	diff_io->is_sync_io = true;
-	init_completion(&diff_io->notify.sync.completion);
-	return diff_io;
-}
 
 struct diff_io *diff_io_new_async(bool is_write, const bool is_nowait,
 				  void (*notify_cb)(void *ctx), void *ctx)
@@ -83,10 +67,9 @@ struct diff_io *diff_io_new_async(bool is_write, const bool is_nowait,
 	if (unlikely(!diff_io))
 		return NULL;
 
-	diff_io->is_sync_io = false;
-	INIT_WORK(&diff_io->notify.async.work, diff_io_notify_cb);
-	diff_io->notify.async.ctx = ctx;
-	diff_io->notify.async.notify_cb = notify_cb;
+	INIT_WORK(&diff_io->work, diff_io_notify_cb);
+	diff_io->ctx = ctx;
+	diff_io->notify_cb = notify_cb;
 	return diff_io;
 }
 
@@ -181,21 +164,12 @@ int diff_io_do(struct diff_io *diff_io, struct diff_region *diff_region,
 		processed += offset;
 	}
 
-	if (current->bio_list) {
-		if (unlikely(diff_io->is_sync_io)) {
-			ret = -EPERM;
-			goto fail;
-		}
-
+	if (current->bio_list)
 		while ((bio = bio_list_pop(&bio_list_head)))
 			bio_list_add(&current->bio_list[0], bio);
-	} else {
+	else
 		while ((bio = bio_list_pop(&bio_list_head)))
 			submit_bio_noacct(bio);
-
-		if (diff_io->is_sync_io)
-			wait_for_completion_io(&diff_io->notify.sync.completion);
-	}
 
 	return 0;
 fail:
