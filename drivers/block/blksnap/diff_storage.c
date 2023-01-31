@@ -8,7 +8,6 @@
 #include <linux/build_bug.h>
 #include <uapi/linux/blksnap.h>
 #include "chunk.h"
-#include "diff_io.h"
 #include "diff_buffer.h"
 #include "diff_storage.h"
 
