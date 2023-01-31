@@ -3,7 +3,6 @@
 blksnap-y := 		\
 	cbt_map.o	\
 	chunk.o		\
-	diff_io.o	\
 	diff_area.o	\
 	diff_buffer.o	\
 	diff_storage.o	\

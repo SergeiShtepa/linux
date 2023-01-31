@@ -5,7 +5,22 @@
 #include "event_queue.h"
 
 struct blksnap_sectors;
-struct diff_region;
+
+/**
+ * struct diff_region - Describes the location of the chunks data on
+ *	difference storage.
+ * @bdev:
+ *	The target block device.
+ * @sector:
+ *	The sector offset of the region's first sector.
+ * @count:
+ *	The count of sectors in the region.
+ */
+struct diff_region {
+	struct block_device *bdev;
+	sector_t sector;
+	sector_t count;
+};
 
 /**
  * struct diff_storage - Difference storage.

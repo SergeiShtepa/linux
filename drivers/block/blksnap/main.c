@@ -8,7 +8,7 @@
 #include "snapimage.h"
 #include "snapshot.h"
 #include "tracker.h"
-#include "diff_io.h"
+#include "chunk.h"
 
 /*
  * The power of 2 for minimum tracking block size.
@@ -294,9 +294,9 @@ static int __init blksnap_init(void)
 		 free_diff_buffer_pool_size);
 	pr_debug("diff_storage_minimum: %d\n", diff_storage_minimum);
 
-	ret = diff_io_init();
+	ret = chunk_init();
 	if (ret)
-		goto fail_diff_io_init;
+		goto fail_chunk_init;
 
 	ret = tracker_init();
 	if (ret)
@@ -311,8 +311,8 @@ static int __init blksnap_init(void)
 fail_misc_register:
 	tracker_done();
 fail_tracker_init:
-	diff_io_done();
-fail_diff_io_init:
+	chunk_done();
+fail_chunk_init:
 
 	return ret;
 }
@@ -323,7 +323,7 @@ static void __exit blksnap_exit(void)
 
 	misc_deregister(&blksnap_ctrl_misc);
 
-	diff_io_done();
+	chunk_done();
 	snapshot_done();
 	tracker_done();
 

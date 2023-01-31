@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0
 #define pr_fmt(fmt) KBUILD_MODNAME "-chunk: " fmt
 
+#include <linux/blkdev.h>
 #include <linux/slab.h>
-#include <linux/dm-io.h>
-#include <linux/sched/mm.h>
 #include "chunk.h"
-#include "diff_io.h"
 #include "diff_buffer.h"
 #include "diff_area.h"
 #include "diff_storage.h"
+
+struct bio_set chunk_io_bioset;
 
 extern int chunk_maximum_in_cache;
 
@@ -72,16 +72,11 @@ void chunk_schedule_caching(struct chunk *chunk)
 		queue_work(system_wq, &diff_area->cache_release_work);
 }
 
-static void chunk_notify_load(void *ctx)
+static void chunk_notify_load(struct chunk *chunk)
 {
-	struct chunk *chunk = ctx;
 	struct image_rw_ctx *image_rw_ctx = chunk->image_rw_ctx;
-	int error = chunk->diff_io->error;
+	int error = chunk->error;
 
-	might_sleep();
-
-	diff_io_free(chunk->diff_io);
-	chunk->diff_io = NULL;
 	chunk->image_rw_ctx = NULL;
 
 	if (unlikely(error)) {
@@ -107,15 +102,9 @@ static void chunk_notify_load(void *ctx)
 	atomic_dec(&chunk->diff_area->pending_io_count);
 }
 
-static void chunk_notify_store(void *ctx)
+static void chunk_notify_store(struct chunk *chunk)
 {
-	struct chunk *chunk = ctx;
-	int error = chunk->diff_io->error;
-
-	diff_io_free(chunk->diff_io);
-	chunk->diff_io = NULL;
-
-	might_sleep();
+	int error = chunk->error;
 
 	if (unlikely(error)) {
 		chunk_store_failed(chunk, error);
@@ -173,40 +162,105 @@ void chunk_free(struct chunk *chunk)
 	kfree(chunk);
 }
 
+static void chunk_io_notify_cb(struct work_struct *work)
+{
+	struct chunk *chunk = container_of(work, struct chunk, work);
+
+	if (chunk->is_write)
+		chunk_notify_store(chunk);
+	else
+		chunk_notify_load(chunk);
+}
+
+static void chunk_io_endio(struct bio *bio)
+{
+	struct chunk *chunk = bio->bi_private;
+
+	if (bio->bi_status != BLK_STS_OK)
+		chunk->error = -EIO;
+
+	queue_work(system_wq, &chunk->work);
+	bio_put(bio);
+}
+
+static inline unsigned short calc_max_vecs(sector_t left)
+{
+	return bio_max_segs(round_up(left, PAGE_SECTORS) / PAGE_SECTORS);
+}
+
+/*
+ * chunk_io() - Perform an I/O operation.
+ *
+ * Returns zero if successful. Failure is possible if the is_nowait flag is set
+ * and a failure was occured when allocating memory. In this case, the error
+ * code -EAGAIN is returned. The error code -EINVAL means that the input
+ * arguments are incorrect.
+ */
+static int chunk_io(struct chunk *chunk, bool is_write, bool is_nowait,
+		struct diff_region *diff_region)
+{
+	struct diff_buffer *diff_buffer = chunk->diff_buffer;
+	gfp_t gfp = GFP_NOIO | (is_nowait ? GFP_NOWAIT : 0);
+	unsigned int page_idx = 0;
+	sector_t left = diff_region->count;
+	unsigned int opf;
+	struct bio *bio;
+
+	if (is_write) {
+		opf = REQ_OP_WRITE | REQ_SYNC | REQ_FUA;
+		chunk_state_set(chunk, CHUNK_ST_STORING);
+	} else {
+		opf = REQ_OP_READ;
+		chunk_state_set(chunk, CHUNK_ST_LOADING);
+	}
+
+	chunk->is_write = is_write;
+	INIT_WORK(&chunk->work, chunk_io_notify_cb);
+	atomic_set(&chunk->diff_area->pending_io_count, 1);
+
+	bio = bio_alloc_bioset(diff_region->bdev, calc_max_vecs(left), opf, gfp,
+			       &chunk_io_bioset);
+	if (unlikely(!bio))
+		return -EAGAIN;
+	bio->bi_iter.bi_sector = diff_region->sector;
+	bio_set_flag(bio, BIO_FILTERED);
+
+	while (left) {
+		sector_t count = min_t(sector_t, left, PAGE_SECTORS);
+		unsigned int bytes = count << SECTOR_SHIFT;
+
+		if (bio_add_page(bio, diff_buffer->pages[page_idx], bytes,
+				0) != bytes) {
+			struct bio *prev = bio;
+
+			bio = bio_alloc_bioset(diff_region->bdev,
+					       calc_max_vecs(left), opf, gfp,
+					       &chunk_io_bioset);
+			bio->bi_iter.bi_sector = bio_end_sector(prev);
+			bio_set_flag(bio, BIO_FILTERED);
+			bio_chain(prev, bio);
+
+			submit_bio(prev);
+		}
+		page_idx++;
+		left -= count;
+	}
+
+	bio->bi_end_io = chunk_io_endio;
+	bio->bi_private = chunk;
+	submit_bio_noacct(bio);
+	return 0;
+}
+
 /*
  * Starts asynchronous storing of a chunk to the  difference storage.
  */
 int chunk_async_store_diff(struct chunk *chunk, const bool is_nowait)
 {
-	int ret;
-	struct diff_io *diff_io;
-	struct diff_region *region = chunk->diff_region;
-
 	if (WARN(!list_is_first(&chunk->cache_link, &chunk->cache_link),
 		 "The chunk already in the cache"))
 		return -EINVAL;
-
-	diff_io = diff_io_new_async_write(chunk_notify_store, chunk, is_nowait);
-	if (unlikely(!diff_io)) {
-		if (is_nowait)
-			return -EAGAIN;
-		else
-			return -ENOMEM;
-	}
-
-	WARN_ON(chunk->diff_io);
-	chunk->diff_io = diff_io;
-	chunk_state_set(chunk, CHUNK_ST_STORING);
-	atomic_inc(&chunk->diff_area->pending_io_count);
-
-	ret = diff_io_do(chunk->diff_io, region, chunk->diff_buffer, is_nowait);
-	if (ret) {
-		atomic_dec(&chunk->diff_area->pending_io_count);
-		diff_io_free(chunk->diff_io);
-		chunk->diff_io = NULL;
-	}
-
-	return ret;
+	return chunk_io(chunk, true, is_nowait, chunk->diff_region);
 }
 
 /*
@@ -214,8 +268,6 @@ int chunk_async_store_diff(struct chunk *chunk, const bool is_nowait)
  */
 int chunk_async_load_orig(struct chunk *chunk, const bool is_nowait)
 {
-	int ret;
-	struct diff_io *diff_io;
 	struct diff_region region = {
 		.bdev = chunk->diff_area->orig_bdev,
 		.sector = (sector_t)(chunk->number) *
@@ -223,26 +275,7 @@ int chunk_async_load_orig(struct chunk *chunk, const bool is_nowait)
 		.count = chunk->sector_count,
 	};
 
-	diff_io = diff_io_new_async_read(chunk_notify_load, chunk, is_nowait);
-	if (unlikely(!diff_io)) {
-		if (is_nowait)
-			return -EAGAIN;
-		else
-			return -ENOMEM;
-	}
-
-	WARN_ON(chunk->diff_io);
-	chunk->diff_io = diff_io;
-	chunk_state_set(chunk, CHUNK_ST_LOADING);
-	atomic_inc(&chunk->diff_area->pending_io_count);
-
-	ret = diff_io_do(chunk->diff_io, &region, chunk->diff_buffer, is_nowait);
-	if (ret) {
-		atomic_dec(&chunk->diff_area->pending_io_count);
-		diff_io_free(chunk->diff_io);
-		chunk->diff_io = NULL;
-	}
-	return ret;
+	return chunk_io(chunk, false, is_nowait, &region);
 }
 
 /*
@@ -250,34 +283,20 @@ int chunk_async_load_orig(struct chunk *chunk, const bool is_nowait)
  */
 int chunk_async_load_diff(struct chunk *chunk, const bool is_nowait)
 {
-	int ret;
-	struct diff_io *diff_io;
-	struct diff_region *region = chunk->diff_region;
-
 	if (WARN(!list_is_first(&chunk->cache_link, &chunk->cache_link),
 		 "The chunk already in the cache"))
 		return -EINVAL;
 
-	diff_io = diff_io_new_async_read(chunk_notify_load,
-					 chunk, is_nowait);
-	if (unlikely(!diff_io)) {
-		if (is_nowait)
-			return -EAGAIN;
-		else
-			return -ENOMEM;
-	}
+	return chunk_io(chunk, false, is_nowait, chunk->diff_region);
+}
 
-	WARN_ON(chunk->diff_io);
-	chunk->diff_io = diff_io;
-	chunk_state_set(chunk, CHUNK_ST_LOADING);
-	atomic_inc(&chunk->diff_area->pending_io_count);
+int chunk_init(void)
+{
+	return bioset_init(&chunk_io_bioset, 64, 0,
+			   BIOSET_NEED_BVECS | BIOSET_NEED_RESCUER);
+}
 
-	ret = diff_io_do(chunk->diff_io, region, chunk->diff_buffer, is_nowait);
-	if (ret) {
-		atomic_dec(&chunk->diff_area->pending_io_count);
-		diff_io_free(chunk->diff_io);
-		chunk->diff_io = NULL;
-	}
-
-	return ret;
+void chunk_done(void)
+{
+	bioset_exit(&chunk_io_bioset);
 }

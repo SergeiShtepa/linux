@@ -9,7 +9,6 @@
 
 struct diff_area;
 struct diff_region;
-struct diff_io;
 
 enum chunk_st_bits {
         __CHUNK_ST_FAILED,
@@ -86,7 +85,7 @@ struct image_rw_ctx {
  *	for the	last chunk.
  * @lock:
  *	Binary semaphore. Syncs access to the chunks fields: state,
- *	diff_buffer, diff_region and diff_io.
+ *	diff_buffer and diff_region.
  * @state:
  *	Defines the state of a chunk. May contain CHUNK_ST_* bits.
  * @diff_buffer:
@@ -95,8 +94,6 @@ struct image_rw_ctx {
  * @diff_region:
  *	Pointer to &struct diff_region. Describes a copy of the chunk data
  *	on the difference storage.
- * @diff_io:
- *	Provides I/O operations for a chunk.
  *
  * This structure describes the block of data that the module operates
  * with when executing the copy-on-write algorithm and when performing I/O
@@ -123,8 +120,12 @@ struct chunk {
         atomic_t diff_buffer_holder;
 	struct diff_buffer *diff_buffer;
 	struct diff_region *diff_region;
-	struct diff_io *diff_io;
+
+	/* I/O handling */
 	struct image_rw_ctx *image_rw_ctx;
+	int error;
+	bool is_write;
+	struct work_struct work;
 };
 
 static inline void chunk_state_set(struct chunk *chunk, int st)
@@ -154,5 +155,8 @@ void chunk_schedule_caching(struct chunk *chunk);
 int chunk_async_store_diff(struct chunk *chunk, const bool is_nowait);
 int chunk_async_load_orig(struct chunk *chunk, const bool is_nowait);
 int chunk_async_load_diff(struct chunk *chunk, const bool is_nowait);
+
+int __init chunk_init(void);
+void __exit chunk_done(void);
 
 #endif /* __BLKSNAP_CHUNK_H */
