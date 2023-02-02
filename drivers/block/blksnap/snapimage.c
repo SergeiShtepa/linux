@@ -45,8 +45,6 @@ static void snapimage_submit_bio(struct bio *bio)
 	ctx->bio = bio;
 	atomic_set(&ctx->error_cnt, 0);
 
-	diff_area_throttling_io(ctx->diff_area);
-
 	bio_list_init(&bio_list[0]);
 	old_bio_list = current->bio_list;
 	current->bio_list = bio_list;

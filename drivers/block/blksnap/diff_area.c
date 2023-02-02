@@ -79,23 +79,9 @@ static void diff_area_calculate_chunk_size(struct diff_area *diff_area)
 void diff_area_free(struct diff_area *diff_area)
 {
 	unsigned long inx = 0;
-	u64 start_waiting;
 	struct chunk *chunk;
 
 	might_sleep();
-	start_waiting = jiffies_64;
-	while (atomic_read(&diff_area->pending_io_count)) {
-		schedule_timeout_interruptible(1);
-		if (jiffies_64 > (start_waiting + HZ)) {
-			start_waiting = jiffies_64;
-			inx++;
-			pr_warn("Waiting for pending I/O to complete\n");
-			if (inx > 5) {
-				pr_err("Failed to complete pending I/O\n");
-				break;
-			}
-		}
-	}
 
 	flush_work(&diff_area->cache_release_work);
 	xa_for_each(&diff_area->chunk_map, inx, chunk)
@@ -253,7 +239,6 @@ struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
 	atomic_set(&diff_area->free_diff_buffers_count, 0);
 
 	diff_area->corrupt_flag = 0;
-	atomic_set(&diff_area->pending_io_count, 0);
 
 	/*
 	 * Allocating all chunks in advance allows to avoid doing this in
@@ -614,16 +599,4 @@ void diff_area_set_corrupted(struct diff_area *diff_area, int err_code)
 	pr_err("Set snapshot device is corrupted for [%u:%u] with error code %d\n",
 	       MAJOR(diff_area->orig_bdev->bd_dev),
 	       MINOR(diff_area->orig_bdev->bd_dev), abs(err_code));
-}
-
-void diff_area_throttling_io(struct diff_area *diff_area)
-{
-	u64 start_waiting;
-
-	start_waiting = jiffies_64;
-	while (atomic_read(&diff_area->pending_io_count)) {
-		schedule_timeout_interruptible(0);
-		if (jiffies_64 > (start_waiting + HZ / 10))
-			break;
-	}
 }
