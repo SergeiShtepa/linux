@@ -52,7 +52,7 @@ struct snapshot {
 	struct list_head trackers;
 };
 
-void snapshot_done(void);
+void __exit snapshot_done(void);
 
 int snapshot_create(uuid_t *id);
 int snapshot_destroy(const uuid_t *id);

@@ -78,7 +78,7 @@ fail_free_snapshot:
 	return ERR_PTR(ret);
 }
 
-void snapshot_done(void)
+void __exit snapshot_done(void)
 {
 	struct snapshot *snapshot;
 

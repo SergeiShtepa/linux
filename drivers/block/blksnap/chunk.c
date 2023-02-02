@@ -290,7 +290,7 @@ int chunk_async_load_diff(struct chunk *chunk, const bool is_nowait)
 	return chunk_io(chunk, false, is_nowait, chunk->diff_region);
 }
 
-int chunk_init(void)
+int __init chunk_init(void)
 {
 	return bioset_init(&chunk_io_bioset, 64, 0,
 			   BIOSET_NEED_BVECS | BIOSET_NEED_RESCUER);

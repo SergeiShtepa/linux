@@ -157,6 +157,6 @@ int chunk_async_load_orig(struct chunk *chunk, const bool is_nowait);
 int chunk_async_load_diff(struct chunk *chunk, const bool is_nowait);
 
 int __init chunk_init(void);
-void __exit chunk_done(void);
+void chunk_done(void);
 
 #endif /* __BLKSNAP_CHUNK_H */
