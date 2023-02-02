@@ -368,7 +368,7 @@ void tracker_release_snapshot(struct tracker *tracker)
 	}
 }
 
-int tracker_init(void)
+int __init tracker_init(void)
 {
 	pr_debug("Register filter '%s'", tracker_acc.name);
 

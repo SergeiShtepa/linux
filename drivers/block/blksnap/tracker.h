@@ -51,7 +51,7 @@ struct tracker {
         bool is_frozen;
 };
 
-int tracker_init(void);
+int __init tracker_init(void);
 void tracker_done(void);
 
 void tracker_free(struct kref *kref);
