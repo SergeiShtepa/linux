@@ -98,8 +98,6 @@ static void chunk_notify_load(struct chunk *chunk)
 	}
 	if (image_rw_ctx)
 		kref_put(&image_rw_ctx->kref, diff_area_rw_chunk);
-
-	atomic_dec(&chunk->diff_area->pending_io_count);
 }
 
 static void chunk_notify_store(struct chunk *chunk)
@@ -108,13 +106,13 @@ static void chunk_notify_store(struct chunk *chunk)
 
 	if (unlikely(error)) {
 		chunk_store_failed(chunk, error);
-		goto out;
+		return;
 	}
 
 	if (unlikely(chunk_state_check(chunk, CHUNK_ST_FAILED))) {
 		pr_err("Chunk in a failed state\n");
 		chunk_store_failed(chunk, 0);
-		goto out;
+		return;
 	}
 	if (chunk_state_check(chunk, CHUNK_ST_STORING)) {
 		chunk_state_unset(chunk, CHUNK_ST_STORING);
@@ -127,8 +125,6 @@ static void chunk_notify_store(struct chunk *chunk)
 	} else
 		pr_err("invalid chunk state 0x%x\n", atomic_read(&chunk->state));
 	up(&chunk->lock);
-out:
-	atomic_dec(&chunk->diff_area->pending_io_count);
 }
 
 struct chunk *chunk_alloc(struct diff_area *diff_area, unsigned long number)
@@ -216,7 +212,6 @@ static int chunk_io(struct chunk *chunk, bool is_write, bool is_nowait,
 
 	chunk->is_write = is_write;
 	INIT_WORK(&chunk->work, chunk_io_notify_cb);
-	atomic_set(&chunk->diff_area->pending_io_count, 1);
 
 	bio = bio_alloc_bioset(diff_region->bdev, calc_max_vecs(left), opf, gfp,
 			       &chunk_io_bioset);

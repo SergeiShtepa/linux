@@ -52,9 +52,6 @@ struct image_rw_ctx;
  *	The flag is set if an error occurred in the operation of the data
  *	saving mechanism in the diff area. In this case, an error will be
  *	generated when reading from the snapshot image.
- * @pending_io_count:
- *	Counter of incomplete I/O operations. Allows to wait for all I/O
- *	operations to be completed before releasing this structure.
  *
  * The &struct diff_area is created for each block device in the snapshot.
  * It is used to save the differences between the original block device and
@@ -106,7 +103,6 @@ struct diff_area {
 
 	unsigned long corrupt_flag;
 	int error_code;
-	atomic_t pending_io_count;
 };
 
 struct diff_area *diff_area_new(dev_t dev_id,
@@ -130,6 +126,6 @@ int diff_area_wait(struct diff_area *diff_area, sector_t sector, sector_t count,
 
 void diff_area_preload(struct image_rw_ctx *image_rw_ctx);
 void diff_area_rw_chunk(struct kref *kref);
-void diff_area_throttling_io(struct diff_area *diff_area);
+//void diff_area_throttling_io(struct diff_area *diff_area);
 
 #endif /* __BLKSNAP_DIFF_AREA_H */
