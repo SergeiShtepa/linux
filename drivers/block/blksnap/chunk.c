@@ -235,7 +235,7 @@ static int chunk_io(struct chunk *chunk, bool is_write, bool is_nowait,
 			next->bi_iter.bi_sector = bio_end_sector(bio);
 			bio_set_flag(next, BIO_FILTERED);
 			bio_chain(bio, next);
-			submit_bio(bio);
+			submit_bio_noacct(bio);
 			bio = next;
 		}
 		page_idx++;
@@ -244,7 +244,7 @@ static int chunk_io(struct chunk *chunk, bool is_write, bool is_nowait,
 
 	bio->bi_end_io = chunk_io_endio;
 	bio->bi_private = chunk;
-	submit_bio(bio);
+	submit_bio_noacct(bio);
 	return 0;
 fail:
 	bio->bi_end_io = chunk_io_endio;
