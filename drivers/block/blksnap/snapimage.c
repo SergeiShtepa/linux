@@ -18,12 +18,10 @@ static void snapimage_submit_bio(struct bio *bio)
 {
 	struct tracker *tracker = bio->bi_bdev->bd_disk->private_data;
 	struct diff_area *diff_area = tracker->diff_area;
-	struct bio_list *old_bio_list;
-	struct bio_list bio_list[2] = { };
-	struct bio *new_bio;
 	struct image_rw_ctx *ctx;
 
-	WARN_ONCE(bio->bi_opf & REQ_NOWAIT, "Processing bio with the flag REQ_NOWAIT is not supported\n");
+	WARN_ONCE(bio->bi_opf & REQ_NOWAIT,
+		  "Processing bio with the flag REQ_NOWAIT is not supported\n");
 	if (unlikely(bio->bi_opf & REQ_NOWAIT)) {
 		bio_io_error(bio);
 		return;
@@ -45,16 +43,7 @@ static void snapimage_submit_bio(struct bio *bio)
 	ctx->bio = bio;
 	atomic_set(&ctx->error_cnt, 0);
 
-	bio_list_init(&bio_list[0]);
-	old_bio_list = current->bio_list;
-	current->bio_list = bio_list;
-
 	diff_area_preload(ctx);
-
-	current->bio_list = NULL;
-	while ((new_bio = bio_list_pop(&bio_list[0])))
-		submit_bio_noacct(new_bio);
-	current->bio_list = old_bio_list;
 
 	kref_put(&ctx->kref, diff_area_rw_chunk);
 }
