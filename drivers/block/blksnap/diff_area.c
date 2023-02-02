@@ -182,7 +182,7 @@ static void diff_area_cache_release(struct diff_area *diff_area)
 			}
 			chunk->diff_region = diff_region;
 		}
-		ret = chunk_async_store_diff(chunk, false);
+		ret = chunk_async_store_diff(chunk);
 		if (ret)
 			chunk_store_failed(chunk, ret);
 	}
@@ -284,8 +284,7 @@ struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
 /*
  * Implements the copy-on-write mechanism.
  */
-int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
-		   const bool is_nowait)
+int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count)
 {
 	int ret = 0;
 	sector_t offset;
@@ -304,14 +303,9 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
 			return -EINVAL;
 		}
 		WARN_ON(chunk_number(diff_area, offset) != chunk->number);
-		if (is_nowait) {
-			if (down_trylock(&chunk->lock))
-				return -EAGAIN;
-		} else {
-			ret = down_killable(&chunk->lock);
-			if (unlikely(ret))
-				return ret;
-		}
+		ret = down_killable(&chunk->lock);
+		if (unlikely(ret))
+			return ret;
 
 		if (chunk_state_check(chunk, CHUNK_ST_FAILED |
 			CHUNK_ST_BUFFER_READY | CHUNK_ST_STORE_READY)) {
@@ -334,7 +328,7 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
 			goto fail_unlock_chunk;
 		}
 
-		diff_buffer = diff_buffer_take(chunk->diff_area, is_nowait);
+		diff_buffer = diff_buffer_take(chunk->diff_area);
 		if (IS_ERR(diff_buffer)) {
 			ret = PTR_ERR(diff_buffer);
 			goto fail_unlock_chunk;
@@ -342,9 +336,7 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
 		WARN(chunk->diff_buffer, "Chunks buffer has been lost");
 		chunk->diff_buffer = diff_buffer;
 
-		ret = chunk_async_load_orig(chunk, is_nowait);
-		if (unlikely(ret))
-			goto fail_unlock_chunk;
+		chunk_async_load_orig(chunk);
 	}
 
 	return ret;
@@ -354,8 +346,7 @@ fail_unlock_chunk:
 	return ret;
 }
 
-int diff_area_wait(struct diff_area *diff_area, sector_t sector, sector_t count,
-		   const bool is_nowait)
+int diff_area_wait(struct diff_area *diff_area, sector_t sector, sector_t count)
 {
 	int ret = 0;
 	sector_t offset;
@@ -373,14 +364,9 @@ int diff_area_wait(struct diff_area *diff_area, sector_t sector, sector_t count,
 			return -EINVAL;
 		}
 		WARN_ON(chunk_number(diff_area, offset) != chunk->number);
-		if (is_nowait) {
-			if (down_trylock(&chunk->lock))
-				return -EAGAIN;
-		} else {
-			ret = down_killable(&chunk->lock);
-			if (unlikely(ret))
-				return ret;
-		}
+		ret = down_killable(&chunk->lock);
+		if (unlikely(ret))
+			return ret;
 
 		if (chunk_state_check(chunk, CHUNK_ST_FAILED)) {
 			up(&chunk->lock);
@@ -408,7 +394,7 @@ static int diff_area_load_chunk(struct diff_area *diff_area,
 {
 	struct diff_buffer *diff_buffer;
 
-	diff_buffer = diff_buffer_take(diff_area, false);
+	diff_buffer = diff_buffer_take(diff_area);
 	if (IS_ERR(diff_buffer))
 		return PTR_ERR(diff_buffer);
 
@@ -416,9 +402,9 @@ static int diff_area_load_chunk(struct diff_area *diff_area,
 	chunk->diff_buffer = diff_buffer;
 
 	if (chunk_state_check(chunk, CHUNK_ST_STORE_READY))
-		return chunk_async_load_diff(chunk, false);
-
-	return chunk_async_load_orig(chunk, false);
+		return chunk_async_load_diff(chunk);
+	chunk_async_load_orig(chunk);
+	return 0;
 }
 
 static struct chunk *diff_area_image_get_chunk(

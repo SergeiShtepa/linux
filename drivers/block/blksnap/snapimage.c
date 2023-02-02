@@ -20,13 +20,6 @@ static void snapimage_submit_bio(struct bio *bio)
 	struct diff_area *diff_area = tracker->diff_area;
 	struct image_rw_ctx *ctx;
 
-	WARN_ONCE(bio->bi_opf & REQ_NOWAIT,
-		  "Processing bio with the flag REQ_NOWAIT is not supported\n");
-	if (unlikely(bio->bi_opf & REQ_NOWAIT)) {
-		bio_io_error(bio);
-		return;
-	}
-
 	if (diff_area_is_corrupted(diff_area)) {
 		bio_io_error(bio);
 		return;

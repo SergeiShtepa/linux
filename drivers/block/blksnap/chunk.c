@@ -184,19 +184,10 @@ static inline unsigned short calc_max_vecs(sector_t left)
 	return bio_max_segs(round_up(left, PAGE_SECTORS) / PAGE_SECTORS);
 }
 
-/*
- * chunk_io() - Perform an I/O operation.
- *
- * Returns zero if successful. Failure is possible if the is_nowait flag is set
- * and a failure was occured when allocating memory. In this case, the error
- * code -EAGAIN is returned. The error code -EINVAL means that the input
- * arguments are incorrect.
- */
-static int chunk_io(struct chunk *chunk, bool is_write, bool is_nowait,
+static void chunk_io(struct chunk *chunk, bool is_write,
 		struct diff_region *diff_region)
 {
 	struct diff_buffer *diff_buffer = chunk->diff_buffer;
-	gfp_t gfp = GFP_NOIO | (is_nowait ? GFP_NOWAIT : 0);
 	unsigned int page_idx = 0;
 	sector_t left = diff_region->count;
 	unsigned int opf;
@@ -213,10 +204,8 @@ static int chunk_io(struct chunk *chunk, bool is_write, bool is_nowait,
 	chunk->is_write = is_write;
 	INIT_WORK(&chunk->work, chunk_io_notify_cb);
 
-	bio = bio_alloc_bioset(diff_region->bdev, calc_max_vecs(left), opf, gfp,
-			       &chunk_io_bioset);
-	if (unlikely(!bio))
-		return -EAGAIN;
+	bio = bio_alloc_bioset(diff_region->bdev, calc_max_vecs(left), opf,
+			       GFP_NOIO, &chunk_io_bioset);
 	bio->bi_iter.bi_sector = diff_region->sector;
 	bio_set_flag(bio, BIO_FILTERED);
 
@@ -224,14 +213,13 @@ static int chunk_io(struct chunk *chunk, bool is_write, bool is_nowait,
 		sector_t count = min_t(sector_t, left, PAGE_SECTORS);
 		unsigned int bytes = count << SECTOR_SHIFT;
 
-		if (bio_add_page(bio, diff_buffer->pages[page_idx], bytes, 0)
-			!= bytes) {
+		if (bio_add_page(bio, diff_buffer->pages[page_idx], bytes, 0) !=
+				bytes) {
 			struct bio *next;
+
 			next = bio_alloc_bioset(diff_region->bdev,
-						calc_max_vecs(left), opf, gfp,
-						&chunk_io_bioset);
-			if (unlikely(!next))
-				goto fail;
+						calc_max_vecs(left), opf,
+						GFP_NOIO, &chunk_io_bioset);
 			next->bi_iter.bi_sector = bio_end_sector(bio);
 			bio_set_flag(next, BIO_FILTERED);
 			bio_chain(bio, next);
@@ -245,29 +233,24 @@ static int chunk_io(struct chunk *chunk, bool is_write, bool is_nowait,
 	bio->bi_end_io = chunk_io_endio;
 	bio->bi_private = chunk;
 	submit_bio_noacct(bio);
-	return 0;
-fail:
-	bio->bi_end_io = chunk_io_endio;
-	bio->bi_private = chunk;
-	bio_io_error(bio);
-	return -EAGAIN;
 }
 
 /*
  * Starts asynchronous storing of a chunk to the  difference storage.
  */
-int chunk_async_store_diff(struct chunk *chunk, const bool is_nowait)
+int chunk_async_store_diff(struct chunk *chunk)
 {
 	if (WARN(!list_is_first(&chunk->cache_link, &chunk->cache_link),
 		 "The chunk already in the cache"))
 		return -EINVAL;
-	return chunk_io(chunk, true, is_nowait, chunk->diff_region);
+	chunk_io(chunk, true, chunk->diff_region);
+	return 0;
 }
 
 /*
  * Starts asynchronous loading of a chunk from the original block device.
  */
-int chunk_async_load_orig(struct chunk *chunk, const bool is_nowait)
+void chunk_async_load_orig(struct chunk *chunk)
 {
 	struct diff_region region = {
 		.bdev = chunk->diff_area->orig_bdev,
@@ -276,19 +259,20 @@ int chunk_async_load_orig(struct chunk *chunk, const bool is_nowait)
 		.count = chunk->sector_count,
 	};
 
-	return chunk_io(chunk, false, is_nowait, &region);
+	chunk_io(chunk, false, &region);
 }
 
 /*
  * Performs asynchronous loading of a chunk from the difference storage.
  */
-int chunk_async_load_diff(struct chunk *chunk, const bool is_nowait)
+int chunk_async_load_diff(struct chunk *chunk)
 {
 	if (WARN(!list_is_first(&chunk->cache_link, &chunk->cache_link),
 		 "The chunk already in the cache"))
 		return -EINVAL;
 
-	return chunk_io(chunk, false, is_nowait, chunk->diff_region);
+	chunk_io(chunk, false, chunk->diff_region);
+	return 0;
 }
 
 int __init chunk_init(void)
