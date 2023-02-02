@@ -152,9 +152,9 @@ void chunk_store_failed(struct chunk *chunk, int error);
 void chunk_schedule_caching(struct chunk *chunk);
 
 /* Asynchronous operations are used to implement the COW algorithm. */
-int chunk_async_store_diff(struct chunk *chunk, const bool is_nowait);
-int chunk_async_load_orig(struct chunk *chunk, const bool is_nowait);
-int chunk_async_load_diff(struct chunk *chunk, const bool is_nowait);
+int chunk_async_store_diff(struct chunk *chunk);
+void chunk_async_load_orig(struct chunk *chunk);
+int chunk_async_load_diff(struct chunk *chunk);
 
 int __init chunk_init(void);
 void chunk_done(void);

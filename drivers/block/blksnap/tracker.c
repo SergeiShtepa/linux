@@ -39,7 +39,6 @@ static bool tracker_submit_bio(struct bio *bio)
 	sector_t sector;
 	sector_t count = bio_sectors(bio);
 	unsigned int current_flag;
-	bool is_nowait = !!(bio->bi_opf & REQ_NOWAIT);
 
 	if (!op_is_write(bio_op(bio)) || !count)
 		return false;
@@ -57,11 +56,22 @@ static bool tracker_submit_bio(struct bio *bio)
 	    diff_area_is_corrupted(tracker->diff_area))
 		return false;
 
+	/*
+	 * Writing to the diff area may split the bio or block, so don't try
+	 * to handle nowait requests.  Just let the caller retry from a context
+	 * where it can block.
+	 */
+	if (bio->bi_opf & REQ_NOWAIT) {
+		bio->bi_status = BLK_STS_AGAIN;
+		bio_endio(bio);
+		return true;
+	}
+
 	current_flag = memalloc_noio_save();
 	bio_list_init(&bio_list_on_stack[0]);
 	current->bio_list = bio_list_on_stack;
 
-	err = diff_area_copy(tracker->diff_area, sector, count, is_nowait);
+	err = diff_area_copy(tracker->diff_area, sector, count);
 
 	current->bio_list = NULL;
 	memalloc_noio_restore(current_flag);
@@ -91,7 +101,7 @@ static bool tracker_submit_bio(struct bio *bio)
 	 * flags and options.
 	 * Otherwise, write I/O units may overtake read I/O units.
 	 */
-	err = diff_area_wait(tracker->diff_area, sector, count, is_nowait);
+	err = diff_area_wait(tracker->diff_area, sector, count);
 	if (unlikely(err)) {
 		if (err == -EAGAIN) {
 			bio_wouldblock_error(bio);

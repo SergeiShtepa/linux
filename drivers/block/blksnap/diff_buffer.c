@@ -60,8 +60,7 @@ fail:
 	return NULL;
 }
 
-struct diff_buffer *diff_buffer_take(struct diff_area *diff_area,
-				     const bool is_nowait)
+struct diff_buffer *diff_buffer_take(struct diff_area *diff_area)
 {
 	struct diff_buffer *diff_buffer = NULL;
 	sector_t chunk_sectors;
@@ -87,15 +86,9 @@ struct diff_buffer *diff_buffer_take(struct diff_area *diff_area,
 	buffer_size = chunk_sectors << SECTOR_SHIFT;
 
 	diff_buffer =
-		diff_buffer_new(page_count, buffer_size,
-				is_nowait ? (GFP_NOIO | GFP_NOWAIT) : GFP_NOIO);
-	if (unlikely(!diff_buffer)) {
-		if (is_nowait)
-			return ERR_PTR(-EAGAIN);
-		else
-			return ERR_PTR(-ENOMEM);
-	}
-
+		diff_buffer_new(page_count, buffer_size, GFP_NOIO);
+	if (unlikely(!diff_buffer))
+		return ERR_PTR(-ENOMEM);
 	return diff_buffer;
 }
 

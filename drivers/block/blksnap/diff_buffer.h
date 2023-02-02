@@ -29,8 +29,7 @@ struct diff_buffer {
 	struct page *pages[0];
 };
 
-struct diff_buffer *diff_buffer_take(struct diff_area *diff_area,
-				     const bool is_nowait);
+struct diff_buffer *diff_buffer_take(struct diff_area *diff_area);
 void diff_buffer_release(struct diff_area *diff_area,
 			 struct diff_buffer *diff_buffer);
 void diff_buffer_cleanup(struct diff_area *diff_area);
