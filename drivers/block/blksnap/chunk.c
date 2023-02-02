@@ -224,18 +224,19 @@ static int chunk_io(struct chunk *chunk, bool is_write, bool is_nowait,
 		sector_t count = min_t(sector_t, left, PAGE_SECTORS);
 		unsigned int bytes = count << SECTOR_SHIFT;
 
-		if (bio_add_page(bio, diff_buffer->pages[page_idx], bytes,
-				0) != bytes) {
-			struct bio *prev = bio;
-
-			bio = bio_alloc_bioset(diff_region->bdev,
-					       calc_max_vecs(left), opf, gfp,
-					       &chunk_io_bioset);
-			bio->bi_iter.bi_sector = bio_end_sector(prev);
-			bio_set_flag(bio, BIO_FILTERED);
-			bio_chain(prev, bio);
-
-			submit_bio(prev);
+		if (bio_add_page(bio, diff_buffer->pages[page_idx], bytes, 0)
+			!= bytes) {
+			struct bio *next;
+			next = bio_alloc_bioset(diff_region->bdev,
+						calc_max_vecs(left), opf, gfp,
+						&chunk_io_bioset);
+			if (unlikely(!next))
+				goto fail;
+			next->bi_iter.bi_sector = bio_end_sector(bio);
+			bio_set_flag(next, BIO_FILTERED);
+			bio_chain(bio, next);
+			submit_bio(bio);
+			bio = next;
 		}
 		page_idx++;
 		left -= count;
@@ -243,8 +244,13 @@ static int chunk_io(struct chunk *chunk, bool is_write, bool is_nowait,
 
 	bio->bi_end_io = chunk_io_endio;
 	bio->bi_private = chunk;
-	submit_bio_noacct(bio);
+	submit_bio(bio);
 	return 0;
+fail:
+	bio->bi_end_io = chunk_io_endio;
+	bio->bi_private = chunk;
+	bio_io_error(bio);
+	return -EAGAIN;
 }
 
 /*
