@@ -200,8 +200,8 @@ static int ioctl_snapshot_wait_event(unsigned long arg)
 	if (!karg)
 		return -ENOMEM;
 
-	/* Copy only snapshot ID */
-	if (copy_from_user(karg->id.b, uarg->id.b, sizeof(uuid_t))) {
+	/* Copy only snapshot ID and timeout*/
+	if (copy_from_user(karg, uarg, sizeof(uuid_t) + sizeof(__u32))) {
 		pr_err("Unable to get snapshot event. Invalid user buffer\n");
 		ret = -EINVAL;
 		goto out;
@@ -243,7 +243,6 @@ static int (*const blksnap_ioctl_table[])(unsigned long arg) = {
 	ioctl_snapshot_append_storage,
 	ioctl_snapshot_take,
 	ioctl_snapshot_collect,
-	//ioctl_tracker_collect,
 	ioctl_snapshot_wait_event,
 };
 

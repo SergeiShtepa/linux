@@ -57,25 +57,25 @@ struct event *event_wait(struct event_queue *event_queue,
 	int ret;
 
 	ret = wait_event_interruptible_timeout(event_queue->wq_head,
-					       !list_empty(&event_queue->list),
-					       timeout_ms);
-
-	if (ret > 0) {
-		struct event *event;
+				!list_empty(&event_queue->list), timeout_ms);
+	if (ret >= 0) {
+		struct event *event = ERR_PTR(-ENOENT);
 
 		spin_lock(&event_queue->lock);
-		event = list_first_entry(&event_queue->list, struct event,
-					 link);
-		list_del(&event->link);
+		if (!list_empty(&event_queue->list)) {
+			event = list_first_entry(&event_queue->list,
+						 struct event, link);
+			list_del(&event->link);
+		}
 		spin_unlock(&event_queue->lock);
 
-		pr_debug("Event received: time=%lld code=%d\n", event->time,
-			 event->code);
+		if (IS_ERR(event))
+			pr_debug("Queue list is empty, timeout_ms=%lu\n", timeout_ms);
+		else
+			pr_debug("Event received: time=%lld code=%d\n",
+				 event->time, event->code);
 		return event;
 	}
-	if (ret == 0)
-		return ERR_PTR(-ENOENT);
-
 	if (ret == -ERESTARTSYS) {
 		pr_debug("event waiting interrupted\n");
 		return ERR_PTR(-EINTR);
