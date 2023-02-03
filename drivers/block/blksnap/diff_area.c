@@ -284,7 +284,8 @@ struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
 /*
  * Implements the copy-on-write mechanism.
  */
-int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count)
+int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
+		   const bool nowait)
 {
 	int ret = 0;
 	sector_t offset;
@@ -304,8 +305,14 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count)
 		}
 		WARN_ON(chunk_number(diff_area, offset) != chunk->number);
 		ret = down_killable(&chunk->lock);
-		if (unlikely(ret))
-			return ret;
+		if (nowait) {
+			if (down_trylock(&chunk->lock))
+				return -EAGAIN;
+		} else {
+			ret = down_killable(&chunk->lock);
+			if (unlikely(ret))
+				return ret;
+		}
 
 		if (chunk_state_check(chunk, CHUNK_ST_FAILED |
 			CHUNK_ST_BUFFER_READY | CHUNK_ST_STORE_READY)) {
@@ -319,6 +326,16 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count)
 			up(&chunk->lock);
 			continue;
 		}
+		if (nowait) {
+			/*
+			 * If the data of this chunk has not yet been copyed to
+			 * the difference storage, then it is impossible to
+			 * process the I/O write unit with the NOWAIT flag.
+			 */
+			up(&chunk->lock);
+			return -EAGAIN;
+		}
+
 
 		if (unlikely(chunk_state_check(chunk,
 			CHUNK_ST_LOADING | CHUNK_ST_STORING))) {

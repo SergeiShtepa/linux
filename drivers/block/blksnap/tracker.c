@@ -56,32 +56,29 @@ static bool tracker_submit_bio(struct bio *bio)
 	    diff_area_is_corrupted(tracker->diff_area))
 		return false;
 
-	/*
-	 * Writing to the diff area may split the bio or block, so don't try
-	 * to handle nowait requests.  Just let the caller retry from a context
-	 * where it can block.
-	 */
-	if (bio->bi_opf & REQ_NOWAIT) {
-		bio->bi_status = BLK_STS_AGAIN;
-		bio_endio(bio);
-		return true;
-	}
-
 	current_flag = memalloc_noio_save();
 	bio_list_init(&bio_list_on_stack[0]);
 	current->bio_list = bio_list_on_stack;
 
-	err = diff_area_copy(tracker->diff_area, sector, count);
+	err = diff_area_copy(tracker->diff_area, sector, count,
+			     bio->bi_opf & REQ_NOWAIT);
 
 	current->bio_list = NULL;
 	memalloc_noio_restore(current_flag);
 
 	if (unlikely(err)) {
 		if (err == -EAGAIN) {
+		/*
+	 	 * Writing to the diff area may split the bio or block,
+	 	 * so don't try to handle nowait requests.  Just let
+	 	 * the caller retry from a context where it can block.
+	 	 */
 			bio_wouldblock_error(bio);
 			return true;
 		}
-		pr_err("Failed to copy data to diff storage with error %d\n", abs(err));
+
+		pr_err("Failed to copy data to diff storage with error %d\n",
+		       abs(err));
 		return false;
 	}
 
