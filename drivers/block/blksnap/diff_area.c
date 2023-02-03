@@ -162,7 +162,6 @@ static struct chunk *diff_area_lock_and_get_chunk_from_cache(
 
 static void diff_area_cache_release(struct diff_area *diff_area)
 {
-	int ret;
 	struct chunk *chunk;
 
 	while ((atomic_read(&diff_area->cache_count) > chunk_maximum_in_cache) &&
@@ -330,8 +329,6 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
 			diff_area_set_corrupted(diff_area, -EINVAL);
 			return -EINVAL;
 		}
-		WARN_ON(chunk_number(diff_area, offset) != chunk->number);
-		ret = down_killable(&chunk->lock);
 		if (nowait) {
 			if (down_trylock(&chunk->lock))
 				return -EAGAIN;
