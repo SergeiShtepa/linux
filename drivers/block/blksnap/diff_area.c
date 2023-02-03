@@ -45,6 +45,35 @@ static inline unsigned long long count_by_shift(sector_t capacity,
 	return round_up(capacity, (1ull << shift_sector)) >> shift_sector;
 }
 
+/*
+ * Starts asynchronous storing of a chunk to the  difference storage.
+ */
+static inline void chunk_async_store_diff(struct chunk *chunk)
+{
+        chunk_io(chunk, true, chunk->diff_region);
+}
+/*
+ * Starts asynchronous loading of a chunk from the original block device.
+ */
+static inline void chunk_async_load_orig(struct chunk *chunk)
+{
+        struct diff_region region = {
+                .bdev = chunk->diff_area->orig_bdev,
+                .sector = (sector_t)(chunk->number) *
+                          diff_area_chunk_sectors(chunk->diff_area),
+                .count = chunk->sector_count,
+        };
+
+        chunk_io(chunk, false, &region);
+}
+/*
+ * Starts asynchronous loading of a chunk from the difference storage.
+ */
+static inline void chunk_async_load_diff(struct chunk *chunk)
+{
+        chunk_io(chunk, false, chunk->diff_region);
+}
+
 static void diff_area_calculate_chunk_size(struct diff_area *diff_area)
 {
 	unsigned long long shift = chunk_minimum_shift;
@@ -182,9 +211,7 @@ static void diff_area_cache_release(struct diff_area *diff_area)
 			}
 			chunk->diff_region = diff_region;
 		}
-		ret = chunk_async_store_diff(chunk);
-		if (ret)
-			chunk_store_failed(chunk, ret);
+		chunk_async_store_diff(chunk);
 	}
 }
 
@@ -419,8 +446,9 @@ static int diff_area_load_chunk(struct diff_area *diff_area,
 	chunk->diff_buffer = diff_buffer;
 
 	if (chunk_state_check(chunk, CHUNK_ST_STORE_READY))
-		return chunk_async_load_diff(chunk);
-	chunk_async_load_orig(chunk);
+		chunk_async_load_diff(chunk);
+	else
+		chunk_async_load_orig(chunk);
 	return 0;
 }
 
