@@ -119,7 +119,7 @@ static inline sector_t diff_area_chunk_sectors(struct diff_area *diff_area)
 	return (sector_t)(1ull << (diff_area->chunk_shift - SECTOR_SHIFT));
 };
 int diff_area_copy(struct diff_area *diff_area, sector_t sector,
-		   sector_t count);
+		   sector_t count, const bool nowait);
 
 int diff_area_wait(struct diff_area *diff_area, sector_t sector,
 		   sector_t count);
