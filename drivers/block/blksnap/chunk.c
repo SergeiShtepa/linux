@@ -184,7 +184,7 @@ static inline unsigned short calc_max_vecs(sector_t left)
 	return bio_max_segs(round_up(left, PAGE_SECTORS) / PAGE_SECTORS);
 }
 
-static void chunk_io(struct chunk *chunk, bool is_write,
+void chunk_io(struct chunk *chunk, bool is_write,
 		struct diff_region *diff_region)
 {
 	struct diff_buffer *diff_buffer = chunk->diff_buffer;
@@ -233,46 +233,6 @@ static void chunk_io(struct chunk *chunk, bool is_write,
 	bio->bi_end_io = chunk_io_endio;
 	bio->bi_private = chunk;
 	submit_bio_noacct(bio);
-}
-
-/*
- * Starts asynchronous storing of a chunk to the  difference storage.
- */
-int chunk_async_store_diff(struct chunk *chunk)
-{
-	if (WARN(!list_is_first(&chunk->cache_link, &chunk->cache_link),
-		 "The chunk already in the cache"))
-		return -EINVAL;
-	chunk_io(chunk, true, chunk->diff_region);
-	return 0;
-}
-
-/*
- * Starts asynchronous loading of a chunk from the original block device.
- */
-void chunk_async_load_orig(struct chunk *chunk)
-{
-	struct diff_region region = {
-		.bdev = chunk->diff_area->orig_bdev,
-		.sector = (sector_t)(chunk->number) *
-			  diff_area_chunk_sectors(chunk->diff_area),
-		.count = chunk->sector_count,
-	};
-
-	chunk_io(chunk, false, &region);
-}
-
-/*
- * Performs asynchronous loading of a chunk from the difference storage.
- */
-int chunk_async_load_diff(struct chunk *chunk)
-{
-	if (WARN(!list_is_first(&chunk->cache_link, &chunk->cache_link),
-		 "The chunk already in the cache"))
-		return -EINVAL;
-
-	chunk_io(chunk, false, chunk->diff_region);
-	return 0;
 }
 
 int __init chunk_init(void)
