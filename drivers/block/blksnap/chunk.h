@@ -123,9 +123,6 @@ struct chunk {
 
 	/* I/O handling */
 	struct image_rw_ctx *image_rw_ctx;
-	int error;
-	bool is_write;
-	struct work_struct work;
 };
 
 static inline void chunk_state_set(struct chunk *chunk, int st)

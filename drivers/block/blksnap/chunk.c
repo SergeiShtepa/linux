@@ -8,6 +8,12 @@
 #include "diff_area.h"
 #include "diff_storage.h"
 
+struct chunk_bio {
+	struct work_struct work;
+	struct chunk *chunk;
+	struct bio bio;
+};
+
 struct bio_set chunk_io_bioset;
 
 extern int chunk_maximum_in_cache;
@@ -72,16 +78,17 @@ void chunk_schedule_caching(struct chunk *chunk)
 		queue_work(system_wq, &diff_area->cache_release_work);
 }
 
-static void chunk_notify_load(struct chunk *chunk)
+static void chunk_notify_load(struct work_struct *work)
 {
+	struct chunk_bio *cbio = container_of(work, struct chunk_bio, work);
+	struct chunk *chunk = cbio->chunk;
 	struct image_rw_ctx *image_rw_ctx = chunk->image_rw_ctx;
-	int error = chunk->error;
 
 	chunk->image_rw_ctx = NULL;
 
-	if (unlikely(error)) {
+	if (unlikely(cbio->bio.bi_status != BLK_STS_OK)) {
 		atomic_inc(&image_rw_ctx->error_cnt);
-		chunk_store_failed(chunk, error);
+		chunk_store_failed(chunk, -EIO);
 	} else {
 		//pr_debug("DEBUG! %s original loaded chunk #%lu\n", __func__, chunk->number);
 		if (likely(chunk_state_check(chunk, CHUNK_ST_LOADING))) {
@@ -98,22 +105,26 @@ static void chunk_notify_load(struct chunk *chunk)
 	}
 	if (image_rw_ctx)
 		kref_put(&image_rw_ctx->kref, diff_area_rw_chunk);
+
+	bio_put(&cbio->bio);
 }
 
-static void chunk_notify_store(struct chunk *chunk)
+static void chunk_notify_store(struct work_struct *work)
 {
-	int error = chunk->error;
+	struct chunk_bio *cbio = container_of(work, struct chunk_bio, work);
+	struct chunk *chunk = cbio->chunk;
 
-	if (unlikely(error)) {
-		chunk_store_failed(chunk, error);
-		return;
+	if (unlikely(cbio->bio.bi_status != BLK_STS_OK)) {
+		chunk_store_failed(chunk, -EIO);
+		goto out;
 	}
 
 	if (unlikely(chunk_state_check(chunk, CHUNK_ST_FAILED))) {
 		pr_err("Chunk in a failed state\n");
 		chunk_store_failed(chunk, 0);
-		return;
+		goto out;
 	}
+
 	if (chunk_state_check(chunk, CHUNK_ST_STORING)) {
 		chunk_state_unset(chunk, CHUNK_ST_STORING);
 		chunk_state_set(chunk, CHUNK_ST_STORE_READY);
@@ -125,6 +136,8 @@ static void chunk_notify_store(struct chunk *chunk)
 	} else
 		pr_err("invalid chunk state 0x%x\n", atomic_read(&chunk->state));
 	up(&chunk->lock);
+out:
+	bio_put(&cbio->bio);
 }
 
 struct chunk *chunk_alloc(struct diff_area *diff_area, unsigned long number)
@@ -158,25 +171,11 @@ void chunk_free(struct chunk *chunk)
 	kfree(chunk);
 }
 
-static void chunk_io_notify_cb(struct work_struct *work)
-{
-	struct chunk *chunk = container_of(work, struct chunk, work);
-
-	if (chunk->is_write)
-		chunk_notify_store(chunk);
-	else
-		chunk_notify_load(chunk);
-}
-
 static void chunk_io_endio(struct bio *bio)
 {
-	struct chunk *chunk = bio->bi_private;
+	struct chunk_bio *cbio = container_of(bio, struct chunk_bio, bio);
 
-	if (bio->bi_status != BLK_STS_OK)
-		chunk->error = -EIO;
-
-	queue_work(system_wq, &chunk->work);
-	bio_put(bio);
+	queue_work(system_wq, &cbio->work);
 }
 
 static inline unsigned short calc_max_vecs(sector_t left)
@@ -192,6 +191,7 @@ void chunk_io(struct chunk *chunk, bool is_write,
 	sector_t left = diff_region->count;
 	unsigned int opf;
 	struct bio *bio;
+	struct chunk_bio *cbio;
 
 	if (is_write) {
 		opf = REQ_OP_WRITE | REQ_SYNC | REQ_FUA;
@@ -201,8 +201,6 @@ void chunk_io(struct chunk *chunk, bool is_write,
 		chunk_state_set(chunk, CHUNK_ST_LOADING);
 	}
 
-	chunk->is_write = is_write;
-	INIT_WORK(&chunk->work, chunk_io_notify_cb);
 
 	bio = bio_alloc_bioset(diff_region->bdev, calc_max_vecs(left), opf,
 			       GFP_NOIO, &chunk_io_bioset);
@@ -230,14 +228,22 @@ void chunk_io(struct chunk *chunk, bool is_write,
 		left -= count;
 	}
 
+	cbio = container_of(bio, struct chunk_bio, bio);
+	if (is_write)
+		INIT_WORK(&cbio->work, chunk_notify_store);
+	else
+		INIT_WORK(&cbio->work, chunk_notify_load);
+	cbio->chunk = chunk;
+
 	bio->bi_end_io = chunk_io_endio;
-	bio->bi_private = chunk;
+	bio->bi_private = NULL;
 	submit_bio_noacct(bio);
 }
 
 int __init chunk_init(void)
 {
-	return bioset_init(&chunk_io_bioset, 64, 0,
+	return bioset_init(&chunk_io_bioset, 64,
+			   offsetof(struct chunk_bio, bio),
 			   BIOSET_NEED_BVECS | BIOSET_NEED_RESCUER);
 }
 
