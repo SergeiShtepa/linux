@@ -45,35 +45,6 @@ static inline unsigned long long count_by_shift(sector_t capacity,
 	return round_up(capacity, (1ull << shift_sector)) >> shift_sector;
 }
 
-/*
- * Starts asynchronous storing of a chunk to the  difference storage.
- */
-static inline void chunk_async_store_diff(struct chunk *chunk)
-{
-        chunk_io(chunk, true, chunk->diff_region);
-}
-/*
- * Starts asynchronous loading of a chunk from the original block device.
- */
-static inline void chunk_async_load_orig(struct chunk *chunk)
-{
-        struct diff_region region = {
-                .bdev = chunk->diff_area->orig_bdev,
-                .sector = (sector_t)(chunk->number) *
-                          diff_area_chunk_sectors(chunk->diff_area),
-                .count = chunk->sector_count,
-        };
-
-        chunk_io(chunk, false, &region);
-}
-/*
- * Starts asynchronous loading of a chunk from the difference storage.
- */
-static inline void chunk_async_load_diff(struct chunk *chunk)
-{
-        chunk_io(chunk, false, chunk->diff_region);
-}
-
 static void diff_area_calculate_chunk_size(struct diff_area *diff_area)
 {
 	unsigned long long shift = chunk_minimum_shift;
@@ -210,7 +181,7 @@ static void diff_area_cache_release(struct diff_area *diff_area)
 			}
 			chunk->diff_region = diff_region;
 		}
-		chunk_async_store_diff(chunk);
+		chunk_store(chunk);
 	}
 }
 
@@ -377,7 +348,14 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
 		WARN(chunk->diff_buffer, "Chunks buffer has been lost");
 		chunk->diff_buffer = diff_buffer;
 
-		chunk_async_load_orig(chunk);
+		/*
+		 * Starts asynchronous loading of a chunk from the original
+		 * block device.
+		 */
+		chunk_load(chunk,
+			   chunk->diff_area->orig_bdev,
+			   chunk_sector(chunk),
+			   chunk->sector_count);
 	}
 
 	return ret;
@@ -431,7 +409,7 @@ int diff_area_wait(struct diff_area *diff_area, sector_t sector, sector_t count)
 }
 
 static int diff_area_load_chunk(struct diff_area *diff_area,
-				struct chunk *chunk)
+				struct chunk *chunk, struct image_ctx *ctx)
 {
 	struct diff_buffer *diff_buffer;
 
@@ -443,9 +421,19 @@ static int diff_area_load_chunk(struct diff_area *diff_area,
 	chunk->diff_buffer = diff_buffer;
 
 	if (chunk_state_check(chunk, CHUNK_ST_STORE_READY))
-		chunk_async_load_diff(chunk);
+		chunk_load_and_submit_bio(
+			chunk,
+			chunk->diff_region->bdev,
+			chunk->diff_region->sector,
+			chunk->diff_region->count,
+			ctx);
 	else
-		chunk_async_load_orig(chunk);
+		chunk_load_and_submit_bio(
+			chunk,
+			chunk->diff_area->orig_bdev,
+			chunk_sector(chunk),
+			chunk->sector_count,
+			ctx);
 	return 0;
 }
 
@@ -485,11 +473,11 @@ fail_unlock_chunk:
 	return ERR_PTR(ret);
 }
 
-void diff_area_preload(struct image_rw_ctx *image_rw_ctx)
+void diff_area_preload(struct image_ctx *ctx)
 {
 	struct chunk *chunk;
-	struct bio *bio = image_rw_ctx->bio;
-	struct diff_area *diff_area = image_rw_ctx->diff_area;
+	struct bio *bio = ctx->orig_bio;
+	struct diff_area *diff_area = ctx->diff_area;
 	sector_t pos = bio->bi_iter.bi_sector;
 	sector_t last = bio->bi_iter.bi_sector +
 		(round_up(bio->bi_iter.bi_size, SECTOR_SIZE) >> SECTOR_SHIFT);
@@ -499,7 +487,7 @@ void diff_area_preload(struct image_rw_ctx *image_rw_ctx)
 	while (pos < last) {
 		chunk = diff_area_image_get_chunk(diff_area, pos);
 		if (IS_ERR(chunk)) {
-			atomic_inc(&image_rw_ctx->error_cnt);
+			atomic_inc(&ctx->error_cnt);
 			break;
 		}
 
@@ -512,13 +500,10 @@ void diff_area_preload(struct image_rw_ctx *image_rw_ctx)
 		atomic_inc(&chunk->diff_buffer_holder);
 		if (!chunk_state_check(chunk, CHUNK_ST_BUFFER_READY)) {
 			//pr_debug("DEBUG! %s - load chunk #%lu\n", __func__, chunk->number);
-			if (unlikely(diff_area_load_chunk(diff_area, chunk))) {
-				atomic_inc(&image_rw_ctx->error_cnt);
+			if (unlikely(diff_area_load_chunk(diff_area, chunk, ctx))) {
+				atomic_inc(&ctx->error_cnt);
 				up(&chunk->lock);
 				break;
-			} else {
-				chunk->image_rw_ctx = image_rw_ctx;
-				kref_get(&chunk->image_rw_ctx->kref);
 			}
 		} else
 			up(&chunk->lock);
@@ -553,12 +538,12 @@ static inline void __diff_area_rw_chunk(struct diff_area *diff_area,
 
 void diff_area_rw_chunk(struct kref *kref)
 {
-	struct image_rw_ctx *ctx = container_of(kref, struct image_rw_ctx, kref);
+	struct image_ctx *ctx = container_of(kref, struct image_ctx, kref);
 
 	if (unlikely(atomic_read(&ctx->error_cnt)))
-		bio_io_error(ctx->bio);
+		bio_io_error(ctx->orig_bio);
 	else
-		__diff_area_rw_chunk(ctx->diff_area, ctx->bio);
+		__diff_area_rw_chunk(ctx->diff_area, ctx->orig_bio);
 
 	kfree(ctx);
 }
