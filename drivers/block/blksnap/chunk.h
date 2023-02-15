@@ -147,7 +147,7 @@ void chunk_diff_buffer_release(struct chunk *chunk);
 void chunk_store_failed(struct chunk *chunk, int error);
 
 void chunk_schedule_caching(struct chunk *chunk);
-
+unsigned int chunk_submit_bio(struct chunk *chunk, struct bio *bio);
 void chunk_io(struct chunk *chunk, bool is_write,
               struct diff_region *diff_region);
 
