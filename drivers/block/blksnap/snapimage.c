@@ -18,23 +18,18 @@ static void snapimage_submit_bio(struct bio *bio)
 {
 	struct tracker *tracker = bio->bi_bdev->bd_disk->private_data;
 	struct diff_area *diff_area = tracker->diff_area;
-	struct image_rw_ctx *ctx;
+	struct image_ctx *ctx;
 
 	if (diff_area_is_corrupted(diff_area)) {
 		bio_io_error(bio);
 		return;
 	}
 
-	ctx = kzalloc(sizeof(struct image_rw_ctx), GFP_NOIO);
+	ctx = image_ctx_new(bio, diff_area);
 	if (!ctx) {
 		bio_io_error(bio);
 		return;
 	}
-
-	kref_init(&ctx->kref);
-	ctx->diff_area = tracker->diff_area;
-	ctx->bio = bio;
-	atomic_set(&ctx->error_cnt, 0);
 
 	diff_area_preload(ctx);
 

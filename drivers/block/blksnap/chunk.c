@@ -126,12 +126,11 @@ static void chunk_notify_load(struct work_struct *work)
 {
 	struct chunk_bio *cbio = container_of(work, struct chunk_bio, work);
 	struct chunk *chunk = cbio->chunk;
-	struct image_rw_ctx *image_rw_ctx = chunk->image_rw_ctx;
+	struct image_ctx *ctx = cbio->bio.bi_private;
 
-	chunk->image_rw_ctx = NULL;
 
 	if (unlikely(cbio->bio.bi_status != BLK_STS_OK)) {
-		atomic_inc(&image_rw_ctx->error_cnt);
+		atomic_inc(&ctx->error_cnt);
 		chunk_store_failed(chunk, -EIO);
 	} else {
 		//pr_debug("DEBUG! %s original loaded chunk #%lu\n", __func__, chunk->number);
@@ -147,8 +146,8 @@ static void chunk_notify_load(struct work_struct *work)
 			up(&chunk->lock);
 		}
 	}
-	if (image_rw_ctx)
-		kref_put(&image_rw_ctx->kref, diff_area_rw_chunk);
+	if (ctx)
+		kref_put(&ctx->kref, diff_area_rw_chunk);
 
 	bio_put(&cbio->bio);
 }
@@ -227,41 +226,36 @@ static inline unsigned short calc_max_vecs(sector_t left)
 	return bio_max_segs(round_up(left, PAGE_SECTORS) / PAGE_SECTORS);
 }
 
-void chunk_io(struct chunk *chunk, bool is_write,
-		struct diff_region *diff_region)
+void chunk_store(struct chunk *chunk)
+
 {
 	struct diff_buffer *diff_buffer = chunk->diff_buffer;
+	struct diff_region *diff_region = chunk->diff_region;
 	unsigned int page_idx = 0;
-	sector_t left = diff_region->count;
-	unsigned int opf;
+	sector_t count = diff_region->count;
 	struct bio *bio;
 	struct chunk_bio *cbio;
 
-	if (is_write) {
-		opf = REQ_OP_WRITE | REQ_SYNC | REQ_FUA;
-		chunk_state_set(chunk, CHUNK_ST_STORING);
-	} else {
-		opf = REQ_OP_READ;
-		chunk_state_set(chunk, CHUNK_ST_LOADING);
-	}
+	chunk_state_set(chunk, CHUNK_ST_STORING);
 
-
-	bio = bio_alloc_bioset(diff_region->bdev, calc_max_vecs(left), opf,
-			       GFP_NOIO, &chunk_io_bioset);
+	bio = bio_alloc_bioset(diff_region->bdev, calc_max_vecs(count),
+			       REQ_OP_WRITE | REQ_SYNC | REQ_FUA, GFP_NOIO,
+			       &chunk_io_bioset);
 	bio->bi_iter.bi_sector = diff_region->sector;
 	bio_set_flag(bio, BIO_FILTERED);
 
-	while (left) {
-		sector_t count = min_t(sector_t, left, PAGE_SECTORS);
-		unsigned int bytes = count << SECTOR_SHIFT;
+	while (count) {
+		sector_t portion = min_t(sector_t, count, PAGE_SECTORS);
+		unsigned int bytes = portion << SECTOR_SHIFT;
 
 		if (bio_add_page(bio, diff_buffer->pages[page_idx], bytes, 0) !=
 				bytes) {
 			struct bio *next;
 
 			next = bio_alloc_bioset(diff_region->bdev,
-						calc_max_vecs(left), opf,
-						GFP_NOIO, &chunk_io_bioset);
+					calc_max_vecs(count),
+					REQ_OP_WRITE | REQ_SYNC | REQ_FUA,
+					GFP_NOIO, &chunk_io_bioset);
 			next->bi_iter.bi_sector = bio_end_sector(bio);
 			bio_set_flag(next, BIO_FILTERED);
 			bio_chain(bio, next);
@@ -269,18 +263,61 @@ void chunk_io(struct chunk *chunk, bool is_write,
 			bio = next;
 		}
 		page_idx++;
-		left -= count;
+		count -= portion;
 	}
 
 	cbio = container_of(bio, struct chunk_bio, bio);
-	if (is_write)
-		INIT_WORK(&cbio->work, chunk_notify_store);
-	else
-		INIT_WORK(&cbio->work, chunk_notify_load);
+
+	INIT_WORK(&cbio->work, chunk_notify_store);
+	cbio->chunk = chunk;
+	bio->bi_end_io = chunk_io_endio;
+	bio->bi_private = NULL;
+	submit_bio_noacct(bio);
+}
+
+void chunk_load_and_submit_bio(struct chunk *chunk, struct block_device *bdev,
+			       sector_t sector, sector_t count,
+			       struct image_ctx *ctx)
+{
+	struct diff_buffer *diff_buffer = chunk->diff_buffer;
+	unsigned int page_idx = 0;
+	struct bio *bio;
+	struct chunk_bio *cbio;
+
+	chunk_state_set(chunk, CHUNK_ST_LOADING);
+
+	bio = bio_alloc_bioset(bdev, calc_max_vecs(count), REQ_OP_READ, GFP_NOIO,
+			       &chunk_io_bioset);
+	bio->bi_iter.bi_sector = sector;
+	bio_set_flag(bio, BIO_FILTERED);
+
+	while (count) {
+		sector_t portion = min_t(sector_t, count, PAGE_SECTORS);
+		unsigned int bytes = portion << SECTOR_SHIFT;
+
+		if (bio_add_page(bio, diff_buffer->pages[page_idx], bytes, 0) !=
+				bytes) {
+			struct bio *next;
+
+			next = bio_alloc_bioset(bdev, calc_max_vecs(count),
+						REQ_OP_READ, GFP_NOIO,
+						&chunk_io_bioset);
+			next->bi_iter.bi_sector = bio_end_sector(bio);
+			bio_set_flag(next, BIO_FILTERED);
+			bio_chain(bio, next);
+			submit_bio_noacct(bio);
+			bio = next;
+		}
+		page_idx++;
+		count -= portion;
+	}
+
+	cbio = container_of(bio, struct chunk_bio, bio);
+	INIT_WORK(&cbio->work, chunk_notify_load);
 	cbio->chunk = chunk;
 
 	bio->bi_end_io = chunk_io_endio;
-	bio->bi_private = NULL;
+	bio->bi_private = ctx ? image_ctx_get(ctx) : NULL;
 	submit_bio_noacct(bio);
 }
 

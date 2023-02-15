@@ -13,7 +13,7 @@
 
 struct diff_storage;
 struct chunk;
-struct image_rw_ctx;
+struct image_ctx;
 
 /**
  * struct diff_area - Discribes the difference area for one original device.
@@ -124,7 +124,7 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector,
 int diff_area_wait(struct diff_area *diff_area, sector_t sector,
 		   sector_t count);
 
-void diff_area_preload(struct image_rw_ctx *image_rw_ctx);
+void diff_area_preload(struct image_ctx *ctx);
 void diff_area_rw_chunk(struct kref *kref);
 //void diff_area_throttling_io(struct diff_area *diff_area);
 
