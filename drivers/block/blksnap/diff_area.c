@@ -528,60 +528,22 @@ void diff_area_preload(struct image_rw_ctx *image_rw_ctx)
 static inline void __diff_area_rw_chunk(struct diff_area *diff_area,
 					struct bio *bio)
 {
-	struct chunk *chunk = NULL;
+	struct chunk *chunk;
+
 	sector_t pos = bio->bi_iter.bi_sector;
-	struct bio_vec bvec;
-	struct bvec_iter iter;
+	sector_t last = bio_end_sector(bio);
 
-	//pr_debug("DEBUG! %s pos %llu", __func__, pos);
+	while (pos < last) {
+		unsigned int portion;
 
-	bio_for_each_segment(bvec, bio, iter) {
-		unsigned int bvec_ofs = 0;
-
-		while (bvec_ofs < bvec.bv_len) {
-			size_t buff_offset;
-			struct page *page;
-			unsigned int len;
-
-			if (!chunk) {
-				chunk = diff_area_image_get_chunk(diff_area, pos);
-				if (IS_ERR(chunk)) {
-					bio_io_error(bio);
-					return;
-				}
-			}
-
-			/*DEBUG checking*/
-			//BUG_ON(!chunk->diff_buffer);
-			//BUG_ON(!chunk_state_check(chunk, CHUNK_ST_BUFFER_READY));
-
-			buff_offset = (pos - chunk_sector(chunk)) << SECTOR_SHIFT;
-			/*DEBUG*/
-			//BUG_ON((buff_offset >> PAGE_SHIFT) >= chunk->diff_buffer->page_count);
-
-			page = chunk->diff_buffer->pages[buff_offset >> PAGE_SHIFT];
-			len = min3((size_t)(bvec.bv_len - bvec_ofs),
-				chunk->diff_buffer->size - buff_offset,
-				PAGE_SIZE - offset_in_page(buff_offset));
-
-			if (op_is_write(bio_op(bio))) /* from bio to buffer */
-				memcpy_page(page, offset_in_page(buff_offset), bvec.bv_page, bvec.bv_offset + bvec_ofs, len);
-			else /* from buffer to bio */
-				memcpy_page(bvec.bv_page, bvec.bv_offset + bvec_ofs, page, offset_in_page(buff_offset), len);
-
-			bvec_ofs += len;
-			pos += (len >> SECTOR_SHIFT);
-
-			if ((chunk_sector(chunk) + chunk->sector_count) <= pos) {
-				atomic_dec(&chunk->diff_buffer_holder);
-				up(&chunk->lock);
-				chunk = NULL;
-			}
-
+		chunk = diff_area_image_get_chunk(diff_area, pos);
+		if (IS_ERR(chunk)) {
+			bio_io_error(bio);
+			return;
 		}
-	}
-	//pr_debug("DEBUG! %s last %llu", __func__, pos);
-	if (chunk) {
+
+		portion = chunk_submit_bio(chunk, bio);
+		pos += portion >> SECTOR_SHIFT;
 		atomic_dec(&chunk->diff_buffer_holder);
 		up(&chunk->lock);
 	}

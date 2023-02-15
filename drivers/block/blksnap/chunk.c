@@ -18,6 +18,12 @@ struct bio_set chunk_io_bioset;
 
 extern int chunk_maximum_in_cache;
 
+static inline sector_t chunk_sector(struct chunk *chunk)
+{
+	return (sector_t)(chunk->number)
+	       << (chunk->diff_area->chunk_shift - SECTOR_SHIFT);
+}
+
 void chunk_diff_buffer_release(struct chunk *chunk)
 {
 	if (unlikely(!chunk->diff_buffer))
@@ -76,6 +82,44 @@ void chunk_schedule_caching(struct chunk *chunk)
 	/* Initiate the cache clearing process */
 	if (in_cache_count > chunk_maximum_in_cache)
 		queue_work(system_wq, &diff_area->cache_release_work);
+}
+
+unsigned int chunk_submit_bio(struct chunk *chunk, struct bio *bio)
+{
+	unsigned int processed = 0;
+	unsigned int buff_offset = (bio->bi_iter.bi_sector - chunk_sector(chunk)) << SECTOR_SHIFT;
+	unsigned int buff_left = chunk->diff_buffer->size - buff_offset;
+
+	while (buff_left && bio->bi_iter.bi_size) {
+		struct bio_vec bvec = bio_iter_iovec(bio, bio->bi_iter);
+		unsigned int page_ofs = offset_in_page(buff_offset);
+		struct page *page;
+		unsigned int len;
+
+		page = chunk->diff_buffer->pages[buff_offset >> PAGE_SHIFT];
+		len = min3(bvec.bv_len, buff_left,
+			   (unsigned int)PAGE_SIZE - page_ofs);
+
+		if (op_is_write(bio_op(bio))) {
+			/* from bio to buffer */
+			memcpy_page(page, page_ofs,
+				    bvec.bv_page, bvec.bv_offset,
+				    len);
+		} else {
+			/* from buffer to bio */
+			memcpy_page(bvec.bv_page, bvec.bv_offset,
+				    page, page_ofs,
+				    len);
+		}
+
+		buff_offset += len;
+		buff_left -= len;
+		bio_advance_iter_single(bio, &bio->bi_iter, len);
+
+		processed += len;
+	}
+
+	return processed;
 }
 
 static void chunk_notify_load(struct work_struct *work)
