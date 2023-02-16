@@ -3,8 +3,7 @@
 
 #include "diff_buffer.h"
 #include "diff_area.h"
-
-int get_free_diff_buffer_pool_size(void);
+#include "params.h"
 
 static void diff_buffer_free(struct diff_buffer *diff_buffer)
 {

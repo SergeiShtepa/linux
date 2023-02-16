@@ -9,10 +9,7 @@
 #include "diff_area.h"
 #include "diff_buffer.h"
 #include "diff_storage.h"
-
-int get_chunk_minimum_shift(void);
-int get_chunk_maximum_count(void);
-int get_chunk_maximum_in_cache(void);
+#include "params.h"
 
 static inline unsigned long chunk_number(struct diff_area *diff_area,
 					 sector_t sector)

@@ -10,8 +10,7 @@
 #include "chunk.h"
 #include "diff_buffer.h"
 #include "diff_storage.h"
-
-int get_diff_storage_minimum(void);
+#include "params.h"
 
 /**
  * struct storage_bdev - Information about the opened block device.

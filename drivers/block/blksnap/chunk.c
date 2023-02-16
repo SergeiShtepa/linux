@@ -7,6 +7,7 @@
 #include "diff_buffer.h"
 #include "diff_area.h"
 #include "diff_storage.h"
+#include "params.h"
 
 struct chunk_bio {
 	struct work_struct work;
@@ -16,8 +17,6 @@ struct chunk_bio {
 
 struct bio_set chunk_io_bioset;
 struct bio_set chunk_clone_bioset;
-
-int get_chunk_maximum_in_cache(void);
 
 static inline sector_t chunk_sector(struct chunk *chunk)
 {
