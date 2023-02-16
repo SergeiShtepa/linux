@@ -5,9 +5,7 @@
 #include <linux/vmalloc.h>
 #include <uapi/linux/blksnap.h>
 #include "cbt_map.h"
-
-int get_tracking_block_minimum_shift(void);
-int get_tracking_block_maximum_count(void);
+#include "params.h"
 
 static inline unsigned long long count_by_shift(sector_t capacity,
 						unsigned long long shift)
