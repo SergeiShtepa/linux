@@ -43,7 +43,8 @@ static void snapimage_submit_bio(struct bio *bio)
 		old_bio_list = current->bio_list;
 		current->bio_list = bio_list;
 
-		diff_area_copy(diff_area, bio->bi_iter.bi_sector, bio_sectors(bio), false);
+		diff_area_copy(diff_area, bio->bi_iter.bi_sector,
+			       bio_sectors(bio), false);
 
 		current->bio_list = NULL;
 		while ((new_bio = bio_list_pop(&bio_list[0])))

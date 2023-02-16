@@ -13,7 +13,6 @@
 
 struct diff_storage;
 struct chunk;
-struct image_ctx;
 
 /**
  * struct diff_area - Discribes the difference area for one original device.

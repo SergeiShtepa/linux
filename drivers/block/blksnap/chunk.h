@@ -62,37 +62,6 @@ enum chunk_st {
 };
 
 /**
- * struct image_ctx - Snapshot image bio processing context.
- */
-struct image_ctx {
-	struct kref kref;
-	struct bio *orig_bio;
-	struct diff_area *diff_area;
-	atomic_t error_cnt;
-};
-
-static inline struct image_ctx *image_ctx_new(struct bio *orig_bio, struct diff_area *diff_area)
-{
-	struct image_ctx *ctx;
-
-	ctx = kzalloc(sizeof(struct image_ctx), GFP_NOIO);
-	if (ctx) {
-		kref_init(&ctx->kref);
-		ctx->orig_bio = orig_bio;
-		ctx->diff_area = diff_area;
-		atomic_set(&ctx->error_cnt, 0);
-	}
-	return ctx;
-};
-
-static inline struct image_ctx *image_ctx_get(struct image_ctx *ctx)
-{
-	kref_get(&ctx->kref);
-	return ctx;
-};
-
-
-/**
  * struct chunk - Minimum data storage unit.
  *
  * @cache_link:
@@ -138,7 +107,6 @@ struct chunk {
 	struct semaphore lock;
 
 	atomic_t state;
-	atomic_t diff_buffer_holder;
 	struct diff_buffer *diff_buffer;
 	struct diff_region *diff_region;
 };
@@ -165,18 +133,10 @@ void chunk_diff_buffer_release(struct chunk *chunk);
 void chunk_store_failed(struct chunk *chunk, int error);
 
 void chunk_schedule_caching(struct chunk *chunk);
-unsigned int chunk_submit_bio(struct chunk *chunk, struct bio *bio);
+void chunk_submit_bio(struct chunk *chunk, struct bio *bio);
+void chunk_clone_bio(struct chunk *chunk, struct bio *bio);
 void chunk_store(struct chunk *chunk);
-void chunk_load_and_submit_bio(struct chunk *chunk, struct block_device *bdev,
-			       sector_t sector, sector_t count,
-			       struct image_ctx *ctx);
-static inline void chunk_load(struct chunk *chunk, struct block_device *bdev,
-			      sector_t sector, sector_t count)
-{
-	chunk_load_and_submit_bio(chunk, bdev, sector, count, NULL);
-};
-//void chunk_io(struct chunk *chunk, bool is_write,
-//	      struct diff_region *diff_region);
+void chunk_load(struct chunk *chunk);
 
 int __init chunk_init(void);
 void chunk_done(void);
