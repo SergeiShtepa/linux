@@ -108,10 +108,8 @@ static struct chunk *diff_area_lock_and_get_chunk_from_cache(
 	spin_lock(&diff_area->caches_lock);
 	list_for_each_entry(iter, &diff_area->cache_queue, cache_link) {
 		if (!down_trylock(&iter->lock)) {
-			if (atomic_read(&iter->diff_buffer_holder) == 0) {
-				chunk = iter;
-				break;
-			}
+			chunk = iter;
+			break;
 		}
 		/*
 		 * If it is not possible to lock a chunk for writing,
@@ -349,13 +347,10 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
 		chunk->diff_buffer = diff_buffer;
 
 		/*
-		 * Starts asynchronous loading of a chunk from the original
-		 * block device.
+		 * Starts asynchronous loading of a chunk from
+		 * the original block device.
 		 */
-		chunk_load(chunk,
-			   chunk->diff_area->orig_bdev,
-			   chunk_sector(chunk),
-			   chunk->sector_count);
+		chunk_load(chunk);
 	}
 
 	return ret;
@@ -408,35 +403,6 @@ int diff_area_wait(struct diff_area *diff_area, sector_t sector, sector_t count)
 	return ret;
 }
 
-static int diff_area_load_chunk(struct diff_area *diff_area,
-				struct chunk *chunk, struct image_ctx *ctx)
-{
-	struct diff_buffer *diff_buffer;
-
-	diff_buffer = diff_buffer_take(diff_area);
-	if (IS_ERR(diff_buffer))
-		return PTR_ERR(diff_buffer);
-
-	WARN_ON(chunk->diff_buffer);
-	chunk->diff_buffer = diff_buffer;
-
-	if (chunk_state_check(chunk, CHUNK_ST_STORE_READY))
-		chunk_load_and_submit_bio(
-			chunk,
-			chunk->diff_region->bdev,
-			chunk->diff_region->sector,
-			chunk->diff_region->count,
-			ctx);
-	else
-		chunk_load_and_submit_bio(
-			chunk,
-			chunk->diff_area->orig_bdev,
-			chunk_sector(chunk),
-			chunk->sector_count,
-			ctx);
-	return 0;
-}
-
 static struct chunk *diff_area_image_get_chunk(
 	struct diff_area *diff_area, sector_t sector)
 {
@@ -476,83 +442,31 @@ fail_unlock_chunk:
 void diff_area_submit_bio(struct diff_area *diff_area, struct bio *bio)
 {
 	struct chunk *chunk;
-	sector_t pos = bio->bi_iter.bi_sector;
-	sector_t last = bio->bi_iter.bi_sector +
-		(round_up(bio->bi_iter.bi_size, SECTOR_SIZE) >> SECTOR_SHIFT);
-	struct image_ctx *ctx;
 
-	ctx = image_ctx_new(bio, diff_area);
-	if (!ctx) {
-		bio_io_error(bio);
-		return;
-	}
+	pr_debug("DEBUG! %s %llu - %d)", __func__, bio->bi_iter.bi_sector, bio->bi_iter.bi_size);
+	while (bio->bi_iter.bi_size) {
+		chunk = diff_area_image_get_chunk(diff_area,
+						  bio->bi_iter.bi_sector);
+		if (IS_ERR(chunk))
+			goto fail;
 
-	//pr_debug("DEBUG! %s [%llu - %llu)", __func__, pos, last);
-
-	while (pos < last) {
-		chunk = diff_area_image_get_chunk(diff_area, pos);
-		if (IS_ERR(chunk)) {
-			atomic_inc(&ctx->error_cnt);
-			break;
-		}
-
-		pos = chunk_sector(chunk) + chunk->sector_count;
-		/*
-		 * If there is already data in the buffer, then nothing needs to be loaded.
-		 * Otherwise, the chunk needs to be loaded from the original device or
-		 * from the difference storage.
-		 */
-		atomic_inc(&chunk->diff_buffer_holder);
-		if (!chunk_state_check(chunk, CHUNK_ST_BUFFER_READY)) {
-			//pr_debug("DEBUG! %s - load chunk #%lu\n", __func__, chunk->number);
-			if (unlikely(diff_area_load_chunk(diff_area, chunk, ctx))) {
-				atomic_inc(&ctx->error_cnt);
-				up(&chunk->lock);
-				break;
-			}
-		} else
+		if (chunk_state_check(chunk, CHUNK_ST_BUFFER_READY))
+			chunk_submit_bio(chunk, bio);
+		else if (chunk_state_check(chunk, CHUNK_ST_STORE_READY) ||
+			 !op_is_write(bio_op(bio)))
+			chunk_clone_bio(chunk, bio);
+		else {
+			pr_err("Failed to submit bio: invalid chunk state\n");
 			up(&chunk->lock);
-	}
-
-	kref_put(&ctx->kref, diff_area_rw_chunk);
-}
-
-static inline void __diff_area_rw_chunk(struct diff_area *diff_area,
-					struct bio *bio)
-{
-	struct chunk *chunk;
-
-	sector_t pos = bio->bi_iter.bi_sector;
-	sector_t last = bio_end_sector(bio);
-
-	while (pos < last) {
-		unsigned int portion;
-
-		chunk = diff_area_image_get_chunk(diff_area, pos);
-		if (IS_ERR(chunk)) {
-			bio_io_error(bio);
-			return;
+			goto fail;
 		}
 
-		portion = chunk_submit_bio(chunk, bio);
-		pos += portion >> SECTOR_SHIFT;
-		atomic_dec(&chunk->diff_buffer_holder);
 		up(&chunk->lock);
 	}
-
 	bio_endio(bio);
-}
-
-void diff_area_rw_chunk(struct kref *kref)
-{
-	struct image_ctx *ctx = container_of(kref, struct image_ctx, kref);
-
-	if (unlikely(atomic_read(&ctx->error_cnt)))
-		bio_io_error(ctx->orig_bio);
-	else
-		__diff_area_rw_chunk(ctx->diff_area, ctx->orig_bio);
-
-	kfree(ctx);
+	return;
+fail:
+	bio_io_error(bio);
 }
 
 static inline void diff_area_event_corrupted(struct diff_area *diff_area)
