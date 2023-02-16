@@ -6,8 +6,8 @@
 #include <uapi/linux/blksnap.h>
 #include "cbt_map.h"
 
-extern int tracking_block_minimum_shift;
-extern int tracking_block_maximum_count;
+int get_tracking_block_minimum_shift(void);
+int get_tracking_block_maximum_count(void);
 
 static inline unsigned long long count_by_shift(sector_t capacity,
 						unsigned long long shift)
@@ -26,10 +26,10 @@ static void cbt_map_calculate_block_size(struct cbt_map *cbt_map)
 	 * The size of the tracking block is calculated based on the size of the disk
 	 * so that the CBT table does not exceed a reasonable size.
 	 */
-	shift = tracking_block_minimum_shift;
+	shift = get_tracking_block_minimum_shift();
 	count = count_by_shift(cbt_map->device_capacity, shift);
 
-	while (count > tracking_block_maximum_count) {
+	while (count > get_tracking_block_maximum_count()) {
 		shift = shift << 1;
 		count = count_by_shift(cbt_map->device_capacity, shift);
 	}

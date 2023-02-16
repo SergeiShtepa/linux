@@ -11,7 +11,7 @@
 #include "diff_buffer.h"
 #include "diff_storage.h"
 
-extern int diff_storage_minimum;
+int get_diff_storage_minimum();
 
 /**
  * struct storage_bdev - Information about the opened block device.
@@ -57,7 +57,7 @@ struct storage_block {
 static inline void diff_storage_event_low(struct diff_storage *diff_storage)
 {
 	struct blksnap_event_low_free_space data = {
-		.requested_nr_sect = diff_storage_minimum,
+		.requested_nr_sect = get_diff_storage_minimum(),
 	};
 
 	diff_storage->requested += data.requested_nr_sect;
@@ -153,7 +153,7 @@ static struct block_device *diff_storage_bdev_by_path(
 	return bdev;
 }
 
-static struct block_device * diff_storage_add_storage_bdev(
+static struct block_device *diff_storage_add_storage_bdev(
 	struct diff_storage *diff_storage, const char *bdev_path)
 {
 	struct block_device *bdev;
@@ -249,7 +249,8 @@ int diff_storage_append_block(struct diff_storage *diff_storage,
 
 static inline bool is_halffull(const sector_t sectors_left)
 {
-	return sectors_left <= ((diff_storage_minimum >> 1) & ~(PAGE_SECTORS - 1));
+	return sectors_left <=
+		((get_diff_storage_minimum() >> 1) & ~(PAGE_SECTORS - 1));
 }
 
 struct diff_region *diff_storage_new_region(struct diff_storage *diff_storage,

@@ -96,7 +96,7 @@ static inline void diff_storage_put(struct diff_storage *diff_storage)
 };
 
 int diff_storage_append_block(struct diff_storage *diff_storage,
-                              const char *bdev_path,
+			      const char *bdev_path,
 			      struct blksnap_sectors __user *ranges,
 			      unsigned int range_count);
 struct diff_region *diff_storage_new_region(struct diff_storage *diff_storage,

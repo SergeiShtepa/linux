@@ -69,10 +69,10 @@ static bool tracker_submit_bio(struct bio *bio)
 	if (unlikely(err)) {
 		if (err == -EAGAIN) {
 		/*
-	 	 * Writing to the diff area may split the bio or block,
-	 	 * so don't try to handle nowait requests.  Just let
-	 	 * the caller retry from a context where it can block.
-	 	 */
+		 * Writing to the diff area may split the bio or block,
+		 * so don't try to handle nowait requests.  Just let
+		 * the caller retry from a context where it can block.
+		 */
 			bio_wouldblock_error(bio);
 			return true;
 		}
@@ -104,7 +104,8 @@ static bool tracker_submit_bio(struct bio *bio)
 			bio_wouldblock_error(bio);
 			return true;
 		}
-		pr_err("Failed to wait for available data in diff storage with error %d\n", abs(err));
+		pr_err("Failed to wait for available data in diff storage with error %d\n",
+			abs(err));
 	}
 	return false;
 }
@@ -227,7 +228,7 @@ static int ctl_cbtdirty(struct tracker *tracker, __u8 __user *buf, __u32 *plen)
 	if (copy_from_user(&arg, buf, sizeof(arg)))
 		return -ENODATA;
 
-	for (inx=0; inx < arg.count; inx++) {
+	for (inx = 0; inx < arg.count; inx++) {
 		struct blksnap_sectors range;
 		int ret;
 
@@ -296,7 +297,7 @@ static int tracker_ctl(struct blkfilter *flt, const unsigned int cmd,
 {
 	struct tracker *tracker = container_of(flt, struct tracker, filter);
 
-	if (cmd > (sizeof(ctl_table) / sizeof(ctl_table[0])))
+	if (cmd > ARRAY_SIZE(ctl_table))
 		return -ENOTTY;
 
 	return ctl_table[cmd](tracker, buf, plen);

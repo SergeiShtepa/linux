@@ -10,9 +10,9 @@
 #include "diff_buffer.h"
 #include "diff_storage.h"
 
-extern int chunk_minimum_shift;
-extern int chunk_maximum_count;
-extern int chunk_maximum_in_cache;
+int get_chunk_minimum_shift(void);
+int get_chunk_maximum_count(void);
+int get_chunk_maximum_in_cache(void);
 
 static inline unsigned long chunk_number(struct diff_area *diff_area,
 					 sector_t sector)
@@ -47,7 +47,7 @@ static inline unsigned long long count_by_shift(sector_t capacity,
 
 static void diff_area_calculate_chunk_size(struct diff_area *diff_area)
 {
-	unsigned long long shift = chunk_minimum_shift;
+	unsigned long long shift = get_chunk_minimum_shift();
 	unsigned long long count;
 	sector_t capacity;
 	sector_t min_io_sect;
@@ -60,7 +60,7 @@ static void diff_area_calculate_chunk_size(struct diff_area *diff_area)
 
 	count = count_by_shift(capacity, shift);
 	pr_debug("Chunks count %llu\n", count);
-	while ((count > chunk_maximum_count) ||
+	while ((count > get_chunk_maximum_count()) ||
 		((1ull << (shift - SECTOR_SHIFT)) < min_io_sect)) {
 		shift = shift + 1ull;
 		count = count_by_shift(capacity, shift);
@@ -130,7 +130,8 @@ static void diff_area_cache_release(struct diff_area *diff_area)
 {
 	struct chunk *chunk;
 
-	while ((atomic_read(&diff_area->cache_count) > chunk_maximum_in_cache) &&
+	while ((atomic_read(&diff_area->cache_count) >
+		get_chunk_maximum_in_cache()) &&
 	       (chunk = diff_area_lock_and_get_chunk_from_cache(diff_area))) {
 
 		/*
@@ -147,7 +148,7 @@ static void diff_area_cache_release(struct diff_area *diff_area)
 		/*
 		 * Skip storing data into the diff storage if it is already
 		 * stored there and there is no flag DIRTY.
- 		 */
+		 */
 		if (chunk_state_check(chunk, CHUNK_ST_STORE_READY) &&
 		    !chunk_state_check(chunk, CHUNK_ST_DIRTY)) {
 			chunk_diff_buffer_release(chunk);

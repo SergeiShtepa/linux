@@ -17,7 +17,7 @@ struct chunk_bio {
 struct bio_set chunk_io_bioset;
 struct bio_set chunk_clone_bioset;
 
-extern int chunk_maximum_in_cache;
+int get_chunk_maximum_in_cache();
 
 static inline sector_t chunk_sector(struct chunk *chunk)
 {
@@ -78,7 +78,7 @@ void chunk_schedule_caching(struct chunk *chunk)
 	up(&chunk->lock);
 
 	/* Initiate the cache clearing process */
-	if (in_cache_count > chunk_maximum_in_cache)
+	if (in_cache_count > get_chunk_maximum_in_cache())
 		queue_work(system_wq, &diff_area->cache_release_work);
 }
 

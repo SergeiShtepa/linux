@@ -20,7 +20,7 @@ struct diff_area;
  *	filters callback function. Therefore, the trackers are queued for
  *	release in the worker thread.
  * @kref:
- *      The block device filter structure.
+ *	The block device filter structure.
  * @dev_id:
  *	Original block device ID.
  * @snapshot_is_taken:
@@ -39,16 +39,16 @@ struct diff_area;
 struct tracker {
 	struct blkfilter filter;
 	struct list_head link;
-        struct kref kref;
+	struct kref kref;
 	dev_t dev_id;
 
 	atomic_t snapshot_is_taken;
 
 	struct cbt_map *cbt_map;
 	struct diff_area *diff_area;
-        struct gendisk *snap_disk;
+	struct gendisk *snap_disk;
 
-        bool is_frozen;
+	bool is_frozen;
 };
 
 int __init tracker_init(void);
@@ -57,12 +57,12 @@ void tracker_done(void);
 void tracker_free(struct kref *kref);
 static inline void tracker_put(struct tracker *tracker)
 {
-        if (likely(tracker))
-                kref_put(&tracker->kref, tracker_free);
+	if (likely(tracker))
+		kref_put(&tracker->kref, tracker_free);
 };
 static inline void tracker_get(struct tracker *tracker)
 {
-        kref_get(&tracker->kref);
+	kref_get(&tracker->kref);
 };
 int tracker_take_snapshot(struct tracker *tracker);
 void tracker_release_snapshot(struct tracker *tracker);
