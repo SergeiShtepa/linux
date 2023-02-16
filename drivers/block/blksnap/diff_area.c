@@ -123,9 +123,6 @@ static struct chunk *diff_area_lock_and_get_chunk_from_cache(
 	}
 	spin_unlock(&diff_area->caches_lock);
 
-	//if (chunk)
-	//	pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
-
 	return chunk;
 }
 
@@ -136,7 +133,6 @@ static void diff_area_cache_release(struct diff_area *diff_area)
 	while ((atomic_read(&diff_area->cache_count) > chunk_maximum_in_cache) &&
 	       (chunk = diff_area_lock_and_get_chunk_from_cache(diff_area))) {
 
-		//pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
 		/*
 		 * There cannot be a chunk in the cache whose buffer is
 		 * not ready.
@@ -443,7 +439,6 @@ void diff_area_submit_bio(struct diff_area *diff_area, struct bio *bio)
 {
 	struct chunk *chunk;
 
-	pr_debug("DEBUG! %s %llu - %d)", __func__, bio->bi_iter.bi_sector, bio->bi_iter.bi_size);
 	while (bio->bi_iter.bi_size) {
 		chunk = diff_area_image_get_chunk(diff_area,
 						  bio->bi_iter.bi_sector);

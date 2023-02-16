@@ -30,8 +30,6 @@ void chunk_diff_buffer_release(struct chunk *chunk)
 	if (unlikely(!chunk->diff_buffer))
 		return;
 
-	//pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
-
 	chunk_state_unset(chunk, CHUNK_ST_BUFFER_READY);
 	diff_buffer_release(chunk->diff_area, chunk->diff_buffer);
 	chunk->diff_buffer = NULL;
@@ -56,7 +54,6 @@ void chunk_schedule_caching(struct chunk *chunk)
 	int in_cache_count = 0;
 	struct diff_area *diff_area = chunk->diff_area;
 
-	//pr_debug("DEBUG! %s #%lu", __func__, chunk->number);
 	might_sleep();
 
 	spin_lock(&diff_area->caches_lock);
@@ -87,7 +84,8 @@ void chunk_schedule_caching(struct chunk *chunk)
 
 void chunk_submit_bio(struct chunk *chunk, struct bio *bio)
 {
-	unsigned int chunk_ofs = (bio->bi_iter.bi_sector - chunk_sector(chunk)) << SECTOR_SHIFT;
+	unsigned int chunk_ofs =
+		(bio->bi_iter.bi_sector - chunk_sector(chunk)) << SECTOR_SHIFT;
 	unsigned int chunk_left = chunk->diff_buffer->size - chunk_ofs;
 
 	while (chunk_left && bio->bi_iter.bi_size) {
@@ -173,7 +171,6 @@ static void chunk_notify_load(struct work_struct *work)
 		goto out;
 	}
 
-	//pr_debug("DEBUG! %s original loaded chunk #%lu\n", __func__, chunk->number);
 	if (likely(chunk_state_check(chunk, CHUNK_ST_LOADING))) {
 		chunk_state_unset(chunk, CHUNK_ST_LOADING);
 		chunk_state_set(chunk, CHUNK_ST_BUFFER_READY);
@@ -320,8 +317,8 @@ static void __chunk_load(struct chunk *chunk, struct block_device *bdev,
 
 	chunk_state_set(chunk, CHUNK_ST_LOADING);
 
-	bio = bio_alloc_bioset(bdev, calc_max_vecs(count), REQ_OP_READ, GFP_NOIO,
-			       &chunk_io_bioset);
+	bio = bio_alloc_bioset(bdev, calc_max_vecs(count),
+			       REQ_OP_READ, GFP_NOIO, &chunk_io_bioset);
 	bio->bi_iter.bi_sector = sector;
 	bio_set_flag(bio, BIO_FILTERED);
 
