@@ -473,14 +473,19 @@ fail_unlock_chunk:
 	return ERR_PTR(ret);
 }
 
-void diff_area_preload(struct image_ctx *ctx)
+void diff_area_submit_bio(struct diff_area *diff_area, struct bio *bio)
 {
 	struct chunk *chunk;
-	struct bio *bio = ctx->orig_bio;
-	struct diff_area *diff_area = ctx->diff_area;
 	sector_t pos = bio->bi_iter.bi_sector;
 	sector_t last = bio->bi_iter.bi_sector +
 		(round_up(bio->bi_iter.bi_size, SECTOR_SIZE) >> SECTOR_SHIFT);
+	struct image_ctx *ctx;
+
+	ctx = image_ctx_new(bio, diff_area);
+	if (!ctx) {
+		bio_io_error(bio);
+		return;
+	}
 
 	//pr_debug("DEBUG! %s [%llu - %llu)", __func__, pos, last);
 
@@ -508,6 +513,8 @@ void diff_area_preload(struct image_ctx *ctx)
 		} else
 			up(&chunk->lock);
 	}
+
+	kref_put(&ctx->kref, diff_area_rw_chunk);
 }
 
 static inline void __diff_area_rw_chunk(struct diff_area *diff_area,
