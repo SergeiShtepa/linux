@@ -84,6 +84,35 @@ static const struct blksnap_version version = {
 	.build = 0,
 };
 
+int get_tracking_block_minimum_shift(void)
+{
+	return tracking_block_minimum_shift;
+}
+int get_tracking_block_maximum_count(void)
+{
+	return tracking_block_maximum_count;
+}
+int get_chunk_minimum_shift(void)
+{
+	return chunk_minimum_shift;
+}
+int get_chunk_maximum_count(void)
+{
+	return chunk_maximum_count;
+}
+int get_chunk_maximum_in_cache(void)
+{
+	return chunk_maximum_in_cache;
+}
+int get_free_diff_buffer_pool_size(void)
+{
+	return free_diff_buffer_pool_size;
+}
+int get_diff_storage_minimum(void)
+{
+	return diff_storage_minimum;
+}
+
 static int ioctl_version(unsigned long arg)
 {
 	struct blksnap_version __user *user_version = (void *)arg;

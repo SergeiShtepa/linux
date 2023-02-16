@@ -4,7 +4,7 @@
 #include "diff_buffer.h"
 #include "diff_area.h"
 
-extern int free_diff_buffer_pool_size;
+int get_free_diff_buffer_pool_size(void);
 
 static void diff_buffer_free(struct diff_buffer *diff_buffer)
 {
@@ -96,7 +96,7 @@ void diff_buffer_release(struct diff_area *diff_area,
 			 struct diff_buffer *diff_buffer)
 {
 	if (atomic_read(&diff_area->free_diff_buffers_count) >
-	    free_diff_buffer_pool_size) {
+	    get_free_diff_buffer_pool_size()) {
 		diff_buffer_free(diff_buffer);
 		return;
 	}
