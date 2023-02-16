@@ -2,7 +2,7 @@
 /*
  * Present the snapshot image as a block device.
  */
-#define pr_fmt(fmt) KBUILD_MODNAME "-snapimage: " fmt
+#define pr_fmt(fmt) KBUILD_MODNAME "-image: " fmt
 #include <linux/slab.h>
 #include <linux/cdrom.h>
 #include <linux/blk-mq.h>
