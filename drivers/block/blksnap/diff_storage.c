@@ -11,7 +11,7 @@
 #include "diff_buffer.h"
 #include "diff_storage.h"
 
-int get_diff_storage_minimum();
+int get_diff_storage_minimum(void);
 
 /**
  * struct storage_bdev - Information about the opened block device.
