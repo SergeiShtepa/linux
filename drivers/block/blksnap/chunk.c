@@ -17,7 +17,7 @@ struct chunk_bio {
 struct bio_set chunk_io_bioset;
 struct bio_set chunk_clone_bioset;
 
-int get_chunk_maximum_in_cache();
+int get_chunk_maximum_in_cache(void);
 
 static inline sector_t chunk_sector(struct chunk *chunk)
 {
