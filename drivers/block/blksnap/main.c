@@ -9,6 +9,7 @@
 #include "snapshot.h"
 #include "tracker.h"
 #include "chunk.h"
+#include "params.h"
 
 /*
  * The power of 2 for minimum tracking block size.
