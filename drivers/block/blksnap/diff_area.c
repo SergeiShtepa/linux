@@ -80,7 +80,7 @@ void diff_area_free(struct diff_area *diff_area)
 
 	might_sleep();
 
-	flush_work(&diff_area->cache_release_work);
+	flush_work(&diff_area->store_queue_work);
 	xa_for_each(&diff_area->chunk_map, inx, chunk)
 		chunk_free(chunk);
 	xa_destroy(&diff_area->chunk_map);
@@ -96,14 +96,14 @@ void diff_area_free(struct diff_area *diff_area)
 	kfree(diff_area);
 }
 
-static struct chunk *diff_area_lock_and_get_chunk_from_cache(
+static struct chunk *diff_area_lock_and_get_chunk_from_queue(
 					struct diff_area *diff_area)
 {
 	struct chunk *iter;
 	struct chunk *chunk = NULL;
 
-	spin_lock(&diff_area->caches_lock);
-	list_for_each_entry(iter, &diff_area->cache_queue, cache_link) {
+	spin_lock(&diff_area->store_queue_lock);
+	list_for_each_entry(iter, &diff_area->store_queue, link) {
 		if (!down_trylock(&iter->lock)) {
 			chunk = iter;
 			break;
@@ -115,24 +115,24 @@ static struct chunk *diff_area_lock_and_get_chunk_from_cache(
 		 */
 	}
 	if (likely(chunk)) {
-		atomic_dec(&diff_area->cache_count);
-		list_del_init(&chunk->cache_link);
+		atomic_dec(&diff_area->store_queue_count);
+		list_del_init(&chunk->link);
 	}
-	spin_unlock(&diff_area->caches_lock);
+	spin_unlock(&diff_area->store_queue_lock);
 
 	return chunk;
 }
 
-static void diff_area_cache_release(struct diff_area *diff_area)
+static void diff_area_store_queue_work(struct work_struct *work)
 {
+	struct diff_area *diff_area = container_of(
+		work, struct diff_area, store_queue_work);
 	struct chunk *chunk;
 
-	while ((atomic_read(&diff_area->cache_count) >
-		get_chunk_maximum_in_cache()) &&
-	       (chunk = diff_area_lock_and_get_chunk_from_cache(diff_area))) {
+	while ((chunk = diff_area_lock_and_get_chunk_from_queue(diff_area))) {
 
 		/*
-		 * There cannot be a chunk in the cache whose buffer is
+		 * There cannot be a chunk in the store queue whose buffer is
 		 * not ready.
 		 */
 		if (WARN(!chunk_state_check(chunk, CHUNK_ST_BUFFER_READY),
@@ -177,14 +177,6 @@ static void diff_area_cache_release(struct diff_area *diff_area)
 	}
 }
 
-static void diff_area_cache_release_work(struct work_struct *work)
-{
-	struct diff_area *diff_area = container_of(
-		work, struct diff_area, cache_release_work);
-
-	diff_area_cache_release(diff_area);
-}
-
 struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
 {
 	int ret = 0;
@@ -218,10 +210,10 @@ struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
 
 	xa_init(&diff_area->chunk_map);
 
-	spin_lock_init(&diff_area->caches_lock);
-	INIT_LIST_HEAD(&diff_area->cache_queue);
-	atomic_set(&diff_area->cache_count, 0);
-	INIT_WORK(&diff_area->cache_release_work, diff_area_cache_release_work);
+	spin_lock_init(&diff_area->store_queue_lock);
+	INIT_LIST_HEAD(&diff_area->store_queue);
+	atomic_set(&diff_area->store_queue_count, 0);
+	INIT_WORK(&diff_area->store_queue_work, diff_area_store_queue_work);
 
 	spin_lock_init(&diff_area->free_diff_buffers_lock);
 	INIT_LIST_HEAD(&diff_area->free_diff_buffers);

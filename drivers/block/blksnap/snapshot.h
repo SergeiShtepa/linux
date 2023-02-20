@@ -23,6 +23,8 @@ struct diff_storage;
  *	an ioctl.
  * @id:
  *	UUID of snapshot.
+ * @rw_lock:
+ *	Protects the structure from being modified by different threads.
  * @is_taken:
  *	Flag that the snapshot was taken.
  * @diff_storage:
@@ -36,9 +38,6 @@ struct diff_storage;
  * exist at the same time. However, the original block device can only
  * belong to one snapshot. Creating multiple snapshots from the same block
  * device is not allowed.
- *
- * A UUID is used to identify the snapshot.
- *
  */
 struct snapshot {
 	struct list_head link;

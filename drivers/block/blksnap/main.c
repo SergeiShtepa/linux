@@ -51,14 +51,13 @@ int chunk_minimum_shift = 18;
 int chunk_maximum_count = 2097152;
 
 /*
- * The maximum number of chunks in memory cache.
- * Since reading and writing to snapshots is performed in large chunks,
- * a cache is implemented to optimize reading small portions of data
- * from the snapshot image. As the number of chunks in the cache
- * increases, memory consumption also increases.
- * The minimum recommended value is four.
+ * The maximum number of chunks in queue.
+ * The chunk is not immediately stored to the difference storage. The chunks
+ * are put in a store queue. The store queue allows to postpone the operation
+ * of storing a chunks data to the difference storage and perform it later in
+ * the worker thread.
  */
-int chunk_maximum_in_cache = 32;
+int chunk_maximum_in_queue = 16;
 
 /*
  * The size of the pool of preallocated difference buffers.
@@ -101,9 +100,9 @@ int get_chunk_maximum_count(void)
 {
 	return chunk_maximum_count;
 }
-int get_chunk_maximum_in_cache(void)
+int get_chunk_maximum_in_queue(void)
 {
-	return chunk_maximum_in_cache;
+	return chunk_maximum_in_queue;
 }
 int get_free_diff_buffer_pool_size(void)
 {
@@ -318,7 +317,7 @@ static int __init blksnap_init(void)
 		 tracking_block_maximum_count);
 	pr_debug("chunk_minimum_shift: %d\n", chunk_minimum_shift);
 	pr_debug("chunk_maximum_count: %d\n", chunk_maximum_count);
-	pr_debug("chunk_maximum_in_cache: %d\n", chunk_maximum_in_cache);
+	pr_debug("chunk_maximum_in_queue: %d\n", chunk_maximum_in_queue);
 	pr_debug("free_diff_buffer_pool_size: %d\n",
 		 free_diff_buffer_pool_size);
 	pr_debug("diff_storage_minimum: %d\n", diff_storage_minimum);
@@ -376,9 +375,9 @@ MODULE_PARM_DESC(chunk_minimum_shift,
 module_param_named(chunk_maximum_count, chunk_maximum_count, int, 0644);
 MODULE_PARM_DESC(chunk_maximum_count,
 		 "The maximum number of chunks");
-module_param_named(chunk_maximum_in_cache, chunk_maximum_in_cache, int, 0644);
-MODULE_PARM_DESC(chunk_maximum_in_cache,
-		 "The maximum number of chunks in memory cache");
+module_param_named(chunk_maximum_in_queue, chunk_maximum_in_queue, int, 0644);
+MODULE_PARM_DESC(chunk_maximum_in_queue,
+		 "The maximum number of chunks in store queue");
 module_param_named(free_diff_buffer_pool_size, free_diff_buffer_pool_size, int,
 		   0644);
 MODULE_PARM_DESC(free_diff_buffer_pool_size,

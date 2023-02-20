@@ -29,14 +29,14 @@ struct chunk;
  *	is divided.
  * @chunk_map:
  *	A map of chunks.
- * @caches_lock:
- *	This spinlock guarantees consistency of the linked lists of chunk
- *	caches.
- * @cache_queue:
- *	Queue for the cache.
- * @write_cache_count:
- *	The number of chunks in the cache.
- * @cache_release_work:
+ * @store_queue_lock:
+ *	This spinlock guarantees consistency of the linked lists of chunks
+ *	queue.
+ * @store_queue:
+ *	The queue of chunks waiting to be stored to the difference storage.
+ * @store_queue_count:
+ *	The number of chunks in the store queue.
+ * @store_queue_work:
  *	The workqueue work item. This worker limits the number of chunks
  *	that store their data in RAM.
  * @free_diff_buffers_lock:
@@ -68,14 +68,8 @@ struct chunk;
  * Therefore, the number of chunks into which the block device is divided is
  * limited.
  *
- * To provide high performance, a read cache and a write cache for chunks are
- * used. The cache algorithm is the simplest. If the data of the chunk was
- * read to the difference buffer, then the buffer is not released immediately,
- * but is placed at the end of the queue. The worker thread checks the number
- * of chunks in the queue and releases a difference buffer for the first chunk
- * in the queue, but only if the binary semaphore of the chunk is not locked.
- * If the read thread accesses the chunk from the cache again, it returns
- * back to the end of the queue.
+ * The store queue allows to postpone the operation of storing a chunks data
+ * to the difference storage and perform it later in the worker thread.
  *
  * The linked list of difference buffers allows to have a certain number of
  * "hot" buffers. This allows to reduce the number of allocations and releases
@@ -91,10 +85,10 @@ struct diff_area {
 	unsigned long chunk_count;
 	struct xarray chunk_map;
 
-	spinlock_t caches_lock;
-	struct list_head cache_queue;
-	atomic_t cache_count;
-	struct work_struct cache_release_work;
+	spinlock_t store_queue_lock;
+	struct list_head store_queue;
+	atomic_t store_queue_count;
+	struct work_struct store_queue_work;
 
 	spinlock_t free_diff_buffers_lock;
 	struct list_head free_diff_buffers;

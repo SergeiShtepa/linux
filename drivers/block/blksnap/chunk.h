@@ -31,8 +31,8 @@ enum chunk_st_bits {
  *	difference storage.
  * @CHUNK_ST_BUFFER_READY:
  *	The data of the chunk is ready to be read from the RAM buffer.
- *	The flag is removed when a chunk is removed from the cache and its
- *	buffer is released.
+ *	The flag is removed when a chunk is removed from the store queue
+ *	and its buffer is released.
  * @CHUNK_ST_STORE_READY:
  *	The data of the chunk has been written to the difference storage.
  *	The flag cannot be removed.
@@ -64,8 +64,8 @@ enum chunk_st {
 /**
  * struct chunk - Minimum data storage unit.
  *
- * @cache_link:
- *	The list header allows to create caches of chunks.
+ * @link:
+ *	The list header allows to create queue of chunks.
  * @diff_area:
  *	Pointer to the difference area - the storage of changes for a specific device.
  * @number:
@@ -90,7 +90,7 @@ enum chunk_st {
  * to snapshot images.
  *
  * If the data of the chunk has been changed or has just been read, then
- * the chunk gets into cache.
+ * the chunk gets into store queue.
  *
  * The semaphore is blocked for writing if there is no actual data in the
  * buffer, since a block of data is being read from the original device or
@@ -98,7 +98,7 @@ enum chunk_st {
  * diff_buffer, the semaphore must be locked.
  */
 struct chunk {
-	struct list_head cache_link;
+	struct list_head link;
 	struct diff_area *diff_area;
 
 	unsigned long number;
@@ -132,7 +132,7 @@ void chunk_free(struct chunk *chunk);
 void chunk_diff_buffer_release(struct chunk *chunk);
 void chunk_store_failed(struct chunk *chunk, int error);
 
-void chunk_schedule_caching(struct chunk *chunk);
+void chunk_schedule_storing(struct chunk *chunk);
 void chunk_submit_bio(struct chunk *chunk, struct bio *bio);
 void chunk_clone_bio(struct chunk *chunk, struct bio *bio);
 void chunk_store(struct chunk *chunk);

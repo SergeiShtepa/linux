@@ -48,37 +48,37 @@ void chunk_store_failed(struct chunk *chunk, int error)
 		diff_area_set_corrupted(diff_area, error);
 };
 
-void chunk_schedule_caching(struct chunk *chunk)
+void chunk_schedule_storing(struct chunk *chunk)
 {
-	int in_cache_count = 0;
+	int queue_count = 0;
 	struct diff_area *diff_area = chunk->diff_area;
 
 	might_sleep();
 
-	spin_lock(&diff_area->caches_lock);
+	spin_lock(&diff_area->store_queue_lock);
 
 	/*
-	 * The locked chunk cannot be in the cache.
-	 * If the check reveals that the chunk is in the cache, then something
+	 * The locked chunk cannot be in the queue.
+	 * If the check reveals that the chunk is in the queue, then something
 	 * is wrong in the algorithm.
 	 */
-	if (WARN(!list_is_first(&chunk->cache_link, &chunk->cache_link),
-		 "The chunk already in the cache")) {
-		spin_unlock(&diff_area->caches_lock);
+	if (WARN(!list_is_first(&chunk->link, &chunk->link),
+		 "The chunk already in the queue")) {
+		spin_unlock(&diff_area->store_queue_lock);
 		chunk_store_failed(chunk, 0);
 		return;
 	}
 
-	list_add_tail(&chunk->cache_link, &diff_area->cache_queue);
-	in_cache_count = atomic_inc_return(&diff_area->cache_count);
+	list_add_tail(&chunk->link, &diff_area->store_queue);
+	queue_count = atomic_inc_return(&diff_area->store_queue_count);
 
-	spin_unlock(&diff_area->caches_lock);
+	spin_unlock(&diff_area->store_queue_lock);
 
 	up(&chunk->lock);
 
-	/* Initiate the cache clearing process */
-	if (in_cache_count > get_chunk_maximum_in_cache())
-		queue_work(system_wq, &diff_area->cache_release_work);
+	/* Initiate the queue clearing process */
+	if (queue_count > get_chunk_maximum_in_queue())
+		queue_work(system_wq, &diff_area->store_queue_work);
 }
 
 void chunk_submit_bio(struct chunk *chunk, struct bio *bio)
@@ -173,7 +173,7 @@ static void chunk_notify_load(struct work_struct *work)
 	if (likely(chunk_state_check(chunk, CHUNK_ST_LOADING))) {
 		chunk_state_unset(chunk, CHUNK_ST_LOADING);
 		chunk_state_set(chunk, CHUNK_ST_BUFFER_READY);
-		chunk_schedule_caching(chunk);
+		chunk_schedule_storing(chunk);
 		goto out;
 	}
 
@@ -225,7 +225,7 @@ struct chunk *chunk_alloc(struct diff_area *diff_area, unsigned long number)
 	if (!chunk)
 		return NULL;
 
-	INIT_LIST_HEAD(&chunk->cache_link);
+	INIT_LIST_HEAD(&chunk->link);
 	sema_init(&chunk->lock, 1);
 	chunk->diff_area = diff_area;
 	chunk->number = number;
