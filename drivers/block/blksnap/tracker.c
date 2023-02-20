@@ -142,7 +142,6 @@ static struct blkfilter *tracker_attach(struct block_device *bdev)
 	atomic_set(&tracker->snapshot_is_taken, false);
 	tracker->cbt_map = cbt_map;
 	tracker->diff_area = NULL;
-	tracker->is_frozen = false;
 
 	pr_debug("New tracker for device [%u:%u] was created\n",
 		 MAJOR(tracker->dev_id), MINOR(tracker->dev_id));

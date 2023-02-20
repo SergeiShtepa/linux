@@ -15,12 +15,12 @@ struct diff_area;
 /**
  * struct tracker - Tracker for a block device.
  *
- * @link:
- *	List header. Tracker release cannot be performed in the release()
- *	filters callback function. Therefore, the trackers are queued for
- *	release in the worker thread.
- * @kref:
+ * @filter:
  *	The block device filter structure.
+ * @link:
+ *	List header. Allows to combine trackers into a list in a snapshot.
+ * @kref:
+ *	The link counter allows to control the lifetime of the tracker.
  * @dev_id:
  *	Original block device ID.
  * @snapshot_is_taken:
@@ -31,6 +31,7 @@ struct diff_area;
  * @diff_area:
  *	Pointer to a difference area.
  * @snap_disk:
+ *	Snapshot image disk.
  *
  * The goal of the tracker is to handle I/O unit. The tracker detectes
  * the range of sectors that will change and transmits them to the CBT map
@@ -47,8 +48,6 @@ struct tracker {
 	struct cbt_map *cbt_map;
 	struct diff_area *diff_area;
 	struct gendisk *snap_disk;
-
-	bool is_frozen;
 };
 
 int __init tracker_init(void);

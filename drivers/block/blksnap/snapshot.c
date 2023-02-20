@@ -246,7 +246,6 @@ static int snapshot_take_trackers(struct snapshot *snapshot)
 			pr_warn("Failed to freeze device [%u:%u]\n",
 			       MAJOR(tracker->dev_id), MINOR(tracker->dev_id));
 		else {
-			tracker->is_frozen = true;
 			pr_debug("Device [%u:%u] was frozen\n",
 				MAJOR(tracker->dev_id), MINOR(tracker->dev_id));
 		}
@@ -271,12 +270,11 @@ static int snapshot_take_trackers(struct snapshot *snapshot)
 	/* Thaw file systems on original block devices. */
 	list_for_each_entry(tracker, &snapshot->trackers, link) {
 		if (thaw_bdev(tracker->diff_area->orig_bdev))
-			pr_err("Failed to thaw device [%u:%u]\n",
+			pr_warn("Failed to thaw device [%u:%u]\n",
 			       MAJOR(tracker->dev_id), MINOR(tracker->dev_id));
 		else
 			pr_debug("Device [%u:%u] was unfrozen\n",
 				MAJOR(tracker->dev_id), MINOR(tracker->dev_id));
-		tracker->is_frozen = false;
 	}
 fail:
 
