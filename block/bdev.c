@@ -428,36 +428,8 @@ static void init_once(void *data)
 	inode_init_once(&ei->vfs_inode);
 }
 
-int blkfilter_detach(struct block_device *bdev, const char *name)
-{
-	const struct blkfilter_account *acc;
-	struct blkfilter *flt;
-	int error = 0;
-
-	blk_mq_freeze_queue(bdev->bd_queue);
-	flt = bdev->bd_filter;
-	if (!flt) {
-		error = -ENOENT;
-		goto out_unfreeze;
-	}
-	acc = flt->acc;
-	if (name && strncmp(acc->name, name, BLKFILTER_NAME_LENGTH) != 0) {
-		error = -EINVAL;
-		goto out_unfreeze;
-	}
-
-	bdev->bd_filter = NULL;
-	acc->ops->detach(flt);
-	module_put(acc->owner);
-out_unfreeze:
-	blk_mq_unfreeze_queue(bdev->bd_queue);
-
-	return error;
-}
-
 static void bdev_evict_inode(struct inode *inode)
 {
-	blkfilter_detach(I_BDEV(inode), NULL);
 	truncate_inode_pages_final(&inode->i_data);
 	invalidate_inode_buffers(inode); /* is it needed here? */
 	clear_inode(inode);
@@ -1182,6 +1154,36 @@ out_put_module:
 	if (ret)
 		module_put(acc->owner);
 	return ret;
+}
+
+int blkfilter_detach(struct block_device *bdev, const char *name)
+{
+	const struct blkfilter_account *acc;
+	struct blkfilter *flt;
+	int error = 0;
+
+	pr_debug("%s Detach block device filter %s\n", __func__, name);
+	blk_mq_freeze_queue(bdev->bd_queue);
+	flt = bdev->bd_filter;
+	if (!flt) {
+		pr_debug("%s Block device filter is not attached\n", __func__);
+		error = -ENOENT;
+		goto out_unfreeze;
+	}
+	acc = flt->acc;
+	if (name && strncmp(acc->name, name, BLKFILTER_NAME_LENGTH) != 0) {
+		pr_debug("%s Block device filter not found\n", __func__);
+		error = -EINVAL;
+		goto out_unfreeze;
+	}
+
+	bdev->bd_filter = NULL;
+	acc->ops->detach(flt);
+	module_put(acc->owner);
+out_unfreeze:
+	blk_mq_unfreeze_queue(bdev->bd_queue);
+
+	return error;
 }
 
 int blkfilter_control(struct block_device *bdev, const char *name,

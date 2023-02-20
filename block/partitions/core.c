@@ -277,6 +277,7 @@ static void delete_partition(struct block_device *part)
 
 	fsync_bdev(part);
 	__invalidate_device(part, true);
+	blkfilter_detach(part, NULL);
 
 	xa_erase(&part->bd_disk->part_tbl, part->bd_partno);
 	kobject_put(part->bd_holder_dir);
@@ -666,6 +667,7 @@ rescan:
 		return -EBUSY;
 	sync_blockdev(disk->part0);
 	invalidate_bdev(disk->part0);
+	blkfilter_detach(disk->part0, NULL);
 	blk_drop_partitions(disk);
 
 	clear_bit(GD_NEED_PART_SCAN, &disk->state);
