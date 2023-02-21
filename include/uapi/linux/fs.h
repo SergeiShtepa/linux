@@ -186,21 +186,25 @@ struct fsxattr {
 #define BLKZEROOUT _IO(0x12,127)
 #define BLKGETDISKSEQ _IOR(0x12,128,__u64)
 
-/**
- *
- *
- */
 enum {
 	BLKFILTER_CMD_ATTACH,
 	BLKFILTER_CMD_DETACH,
 	BLKFILTER_CMD_CTL,
 };
-
 #define BLKFILTER_NAME_LENGTH	32
 
 /**
+ * struct blkfilter_ctl - parameter for BLKFILTER ioctl
  *
- *
+ * @name:
+ *	 Name of block device filter.
+ * @cmd:
+ *	Command code BLKFILTER_CMD_ATTACH, BLKFILTER_CMD_DETACH,
+ *	BLKFILTER_CMD_CTL or higher.
+ * @optlen:
+ *	Buffer size with options.
+ * @opt:
+ *	Buffer with options.
  */
 struct blkfilter_ctl {
 	__u8 name[BLKFILTER_NAME_LENGTH];
@@ -209,9 +213,7 @@ struct blkfilter_ctl {
 	__u8 *opt;
 };
 
-/**
- * BLKFILTER -
- */
+/* BLKFILTER - allows to control the filters of block devices */
 #define BLKFILTER _IOWR(0x12, 129, struct blkfilter_ctl)
 
 /*

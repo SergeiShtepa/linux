@@ -9,12 +9,41 @@
 #define BLKSNAP 'V'
 
 /**
- * DOC: Block filter interface.
+ * DOC: Block device filter interface.
  *
- * Control commands that are transmitted through the block device filter interface.
- * See: include/uapi/fs.h#BLKFILTER
+ * Control commands that are transmitted through the block device filter
+ * interface.
  */
 
+/**
+ * enum blkfilter_ctl_blksnap - List of commands for BLKFILTER ioctl
+ *
+ * @blkfilter_ctl_blksnap_cbtinfo:
+ *	Get CBT information.
+ *	The result of executing the command is a &struct blksnap_cbtinfo.
+ *	Return 0 if succeeded, negative errno otherwise.
+ * @blkfilter_ctl_blksnap_cbtmap:
+ *	Read the CBT map.
+ *	The option passes the &struct blksnap_cbtmap.
+ *	The size of the table can be quite large. Thus, the table is read in
+ *	a loop, in each cycle of which the next offset is set to
+ *	&blksnap_tracker_read_cbt_bitmap.offset.
+ *	Return a count of bytes read if succeeded, negative errno otherwise.
+ * @blkfilter_ctl_blksnap_cbtdirty:
+ *	Set dirty blocks in the CBT map.
+ *	The option passes the &struct blksnap_cbtdirty.
+ *	There are cases when some blocks need to be marked as changed.
+ *	This ioctl allows to do this.
+ *	Return 0 if succeeded, negative errno otherwise.
+ * @blkfilter_ctl_blksnap_snapshotadd:
+ *	Add device to snapshot.
+ *	The option passes the &struct blksnap_snapshotadd.
+ *	Return 0 if succeeded, negative errno otherwise.
+ * @blkfilter_ctl_blksnap_snapshotinfo:
+ *	Get information about snapshot.
+ *	The result of executing the command is a &struct blksnap_snapshotinfo.
+ *	Return 0 if succeeded, negative errno otherwise.
+ */
 enum blkfilter_ctl_blksnap {
 	blkfilter_ctl_blksnap_cbtinfo,
 	blkfilter_ctl_blksnap_cbtmap,
@@ -23,42 +52,13 @@ enum blkfilter_ctl_blksnap {
 	blkfilter_ctl_blksnap_snapshotinfo,
 };
 
-/**
- * blkfilter_ctl_blksnap_cbtinfo - Get CBT information
- */
-
-/**
- * blkfilter_ctl_blksnap_cbtmap - Read the CBT map.
- *
- * Allows to read the table of changes.
- *
- * The size of the table can be quite large. Thus, the table is read in a loop,
- * in each cycle of which the next offset is set to
- * &blksnap_tracker_read_cbt_bitmap.offset.
- *
- * Return: a count of bytes read if succeeded, negative errno otherwise.
- */
-
-/**
- * blkfilter_ctl_blksnap_cbtdirty - Set dirty blocks in the CBT map.
- *
- * There are cases when some blocks need to be marked as changed.
- * This ioctl allows to do this.
- *
- * Return: 0 if succeeded, negative errno otherwise.
- */
-
-/**
- * blkfilter_ctl_blksnap_snapshotinfo -
- *
- */
-
 #ifndef UUID_SIZE
 #define UUID_SIZE 16
 #endif
 
 /**
  * struct blksnap_uuid - Unique 16-byte identifier.
+ *
  * @b:
  *	An array of 16 bytes.
  */
@@ -66,20 +66,14 @@ struct blksnap_uuid {
 	__u8 b[UUID_SIZE];
 };
 
-struct blksnap_bdev {
-	__u32 major;
-	__u32 minor;
-}
-;
 /**
- * struct blksnap_cbt_info - Information about change tracking for a block
- *	device.
- * @dev_id:
- *	Device ID.
- * @block_size:
- *	Block size in bytes.
+ * struct blksnap_cbtinfo - Result for the command
+ *	&blkfilter_ctl_blksnap.blkfilter_ctl_blksnap_cbtinfo.
+ *
  * @device_capacity:
  *	Device capacity in bytes.
+ * @block_size:
+ *	Block size in bytes.
  * @block_count:
  *	Number of blocks.
  * @generation_id:
@@ -96,15 +90,14 @@ struct blksnap_cbtinfo {
 };
 
 /**
- * struct blksnap_tracker_read_cbt_bitmap - Argument for the
- *	&IOCTL_BLKSNAP_TRACKER_READ_CBT_MAP control.
- * @dev_id:
- *	Device ID.
+ * struct blksnap_cbtmap - Option for the command
+ *	&blkfilter_ctl_blksnap.blkfilter_ctl_blksnap_cbtmap.
+ *
  * @offset:
  *	Offset from the beginning of the CBT bitmap in bytes.
  * @length:
  *	Size of @buff in bytes.
- * @buff:
+ * @buffer:
  *	Pointer to the buffer for output.
  */
 struct blksnap_cbtmap {
@@ -114,12 +107,12 @@ struct blksnap_cbtmap {
 };
 
 /**
- * struct blksnap_block_range - Element of array for
- *	&struct blksnap_tracker_mark_dirty_blocks.
- * @sector_offset:
+ * struct blksnap_sectors - Description of the block device region.
+ *
+ * @offset:
  *	Offset from the beginning of the disk in sectors.
- * @sector_count:
- *	Number of sectors.
+ * @count:
+ *	Count of sectors.
  */
 struct blksnap_sectors {
 	__u64 offset;
@@ -127,13 +120,13 @@ struct blksnap_sectors {
 };
 
 /**
- * struct blksnap_tracker_mark_dirty_blocks - Argument for the
- *	&IOCTL_BLKSNAP_TRACKER_MARK_DIRTY_BLOCKS control.
+ * struct blksnap_cbtdirty - Option for the command
+ *	&blkfilter_ctl_blksnap.blkfilter_ctl_blksnap_cbtdirty.
+ *
  * @count:
- *	Size of @dirty_blocks_array in the number of
- *	&struct blksnap_block_range.
- * @dirty_blocks_array:
- *	Pointer to the array of &struct blksnap_block_range.
+ *	Count of elements in the @dirty_sectors.
+ * @dirty_sectors:
+ *	Pointer to the array of &struct blksnap_sectors.
  */
 struct blksnap_cbtdirty {
 	__u32 count;
@@ -141,9 +134,9 @@ struct blksnap_cbtdirty {
 };
 
 /**
- * struct blksnap_snapshotadd - Argument for the command
- *	blkfilter_ctl_blksnap_snapshotadd. Allow adding a device to the
- *	snapshot.
+ * struct blksnap_snapshotadd - Option for the command
+ *	&blkfilter_ctl_blksnap.blkfilter_ctl_blksnap_snapshotadd.
+ *
  * @id:
  *	ID of the snapshot to which the block device should be added.
  */
@@ -154,9 +147,9 @@ struct blksnap_snapshotadd {
 #define IMAGE_DISK_NAME_LEN 32
 
 /**
- * struct blksnap_snapshotinfo - Argument for the command
- *	blkfilter_ctl_blksnap_snapshotinfo. Allow to get a status of the block
- *	device snapshot and image.
+ * struct blksnap_snapshotinfo - Result for the command
+ *	&blkfilter_ctl_blksnap.blkfilter_ctl_blksnap_snapshotinfo.
+ *
  * @error_code:
  *	Zero if there were no errors while holding the snapshot.
  *	The error code -ENOSPC means that while holding the snapshot, a snapshot
@@ -165,7 +158,7 @@ struct blksnap_snapshotadd {
  *	The error code is reset when the device is added to a new snapshot.
  * @image:
  *	If the snapshot was taken, it stores the block device name of the
- *	image, or empty string.
+ *	image, or empty string otherwise.
  */
 struct blksnap_snapshotinfo {
 	__s32 error_code;
@@ -189,6 +182,7 @@ enum blksnap_ioctl {
 
 /**
  * struct blksnap_version - Module version.
+ *
  * @major:
  *	Version major part.
  * @minor:
@@ -252,10 +246,13 @@ struct blksnap_version {
 /**
  * struct blksnap_snapshot_append_storage - Argument for the
  *	&IOCTL_BLKSNAP_SNAPSHOT_APPEND_STORAGE control.
+ *
  * @id:
  *	Snapshot ID.
- * @dev_id:
- *	Device ID.
+ * @bdev_path:
+ *	Device path string buffer.
+ * @bdev_path_size:
+ *	Device path string buffer size.
  * @count:
  *	Size of @ranges in the number of &struct blksnap_sectors.
  * @ranges:
@@ -299,6 +296,7 @@ struct blksnap_snapshot_append_storage {
 /**
  * struct blksnap_snapshot_collect - Argument for the
  *	&IOCTL_BLKSNAP_SNAPSHOT_COLLECT control.
+ *
  * @count:
  *	Size of &blksnap_snapshot_collect.ids in the number of 16-byte UUID.
  * @ids:
@@ -356,6 +354,7 @@ enum blksnap_event_codes {
 /**
  * struct blksnap_snapshot_event - Argument for the
  *	&IOCTL_BLKSNAP_SNAPSHOT_WAIT_EVENT control.
+ *
  * @id:
  *	Snapshot ID.
  * @timeout_ms:
@@ -395,6 +394,7 @@ static_assert(sizeof(struct blksnap_snapshot_event) == 4096,
 /**
  * struct blksnap_event_low_free_space - Data for the
  *	&blksnap_event_code_low_free_space event.
+ *
  * @requested_nr_sect:
  *	The required number of sectors.
  */
@@ -405,13 +405,17 @@ struct blksnap_event_low_free_space {
 /**
  * struct blksnap_event_corrupted - Data for the
  *	&blksnap_event_code_corrupted event.
- * @orig_dev_id:
- *	Device ID.
+ *
+ * @dev_id_mj:
+ *	Major part of original device ID.
+ * @dev_id_mn:
+ *	Minor part of original device ID.
  * @err_code:
  *	Error code.
  */
 struct blksnap_event_corrupted {
-	struct blksnap_bdev dev_id;
+	__u32 dev_id_mj;
+	__u32 dev_id_mn;
 	__s32 err_code;
 };
 

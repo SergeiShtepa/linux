@@ -19,32 +19,42 @@ was eliminated in the 5.10 kernel.
 
 The block device filtering mechanism returns the ability to handle I/O units.
 It is possible to safely attach filter to a block device "on the fly" without
-changing the structure of block devices.
+changing the structure of block devices stack.
 
 It supports attaching one filter to one block device, because there is only
-one filter implementation in the kernel.
+one filter implementation in the kernel yet.
 See Documentation/block/blksnap.rst.
 
 Design
 ======
 
-The block device filtering mechanism provides functions for attaching and
-detaching the filter. The filter is a structure with a reference counter
-and callback functions.
+The block device filtering mechanism provides registration and unregistration
+for filters account. The account contains a pointer to the callback functions
+for the filter. After registering the filter account, filter can be managed
+using block device ioctl BLKFILTER.
 
-The submit_bio() callback function is called for each I/O unit for a block
-device, providing I/O unit filtering. Depending on the result of filtering
-the I/O unit, it can either be passed for subsequent processing by the block
-layer, or skipped.
+When the filter is attached, the callback function is called for each I/O unit
+for a block device, providing I/O unit filtering. Depending on the result of
+filtering the I/O unit, it can either be passed for subsequent processing by
+the block layer, or skipped.
 
-The reference counter allows to control the filter lifetime. When the reference
-count is reduced to zero, the release() callback function is called to
-release the filter. This allows the filter to be released when the block
-device is disconnected.
+The filter can be implemented as a loadable module. In this case, module
+unloading is blocked while the filter is attached to at least one of the block
+devices.
 
 Interface description
 =====================
+The ioctl BLKFILTER use structure blkfilter_ctl. It allows to attach a filter
+to a block device, detach it and send it a control command.
+
+.. kernel-doc:: include/uapi/linux/fs.h
+	:functions: blkfilter_ctl
+
+To register in the system, the filter creates its own account, which contains
+callback functions, unique filter name and module owner. This filter account is
+used by the registration functions.
+
 .. kernel-doc:: include/linux/blkdev.h
-	:functions: blkfilter_operations blkfilter blkfilter_init blkfilter_get blkfilter_put
+	:functions: blkfilter blkfilter_operations blkfilter_account
 .. kernel-doc:: block/bdev.c
-	:functions: blkfilter_attach blkfilter_detach
+	:functions: blkfilter_register blkfilter_unregister

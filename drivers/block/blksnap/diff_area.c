@@ -457,10 +457,8 @@ fail:
 static inline void diff_area_event_corrupted(struct diff_area *diff_area)
 {
 	struct blksnap_event_corrupted data = {
-		.dev_id = {
-			.major = MAJOR(diff_area->orig_bdev->bd_dev),
-			.minor = MINOR(diff_area->orig_bdev->bd_dev)
-		},
+		.dev_id_mj = MAJOR(diff_area->orig_bdev->bd_dev),
+		.dev_id_mn = MINOR(diff_area->orig_bdev->bd_dev),
 		.err_code = abs(diff_area->error_code),
 	};
 

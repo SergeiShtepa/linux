@@ -51,6 +51,8 @@ struct chunk;
  *	The flag is set if an error occurred in the operation of the data
  *	saving mechanism in the diff area. In this case, an error will be
  *	generated when reading from the snapshot image.
+ * @error_code:
+ *	The error code that caused the snapshot to be corrupted.
  *
  * The &struct diff_area is created for each block device in the snapshot.
  * It is used to save the differences between the original block device and

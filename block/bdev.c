@@ -1115,6 +1115,29 @@ static inline struct blkfilter_account *blkfilter_find_get(const char *name)
 	return found;
 }
 
+/*
+ * blkfilter_attach() - Attach block device filter to block device.
+ *
+ * @bdev:
+ *	The block device.
+ * @name:
+ *	The name of block device filter.
+ *
+ * The function is called during processing ioctl BLKFILTER with command
+ * BLKFILTER_CMD_ATTACH. The filter with the specified name must be
+ * registered in the system. The block device should not have filters attached.
+ *
+ * Context:
+ *	May sleep, flush filesystem and freeze I/O queue.
+ * Return:
+ *	0 if succeeded,
+ *	-ENOENT if filter with this name is not registered in the system,
+ *	-EALREADY if filter with this name is already attached to the block
+ *		device,
+ *	-EBUSY if filter with a different name attached to the block device,
+ *	otherwise, another negative error occurred as a result of the
+ *		filters attach() callback.
+ */
 int blkfilter_attach(struct block_device *bdev, const char *name)
 {
 	struct blkfilter_account *acc;
@@ -1156,23 +1179,45 @@ out_put_module:
 	return ret;
 }
 
+/*
+ * blkfilter_detach() - Detach block device filter from block device.
+ *
+ * @bdev:
+ *	The block device.
+ * @name:
+ *	The name of block device filter.
+ *
+ * The function is called during processing ioctl BLKFILTER with command
+ * BLKFILTER_CMD_DETACH. The name of the detached filter must match the
+ * name of the attached block device filter.
+ *
+ * Context:
+ *	May sleep and freeze I/O queue.
+ * Return:
+ *	0 if succeeded,
+ *	-ENOENT if filter with this name is not registered in the system,
+ *	-EINVAL if filter with this name is not attached to the block
+ *		device,
+ *	otherwise, another negative error occurred as a result of the
+ 		filters detach() callback.
+ */
 int blkfilter_detach(struct block_device *bdev, const char *name)
 {
 	const struct blkfilter_account *acc;
 	struct blkfilter *flt;
 	int error = 0;
 
-	pr_debug("%s Detach block device filter %s\n", __func__, name);
+	pr_debug("Detach block device filter %s\n", name);
 	blk_mq_freeze_queue(bdev->bd_queue);
 	flt = bdev->bd_filter;
 	if (!flt) {
-		pr_debug("%s Block device filter is not attached\n", __func__);
+		pr_debug("Block device filter is not attached\n");
 		error = -ENOENT;
 		goto out_unfreeze;
 	}
 	acc = flt->acc;
 	if (name && strncmp(acc->name, name, BLKFILTER_NAME_LENGTH) != 0) {
-		pr_debug("%s Block device filter not found\n", __func__);
+		pr_debug("Block device filter not found\n");
 		error = -EINVAL;
 		goto out_unfreeze;
 	}
@@ -1186,6 +1231,29 @@ out_unfreeze:
 	return error;
 }
 
+/*
+ * blkfilter_control() - Send a control command to the filter.
+ *
+ * @bdev:
+ *	The block device.
+ * @name:
+ *	The name of block device filter.
+ * @cmd:
+ *	Command code.
+ * @buf:
+ *	Buffer for command options and result data.
+ * @plen:
+ *	A pointer to the buffer size with command options. If the command
+ *	returns a result, the variable will contain the size of the result.
+ *
+ * The function is called during processing ioctl BLKFILTER with command
+ * BLKFILTER_CMD_CTL.
+ *
+ * Context:
+ *	May sleep.
+ * Return:
+ *	0 if succeeded, negative errno otherwise.
+ */
 int blkfilter_control(struct block_device *bdev, const char *name,
 		      const unsigned int cmd, __u8 __user *buf, __u32 *plen)
 {
@@ -1213,7 +1281,22 @@ out_queue_exit:
 }
 
 /**
- * blkfilter_register() -
+ * blkfilter_register() - Registration of a new block device filter in
+ * 	the system.
+ *
+ * @new_acc:
+ *	The new block device filter account - a pointer to a structure
+ *	with a description of the filter that is being registered.
+ *
+ * A block device filter can be a loadable module. When the module is loaded,
+ * it registers its account so that its callback functions are available to
+ * the system. It is best to call this function from the init function.
+ *
+ * Return:
+ * 	0 if succeeded,
+ *	-EALREADY if this block device filter account is already registered,
+ *	-EBUSY if a block device filter account with same name is already
+ *	registered.
  */
 int blkfilter_register(struct blkfilter_account *new_acc)
 {
@@ -1241,6 +1324,19 @@ int blkfilter_register(struct blkfilter_account *new_acc)
 EXPORT_SYMBOL_GPL(blkfilter_register);
 
 /**
+ * blkfilter_unregister() - Unregistration of a block device filter from
+ * 	the system.
+ *
+ * @acc:
+ *	The block dvice filter account - a pointer to a structure with
+ *	a description of the filter.
+ *
+ * A block device filter can be a loadable module. When the module is unloaded,
+ * it must unregister its account. It is best to call this function from
+ * the exit function.
+ *
+ * Important: before unloading, it is necessary to detach the filter from all
+ * block devices.
  *
  */
 void blkfilter_unregister(struct blkfilter_account *acc)
