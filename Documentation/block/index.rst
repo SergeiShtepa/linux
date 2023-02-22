@@ -12,7 +12,7 @@ Block
    blk-mq
    blkfilter
    blksnap
-   capability
+
    cmdline-partition
    data-integrity
    deadline-iosched
