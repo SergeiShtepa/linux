@@ -56,5 +56,5 @@ used by the registration functions.
 
 .. kernel-doc:: include/linux/blkdev.h
 	:functions: blkfilter blkfilter_operations blkfilter_account
-.. kernel-doc:: block/bdev.c
+.. kernel-doc:: block/blk-filter.c
 	:functions: blkfilter_register blkfilter_unregister
