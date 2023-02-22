@@ -17,10 +17,10 @@
  *
  * @link:
  *	Allows to combine structures into a linked list.
- * @dev_id:
- *	ID of the block device.
  * @bdev:
  *	A pointer to an open block device.
+ * @bdev_path:
+ *	A path to the block device.
  */
 struct storage_bdev {
 	struct list_head link;
