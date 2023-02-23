@@ -86,10 +86,10 @@ void chunk_schedule_storing(struct chunk *chunk)
 void chunk_copy_bio(struct chunk *chunk, struct bio *bio,
 		    struct bvec_iter *iter)
 {
-	unsigned int chunk_ofs =
-		(iter->bi_sector - chunk_sector(chunk)) << SECTOR_SHIFT;
-	unsigned int chunk_left = chunk->diff_buffer->size - chunk_ofs;
+	unsigned int chunk_ofs, chunk_left;
 
+	chunk_ofs = (iter->bi_sector - chunk_sector(chunk)) << SECTOR_SHIFT;
+	chunk_left = chunk->diff_buffer->size - chunk_ofs;
 	while (chunk_left && iter->bi_size) {
 		struct bio_vec bvec = bio_iter_iovec(bio, *iter);
 		unsigned int page_ofs = offset_in_page(chunk_ofs);
