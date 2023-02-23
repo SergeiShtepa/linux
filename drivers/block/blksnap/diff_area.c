@@ -418,6 +418,12 @@ fail_unlock_chunk:
 	return ERR_PTR(ret);
 }
 
+/*
+ * The snapshot supports write operations.  This allows for example to delete
+ * some files from the file system before backing up the volume. The data can
+ * be stored only in the difference storage. Therefore, before partially
+ * overwriting this data, it should be read from the original block device.
+ */
 void diff_area_submit_bio(struct diff_area *diff_area, struct bio *bio)
 {
 	struct chunk *chunk;
@@ -429,25 +435,30 @@ void diff_area_submit_bio(struct diff_area *diff_area, struct bio *bio)
 			goto fail;
 
 		if (chunk_state_check(chunk, CHUNK_ST_BUFFER_READY)) {
-			/* directly copy data from the in-memory chunk */
+			/*
+			 * Directly copy data from the in-memory chunk or
+			 * copy to the in-memory chunk for write operation.
+			 */
 			chunk_copy_bio(chunk, bio, &bio->bi_iter);
 			up(&chunk->lock);
 		} else if (!chunk_state_check(chunk, CHUNK_ST_STORE_READY) &&
 			   op_is_write(bio_op(bio))) {
 			/*
-			 * The snapshot supports write operations.  This allows
-			 * for example to delete some files from the file system
-			 * before backing up the volume.  The recorded data is
-			 * stored in the difference storage.  Therefore, before
-			 * partially overwriting this data, it should be read
-			 * from the original block device.
+			 * Starts asynchronous loading of a chunk from
+			 * the original block device and schedule copying
+			 * data to (or from) the in-memory chunk.
 			 */
 			if (chunk_load(chunk, bio)) {
 				up(&chunk->lock);
 				goto fail;
 			}
 		} else {
-			/* submit a bio to read data from the stored chunk */
+			/*
+			 * Submit a bio to:
+			 * - read data from the chunk on original device or
+			 *   difference storage
+			 * - write data to the chunk on difference storage.
+			 */
 			chunk_clone_bio(chunk, bio);
 			up(&chunk->lock);
 		}
