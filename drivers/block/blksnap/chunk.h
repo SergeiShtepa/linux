@@ -133,10 +133,11 @@ void chunk_diff_buffer_release(struct chunk *chunk);
 void chunk_store_failed(struct chunk *chunk, int error);
 
 void chunk_schedule_storing(struct chunk *chunk);
-void chunk_submit_bio(struct chunk *chunk, struct bio *bio);
+void chunk_copy_bio(struct chunk *chunk, struct bio *bio,
+		    struct bvec_iter *iter);
 void chunk_clone_bio(struct chunk *chunk, struct bio *bio);
 void chunk_store(struct chunk *chunk);
-void chunk_load(struct chunk *chunk);
+int chunk_load(struct chunk *chunk, struct bio *orig_bio);
 
 int __init chunk_init(void);
 void chunk_done(void);

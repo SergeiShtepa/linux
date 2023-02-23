@@ -24,34 +24,6 @@ static void snapimage_submit_bio(struct bio *bio)
 		return;
 	}
 
-	/*
-	 * The snapshot supports the write operation.
-	 * This allows, for example, to delete some files from the
-	 * file system before backing up the volume.
-	 * The recorded data is stored in the difference storage.
-	 * Therefore, before partially overwriting this data, it
-	 * should be read from the original block device.
-	 * To ensure that before overwriting, the data of the chunk
-	 * was guaranteed to be read, this is done synchronously.
-	 */
-	if (op_is_write(bio_op(bio))) {
-		struct bio_list *old_bio_list;
-		struct bio_list bio_list[2] = { };
-		struct bio *new_bio;
-
-		bio_list_init(&bio_list[0]);
-		old_bio_list = current->bio_list;
-		current->bio_list = bio_list;
-
-		diff_area_copy(diff_area, bio->bi_iter.bi_sector,
-			       bio_sectors(bio), false);
-
-		current->bio_list = NULL;
-		while ((new_bio = bio_list_pop(&bio_list[0])))
-			submit_bio_noacct(new_bio);
-		current->bio_list = old_bio_list;
-	}
-
 	diff_area_submit_bio(diff_area, bio);
 }
 

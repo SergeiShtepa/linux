@@ -271,7 +271,6 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
 	int ret = 0;
 	sector_t offset;
 	struct chunk *chunk;
-	struct diff_buffer *diff_buffer;
 	sector_t area_sect_first;
 	sector_t chunk_sectors = diff_area_chunk_sectors(diff_area);
 
@@ -324,19 +323,13 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
 			goto fail_unlock_chunk;
 		}
 
-		diff_buffer = diff_buffer_take(chunk->diff_area);
-		if (IS_ERR(diff_buffer)) {
-			ret = PTR_ERR(diff_buffer);
-			goto fail_unlock_chunk;
-		}
-		WARN(chunk->diff_buffer, "Chunks buffer has been lost");
-		chunk->diff_buffer = diff_buffer;
-
 		/*
 		 * Starts asynchronous loading of a chunk from
 		 * the original block device.
 		 */
-		chunk_load(chunk);
+		ret = chunk_load(chunk, NULL);
+		if (ret)
+			goto fail_unlock_chunk;
 	}
 
 	return ret;
@@ -435,18 +428,29 @@ void diff_area_submit_bio(struct diff_area *diff_area, struct bio *bio)
 		if (IS_ERR(chunk))
 			goto fail;
 
-		if (chunk_state_check(chunk, CHUNK_ST_BUFFER_READY))
-			chunk_submit_bio(chunk, bio);
-		else if (chunk_state_check(chunk, CHUNK_ST_STORE_READY) ||
-			 !op_is_write(bio_op(bio)))
-			chunk_clone_bio(chunk, bio);
-		else {
-			pr_err("Failed to submit bio: invalid chunk state\n");
+		if (chunk_state_check(chunk, CHUNK_ST_BUFFER_READY)) {
+			/* directly copy data from the in-memory chunk */
+			chunk_copy_bio(chunk, bio, &bio->bi_iter);
 			up(&chunk->lock);
-			goto fail;
+		} else if (!chunk_state_check(chunk, CHUNK_ST_STORE_READY) &&
+			   op_is_write(bio_op(bio))) {
+			/*
+			 * The snapshot supports write operations.  This allows
+			 * for example to delete some files from the file system
+			 * before backing up the volume.  The recorded data is
+			 * stored in the difference storage.  Therefore, before
+			 * partially overwriting this data, it should be read
+			 * from the original block device.
+			 */
+			if (chunk_load(chunk, bio)) {
+				up(&chunk->lock);
+				goto fail;
+			}
+		} else {
+			/* submit a bio to read data from the stored chunk */
+			chunk_clone_bio(chunk, bio);
+			up(&chunk->lock);
 		}
-
-		up(&chunk->lock);
 	}
 	bio_endio(bio);
 	return;
