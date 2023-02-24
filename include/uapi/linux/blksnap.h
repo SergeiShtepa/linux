@@ -82,7 +82,7 @@ struct blksnap_uuid {
  *	Current changes number.
  */
 struct blksnap_cbtinfo {
-	__u64 device_capacity; // ? see BLKGETSIZE64
+	__u64 device_capacity;
 	__u32 block_size;
 	__u32 block_count;
 	struct blksnap_uuid generation_id;
