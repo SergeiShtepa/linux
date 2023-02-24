@@ -217,19 +217,27 @@ Performing I/O for a snapshot image
 -----------------------------------
 
 To read snapshot data, when taking a snapshot, block devices of snapshot images
-are created.
+are created. The snapshot image block devices support the write operation.
+This allows to perform additional data preparation on the file system before
+creating a backup.
 
-To process the read I/O unit, clones of the I/O unit are created, which redirect
-the read either to the original block device or to the difference storage.
+To process the I/O unit, clones of the I/O unit are created, which redirect
+the I/O unit either to the original block device or to the difference storage.
 When processing of cloned I/O units is completed, the original I/O unit is
 marked as completed too.
 
-The snapshot image block devices support the write operation. This allows to
-perform additional data preparation on the file system before creating a backup.
-To process the write I/O unit, clones of the I/O unit are created, which
-redirect the write to the difference storage. If the data has not yet been
-copied to the difference storage, then this copying is performed synchronously
-before processing the I/O unit.
+An I/O unit can be partially processed without accessing to block devices if
+the I/O unit refers to a chunk that is in the queue for storing to the
+difference storage. In this case, the data is read or written in a buffer in
+memory.
+
+If, when processing the write I/O unit, it turns out that the data of the
+refered chunk has not yet been stored to the difference storage or has not
+even been read from the original device, then an I/O unit to read data from the
+original device is initiated beforehand. After the reading from original device
+is performed, their data from the I/O unit is partially overwritten directly in
+the buffer of the chunk in memory, and the chunk is scheduled to be saved to the
+difference storage.
 
 How to use
 ==========
