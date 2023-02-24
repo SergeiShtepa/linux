@@ -218,6 +218,9 @@ static int ioctl_snapshot_collect(unsigned long arg)
 	return ret;
 }
 
+static_assert(sizeof(struct blksnap_snapshot_event) == 4096,
+	"The size struct blksnap_snapshot_event should be equal to the size of the page.");
+
 static int ioctl_snapshot_wait_event(unsigned long arg)
 {
 	int ret = 0;
