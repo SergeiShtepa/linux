@@ -137,7 +137,7 @@ void chunk_copy_bio(struct chunk *chunk, struct bio *bio,
 		    struct bvec_iter *iter);
 void chunk_clone_bio(struct chunk *chunk, struct bio *bio);
 void chunk_store(struct chunk *chunk);
-int chunk_load(struct chunk *chunk, struct bio *orig_bio);
+int chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio);
 
 int __init chunk_init(void);
 void chunk_done(void);

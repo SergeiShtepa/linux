@@ -129,18 +129,31 @@ static void chunk_clone_endio(struct bio *bio)
 		bio_endio(orig_bio);
 }
 
-static struct bvec_iter chunk_limit_iter(struct chunk *chunk,
-					 struct bio *orig_bio, sector_t sector)
+static inline sector_t chunk_offset(struct chunk *chunk, struct bio *bio)
 {
-	sector_t chunk_ofs = orig_bio->bi_iter.bi_sector - chunk_sector(chunk);
-
-	return (struct bvec_iter) {
-		.bi_sector = sector + chunk_ofs,
-		.bi_size = min_t(unsigned int, orig_bio->bi_iter.bi_size,
-			(chunk->sector_count - chunk_ofs) << SECTOR_SHIFT),
-	};
+	return bio->bi_iter.bi_sector - chunk_sector(chunk);
 }
 
+static inline void chunk_limit_iter(struct chunk *chunk, struct bio *bio,
+				    sector_t sector, struct bvec_iter *iter)
+{
+	sector_t chunk_ofs = chunk_offset(chunk, bio);
+
+	iter->bi_sector = sector + chunk_ofs;
+	iter->bi_size = min_t(unsigned int,
+			bio->bi_iter.bi_size,
+			(chunk->sector_count - chunk_ofs) << SECTOR_SHIFT);
+}
+
+static inline unsigned int chunk_limit(struct chunk *chunk, struct bio *bio)
+{
+	unsigned int chunk_ofs, chunk_left;
+
+	chunk_ofs = (unsigned int)chunk_offset(chunk, bio) << SECTOR_SHIFT;
+	chunk_left = chunk->diff_buffer->size - chunk_ofs;
+
+	return min(bio->bi_iter.bi_size, chunk_left);
+}
 
 void chunk_clone_bio(struct chunk *chunk, struct bio *bio)
 {
@@ -157,7 +170,7 @@ void chunk_clone_bio(struct chunk *chunk, struct bio *bio)
 	}
 
 	new_bio = bio_alloc_clone(bdev, bio, GFP_NOIO, &chunk_clone_bioset);
-	new_bio->bi_iter = chunk_limit_iter(chunk, bio, sector);
+	chunk_limit_iter(chunk, bio, sector, &new_bio->bi_iter);
 	bio_set_flag(new_bio, BIO_FILTERED);
 	new_bio->bi_end_io = chunk_clone_endio;
 	new_bio->bi_private = bio;
@@ -181,6 +194,10 @@ static void chunk_notify_load(struct work_struct *work)
 	if (likely(chunk_state_check(chunk, CHUNK_ST_LOADING))) {
 		chunk_state_unset(chunk, CHUNK_ST_LOADING);
 		chunk_state_set(chunk, CHUNK_ST_BUFFER_READY);
+		if (cbio->orig_bio) {
+			chunk_copy_bio(chunk, cbio->orig_bio, &cbio->orig_iter);
+			bio_endio(cbio->orig_bio);
+		}
 		chunk_schedule_storing(chunk);
 		goto out;
 	}
@@ -189,12 +206,6 @@ static void chunk_notify_load(struct work_struct *work)
 		pr_err("Chunk in a failed state\n");
 	else
 		pr_err("invalid chunk state 0x%x\n", atomic_read(&chunk->state));
-
-	if (cbio->orig_bio) {
-		chunk_copy_bio(chunk, cbio->orig_bio, &cbio->orig_iter);
-		bio_endio(cbio->orig_bio);
-	}
-
 	up(&chunk->lock);
 out:
 	bio_put(&cbio->bio);
@@ -316,19 +327,36 @@ void chunk_store(struct chunk *chunk)
 
 	INIT_WORK(&cbio->work, chunk_notify_store);
 	cbio->chunk = chunk;
+	cbio->orig_bio = NULL;
 	bio->bi_end_io = chunk_io_endio;
 	bio->bi_private = NULL;
 	submit_bio_noacct(bio);
 }
 
-static void __chunk_load(struct chunk *chunk, struct block_device *bdev,
-			 sector_t sector, sector_t count, struct bio *orig_bio)
+int chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio)
 {
+	struct diff_buffer *diff_buffer;
 	unsigned int page_idx = 0;
 	struct bio *bio;
 	struct chunk_bio *cbio;
+	struct block_device *bdev;
+	sector_t sector, count;
+
+	diff_buffer = diff_buffer_take(chunk->diff_area);
+	if (IS_ERR(diff_buffer))
+		return PTR_ERR(diff_buffer);
+	chunk->diff_buffer = diff_buffer;
 
 	chunk_state_set(chunk, CHUNK_ST_LOADING);
+	if (chunk_state_check(chunk, CHUNK_ST_STORE_READY)) {
+		bdev = chunk->diff_region->bdev;
+		sector = chunk->diff_region->sector;
+		count = chunk->diff_region->count;
+	} else {
+		bdev = chunk->diff_area->orig_bdev;
+		sector = chunk_sector(chunk);
+		count = chunk->sector_count;
+	}
 
 	bio = bio_alloc_bioset(bdev, calc_max_vecs(count),
 			       REQ_OP_READ, GFP_NOIO, &chunk_io_bioset);
@@ -359,40 +387,16 @@ static void __chunk_load(struct chunk *chunk, struct block_device *bdev,
 	cbio = container_of(bio, struct chunk_bio, bio);
 	INIT_WORK(&cbio->work, chunk_notify_load);
 	cbio->chunk = chunk;
+	cbio->orig_bio = orig_bio;
 	if (orig_bio) {
-		cbio->orig_bio = orig_bio;
-		cbio->orig_iter = chunk_limit_iter(chunk, orig_bio, sector);
+		cbio->orig_iter = orig_bio->bi_iter;
+		bio_advance_iter_single(orig_bio, &orig_bio->bi_iter,
+					chunk_limit(chunk, orig_bio));
 		bio_inc_remaining(orig_bio);
-		bio_advance(orig_bio, cbio->orig_iter.bi_size);
 	}
 	bio->bi_end_io = chunk_io_endio;
 	bio->bi_private = NULL;
 	submit_bio_noacct(bio);
-}
-
-int chunk_load(struct chunk *chunk, struct bio *orig_bio)
-{
-	struct diff_buffer *diff_buffer;
-
-	diff_buffer = diff_buffer_take(chunk->diff_area);
-	if (IS_ERR(diff_buffer))
-		return PTR_ERR(diff_buffer);
-
-	chunk->diff_buffer = diff_buffer;
-
-	if (chunk_state_check(chunk, CHUNK_ST_STORE_READY))
-		__chunk_load(chunk,
-			     chunk->diff_region->bdev,
-			     chunk->diff_region->sector,
-			     chunk->diff_region->count,
-			     orig_bio);
-	else
-		__chunk_load(chunk,
-			     chunk->diff_area->orig_bdev,
-			     chunk_sector(chunk),
-			     chunk->sector_count,
-			     orig_bio);
-	return 0;
 }
 
 int __init chunk_init(void)

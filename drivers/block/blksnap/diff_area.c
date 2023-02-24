@@ -327,7 +327,7 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
 		 * Starts asynchronous loading of a chunk from
 		 * the original block device.
 		 */
-		ret = chunk_load(chunk, NULL);
+		ret = chunk_load_and_schedule_io(chunk, NULL);
 		if (ret)
 			goto fail_unlock_chunk;
 	}
@@ -430,7 +430,7 @@ void diff_area_submit_bio(struct diff_area *diff_area, struct bio *bio)
 
 	while (bio->bi_iter.bi_size) {
 		chunk = diff_area_image_get_chunk(diff_area,
-						  bio->bi_iter.bi_sector);
+			bio->bi_iter.bi_sector);
 		if (IS_ERR(chunk))
 			goto fail;
 
@@ -441,18 +441,11 @@ void diff_area_submit_bio(struct diff_area *diff_area, struct bio *bio)
 			 */
 			chunk_copy_bio(chunk, bio, &bio->bi_iter);
 			up(&chunk->lock);
-		} else if (!chunk_state_check(chunk, CHUNK_ST_STORE_READY) &&
-			   op_is_write(bio_op(bio))) {
-			/*
-			 * Starts asynchronous loading of a chunk from
-			 * the original block device and schedule copying
-			 * data to (or from) the in-memory chunk.
-			 */
-			if (chunk_load(chunk, bio)) {
-				up(&chunk->lock);
-				goto fail;
-			}
-		} else {
+			continue;
+		}
+
+		if (chunk_state_check(chunk, CHUNK_ST_STORE_READY) ||
+			 !op_is_write(bio_op(bio))) {
 			/*
 			 * Submit a bio to:
 			 * - read data from the chunk on original device or
@@ -461,6 +454,17 @@ void diff_area_submit_bio(struct diff_area *diff_area, struct bio *bio)
 			 */
 			chunk_clone_bio(chunk, bio);
 			up(&chunk->lock);
+			continue;
+		}
+
+		/*
+		 * Starts asynchronous loading of a chunk from the original
+		 * block device and schedule copying data to (or from) the
+		 * in-memory chunk.
+		 */
+		if (chunk_load_and_schedule_io(chunk, bio)) {
+			up(&chunk->lock);
+			goto fail;
 		}
 	}
 	bio_endio(bio);
