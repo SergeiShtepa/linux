@@ -397,6 +397,8 @@ int chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio)
 	bio->bi_end_io = chunk_io_endio;
 	bio->bi_private = NULL;
 	submit_bio_noacct(bio);
+
+	return 0;
 }
 
 int __init chunk_init(void)
