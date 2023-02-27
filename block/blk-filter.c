@@ -23,7 +23,7 @@ static inline struct blkfilter_account *blkfilter_find_get(const char *name)
 	return found;
 }
 
-/*
+/**
  * blkfilter_attach() - Attach block device filter to block device.
  *
  * @bdev:
@@ -41,10 +41,10 @@ static inline struct blkfilter_account *blkfilter_find_get(const char *name)
  *	0 if succeeded,
  *	-ENOENT if filter with this name is not registered in the system,
  *	-EALREADY if filter with this name is already attached to the block
- *		device,
+ *	device,
  *	-EBUSY if filter with a different name attached to the block device,
- *	otherwise, another negative error occurred as a result of the
- *		filters attach() callback.
+ *	otherwise, another negative error occurred as a result of the filters
+ *	attach() callback.
  */
 int blkfilter_attach(struct block_device *bdev, const char *name)
 {
@@ -87,7 +87,7 @@ out_put_module:
 	return ret;
 }
 
-/*
+/**
  * blkfilter_detach() - Detach block device filter from block device.
  *
  * @bdev:
@@ -104,10 +104,9 @@ out_put_module:
  * Return:
  *	0 if succeeded,
  *	-ENOENT if filter with this name is not registered in the system,
- *	-EINVAL if filter with this name is not attached to the block
- *		device,
- *	otherwise, another negative error occurred as a result of the
- 		filters detach() callback.
+ *	-EINVAL if filter with this name is not attached to the block device,
+ *	otherwise, another negative error occurred as a result of the filters
+ *	detach() callback.
  */
 int blkfilter_detach(struct block_device *bdev, const char *name)
 {
@@ -139,7 +138,7 @@ out_unfreeze:
 	return error;
 }
 
-/*
+/**
  * blkfilter_control() - Send a control command to the filter.
  *
  * @bdev:
@@ -236,7 +235,7 @@ EXPORT_SYMBOL_GPL(blkfilter_register);
  * 	the system.
  *
  * @acc:
- *	The block dvice filter account - a pointer to a structure with
+ *	The block device filter account - a pointer to a structure with
  *	a description of the filter.
  *
  * A block device filter can be a loadable module. When the module is unloaded,

@@ -44,6 +44,7 @@ devices.
 
 Interface description
 =====================
+
 The ioctl BLKFILTER use structure blkfilter_ctl. It allows to attach a filter
 to a block device, detach it and send it a control command.
 
@@ -55,6 +56,15 @@ callback functions, unique filter name and module owner. This filter account is
 used by the registration functions.
 
 .. kernel-doc:: include/linux/blkdev.h
-	:functions: blkfilter blkfilter_operations blkfilter_account
+   :functions: blkfilter blkfilter_operations blkfilter_account
 .. kernel-doc:: block/blk-filter.c
-	:functions: blkfilter_register blkfilter_unregister
+   :export:
+
+Internal interface description
+==============================
+
+Description of functions that are not available for kernel modules, but are
+necessary for interacting with other parts of the kernel.
+
+.. kernel-doc:: block/blk-filter.c
+   :internal:
