@@ -3727,13 +3727,14 @@ S:	Maintained
 F:	drivers/leds/leds-blinkm.c
 
 BLOCK DEVICE FILTERING MECHANISM
-M:	sergei.shtepa@veeam.com
+M:	Sergei Shtepa <sergei.shtepa@veeam.com>
 L:	linux-block@vger.kernel.org
 S:	Supported
 F:	Documentation/block/blkfilter.rst
+F:	block/blk-filter.c
 
 BLOCK DEVICE SNAPSHOTS MODULE
-M:	sergei.shtepa@veeam.com
+M:	Sergei Shtepa <sergei.shtepa@veeam.com>
 L:	linux-block@vger.kernel.org
 S:	Supported
 F:	Documentation/block/blksnap.rst
