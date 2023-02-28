@@ -164,7 +164,8 @@ static void diff_area_store_queue_work(struct work_struct *work)
 
 			diff_region = diff_storage_new_region(
 				diff_area->diff_storage,
-				diff_area_chunk_sectors(diff_area));
+				diff_area_chunk_sectors(diff_area),
+				diff_area->logical_blksz);
 
 			if (IS_ERR(diff_region)) {
 				pr_debug("Cannot get store for chunk #%ld\n",
@@ -219,6 +220,9 @@ struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
 	spin_lock_init(&diff_area->free_diff_buffers_lock);
 	INIT_LIST_HEAD(&diff_area->free_diff_buffers);
 	atomic_set(&diff_area->free_diff_buffers_count, 0);
+
+	diff_area->physical_blksz = bdev->bd_queue->limits.physical_block_size;
+	diff_area->logical_blksz = bdev->bd_queue->limits.logical_block_size;
 
 	diff_area->corrupt_flag = 0;
 

@@ -254,7 +254,8 @@ static inline bool is_halffull(const sector_t sectors_left)
 }
 
 struct diff_region *diff_storage_new_region(struct diff_storage *diff_storage,
-					   sector_t count)
+					   sector_t count,
+					   unsigned int logical_blksz)
 {
 	int ret = 0;
 	struct diff_region *diff_region;
@@ -271,11 +272,19 @@ struct diff_region *diff_storage_new_region(struct diff_storage *diff_storage,
 	do {
 		struct storage_block *storage_block;
 		sector_t available;
+		struct request_queue *q;
 
 		storage_block = first_empty_storage_block(diff_storage);
 		if (unlikely(!storage_block)) {
 			atomic_inc(&diff_storage->overflow_flag);
 			ret = -ENOSPC;
+			break;
+		}
+
+		q = storage_block->bdev->bd_queue;
+		if (logical_blksz < q->limits.logical_block_size) {
+			pr_err("Incompatibility of block sizes was detected.");
+			ret = -ENOTBLK;
 			break;
 		}
 

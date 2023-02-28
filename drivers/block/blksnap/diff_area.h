@@ -97,6 +97,9 @@ struct diff_area {
 	struct list_head free_diff_buffers;
 	atomic_t free_diff_buffers_count;
 
+	unsigned int physical_blksz;
+	unsigned int logical_blksz;
+
 	unsigned long corrupt_flag;
 	int error_code;
 };
