@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
+/* Copyright (C) 2023 Veeam Software Group GmbH */
 #ifndef __BLKSNAP_SNAPSHOT_H
 #define __BLKSNAP_SNAPSHOT_H
 

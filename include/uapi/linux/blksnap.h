@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+/* Copyright (C) 2023 Veeam Software Group GmbH */
 #ifndef _UAPI_LINUX_BLKSNAP_H
 #define _UAPI_LINUX_BLKSNAP_H
 

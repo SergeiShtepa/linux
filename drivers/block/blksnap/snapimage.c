@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
+/* Copyright (C) 2023 Veeam Software Group GmbH */
 /*
  * Present the snapshot image as a block device.
  */
