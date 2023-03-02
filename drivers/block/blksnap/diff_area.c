@@ -267,36 +267,49 @@ struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
 	return diff_area;
 }
 
+static inline unsigned int chunk_limit(struct chunk *chunk,
+				       struct bvec_iter *iter)
+{
+	sector_t chunk_ofs = iter->bi_sector - chunk_sector(chunk);
+	sector_t chunk_left = chunk->sector_count - chunk_ofs;
+
+	return min(iter->bi_size, (unsigned int)(chunk_left << SECTOR_SHIFT));
+}
+
 /*
  * Implements the copy-on-write mechanism.
  */
-int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
-		   const bool nowait)
+int diff_area_cow(struct diff_area *diff_area, struct bio *bio)
 {
 	int ret = 0;
-	sector_t offset;
-	struct chunk *chunk;
-	sector_t area_sect_first;
-	sector_t chunk_sectors = diff_area_chunk_sectors(diff_area);
+	unsigned int len;
+	struct chunk_postpone_ctx *ctx = NULL;
+	struct chunk *chunk = NULL;
+	struct bvec_iter copy_iter = bio->bi_iter;
+	bool nowait = bio->bi_opf & REQ_NOWAIT;
 
-	area_sect_first = round_down(sector, chunk_sectors);
-	for (offset = area_sect_first; offset < (sector + count);
-	     offset += chunk_sectors) {
+	if (bio_flagged(bio, BIO_REMAPPED))
+		copy_iter.bi_sector -= bio->bi_bdev->bd_start_sect;
+
+	while (copy_iter.bi_size) {
 		chunk = xa_load(&diff_area->chunk_map,
-				chunk_number(diff_area, offset));
+				chunk_number(diff_area, copy_iter.bi_sector));
 		if (!chunk) {
 			diff_area_set_corrupted(diff_area, -EINVAL);
 			return -EINVAL;
 		}
 		if (nowait) {
-			if (down_trylock(&chunk->lock))
-				return -EAGAIN;
+			if (down_trylock(&chunk->lock)) {
+				ret = -EAGAIN;
+				break;
+			}
 		} else {
 			ret = down_killable(&chunk->lock);
 			if (unlikely(ret))
 				return ret;
 		}
 
+		len = chunk_limit(chunk, &copy_iter);
 		if (chunk_state_check(chunk, CHUNK_ST_FAILED |
 			CHUNK_ST_BUFFER_READY | CHUNK_ST_STORE_READY)) {
 			/*
@@ -307,88 +320,60 @@ int diff_area_copy(struct diff_area *diff_area, sector_t sector, sector_t count,
 			 * In this case, we do not change the chunk.
 			 */
 			up(&chunk->lock);
-			continue;
-		}
-		if (nowait) {
+		} else {
+			if (nowait) {
+				/*
+				 * If the data of this chunk has not yet been
+				 * copyed to the difference storage, then it is
+				 * impossible to process the I/O write unit with
+				 * the NOWAIT flag.
+				 */
+				ret = -EAGAIN;
+				up(&chunk->lock);
+				break;
+			}
+
+			if (unlikely(chunk_state_check(chunk,
+				CHUNK_ST_LOADING | CHUNK_ST_STORING))) {
+
+				pr_err("Invalid chunk state\n");
+				ret = -EFAULT;
+				up(&chunk->lock);
+				break;
+			}
+
+			if (!ctx) {
+				ctx = chunk_postpone_ctx_new(bio);
+				if (!ctx) {
+					ret = -ENOMEM;
+					up(&chunk->lock);
+					break;
+				}
+			}
 			/*
-			 * If the data of this chunk has not yet been copyed to
-			 * the difference storage, then it is impossible to
-			 * process the I/O write unit with the NOWAIT flag.
+			 * Starts asynchronous loading of a chunk from
+			 * the original block device.
 			 */
-			up(&chunk->lock);
-			return -EAGAIN;
+			ret = chunk_load_and_postpone_io(chunk, ctx);
+			if (ret) {
+				up(&chunk->lock);
+				break;
+			}
 		}
-
-
-		if (unlikely(chunk_state_check(chunk,
-			CHUNK_ST_LOADING | CHUNK_ST_STORING))) {
-
-			pr_err("Invalid chunk state\n");
-			ret = -EFAULT;
-			goto fail_unlock_chunk;
-		}
-
-		/*
-		 * Starts asynchronous loading of a chunk from
-		 * the original block device.
-		 */
-		ret = chunk_load_and_schedule_io(chunk, NULL);
-		if (ret)
-			goto fail_unlock_chunk;
+		bio_advance_iter_single(bio, &copy_iter, len);
 	}
 
-	return ret;
-fail_unlock_chunk:
-	WARN_ON(!chunk);
-	chunk_store_failed(chunk, ret);
+	/*
+	 * If the context counter remains equal to one, then there are no
+	 * postponed I/O units in it, so we can just free memory.
+	 */
+	if (ctx && refcount_dec_and_test(&ctx->kref.refcount))
+		kfree(ctx);
 	return ret;
 }
 
-int diff_area_wait(struct diff_area *diff_area, sector_t sector, sector_t count)
-{
-	int ret = 0;
-	sector_t offset;
-	struct chunk *chunk;
-	sector_t area_sect_first;
-	sector_t chunk_sectors = diff_area_chunk_sectors(diff_area);
-
-	area_sect_first = round_down(sector, chunk_sectors);
-	for (offset = area_sect_first; offset < (sector + count);
-	     offset += chunk_sectors) {
-		chunk = xa_load(&diff_area->chunk_map,
-				chunk_number(diff_area, offset));
-		if (!chunk) {
-			diff_area_set_corrupted(diff_area, -EINVAL);
-			return -EINVAL;
-		}
-		WARN_ON(chunk_number(diff_area, offset) != chunk->number);
-		ret = down_killable(&chunk->lock);
-		if (unlikely(ret))
-			return ret;
-
-		if (chunk_state_check(chunk, CHUNK_ST_FAILED)) {
-			up(&chunk->lock);
-			ret = -EFAULT;
-			break;
-		}
-
-		if (chunk_state_check(chunk,
-			CHUNK_ST_BUFFER_READY | CHUNK_ST_STORE_READY)) {
-			/*
-			 * The chunk has already been:
-			 * - read from original device
-			 * - stored into the diff storage
-			 */
-			up(&chunk->lock);
-			continue;
-		}
-	}
-
-	return ret;
-}
-
-static struct chunk *diff_area_image_get_chunk(
-	struct diff_area *diff_area, sector_t sector)
+static struct chunk *diff_area_image_get_chunk(struct diff_area *diff_area,
+					       sector_t sector)
 {
 	unsigned long new_chunk_number = chunk_number(diff_area, sector);
 	struct chunk *chunk;

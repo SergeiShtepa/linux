@@ -140,7 +140,25 @@ void chunk_clone_bio(struct chunk *chunk, struct bio *bio);
 void chunk_store(struct chunk *chunk);
 int chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio);
 
+struct chunk_postpone_ctx {
+	struct kref kref;
+	struct bio *orig_bio;
+};
+
+void chunk_postpone_ctx_free(struct kref *kref);
+static inline struct chunk_postpone_ctx *chunk_postpone_ctx_new(struct bio *orig_bio)
+{
+	struct chunk_postpone_ctx *ctx;
+
+	ctx = kzalloc(sizeof(struct chunk_postpone_ctx), GFP_NOIO);
+	if (ctx) {
+		kref_init(&ctx->kref);
+		ctx->orig_bio = orig_bio;
+	}
+	return ctx;
+};
+int chunk_load_and_postpone_io(struct chunk *chunk, struct chunk_postpone_ctx *ctx);
+
 int __init chunk_init(void);
 void chunk_done(void);
-
 #endif /* __BLKSNAP_CHUNK_H */

@@ -61,19 +61,18 @@ static bool tracker_submit_bio(struct bio *bio)
 	bio_list_init(&bio_list_on_stack[0]);
 	current->bio_list = bio_list_on_stack;
 
-	err = diff_area_copy(tracker->diff_area, sector, count,
-			     bio->bi_opf & REQ_NOWAIT);
+	err = diff_area_cow(tracker->diff_area, bio);
 
 	current->bio_list = NULL;
 	memalloc_noio_restore(current_flag);
 
 	if (unlikely(err)) {
 		if (err == -EAGAIN) {
-		/*
-		 * Writing to the diff area may split the bio or block,
-		 * so don't try to handle nowait requests.  Just let
-		 * the caller retry from a context where it can block.
-		 */
+			/*
+			 * Writing to the diff area may split the bio or block,
+			 * so don't try to handle nowait requests.  Just let
+			 * the caller retry from a context where it can block.
+			 */
 			bio_wouldblock_error(bio);
 			return true;
 		}
@@ -82,7 +81,16 @@ static bool tracker_submit_bio(struct bio *bio)
 		       abs(err));
 		return false;
 	}
+	/*
+	 * If the list is empty, then the bio can be passed.
+	 */
+	if (bio_list_empty(&bio_list_on_stack[0]))
+		return false;
 
+	/*
+	 * If there are bios in the bio_list, then the original bio has been
+	 * postponed. The asynchronous COW algorithm execution is required.
+	 */
 	while ((new_bio = bio_list_pop(&bio_list_on_stack[0]))) {
 		/*
 		 * The result from submitting a bio from the
@@ -92,23 +100,8 @@ static bool tracker_submit_bio(struct bio *bio)
 		bio_set_flag(new_bio, BIO_FILTERED);
 		submit_bio_noacct(new_bio);
 	}
-	/*
-	 * If a new bio was created during the handling, then new bios must
-	 * be sent and returned to complete the processing of the original bio.
-	 * Unfortunately, this has to be done for any bio, regardless of their
-	 * flags and options.
-	 * Otherwise, write I/O units may overtake read I/O units.
-	 */
-	err = diff_area_wait(tracker->diff_area, sector, count);
-	if (unlikely(err)) {
-		if (err == -EAGAIN) {
-			bio_wouldblock_error(bio);
-			return true;
-		}
-		pr_err("Failed to wait for available data in diff storage with error %d\n",
-			abs(err));
-	}
-	return false;
+
+	return true;
 }
 
 static struct blkfilter_account tracker_acc;

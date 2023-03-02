@@ -182,6 +182,15 @@ void chunk_clone_bio(struct chunk *chunk, struct bio *bio)
 	submit_bio_noacct(new_bio);
 }
 
+void chunk_postpone_ctx_free(struct kref *kref)
+{
+	struct chunk_postpone_ctx *ctx;
+
+	ctx = container_of(kref, struct chunk_postpone_ctx, kref);
+	submit_bio_noacct_nocheck(ctx->orig_bio);
+	kfree(ctx);
+}
+
 static void chunk_notify_load(struct work_struct *work)
 {
 	struct chunk_bio *cbio = container_of(work, struct chunk_bio, work);
@@ -198,6 +207,10 @@ static void chunk_notify_load(struct work_struct *work)
 		if (cbio->orig_bio) {
 			chunk_copy_bio(chunk, cbio->orig_bio, &cbio->orig_iter);
 			bio_endio(cbio->orig_bio);
+		} else if (cbio->bio.bi_private) {
+			struct chunk_postpone_ctx *ctx = cbio->bio.bi_private;
+
+			kref_put(&ctx->kref, chunk_postpone_ctx_free);
 		}
 		chunk_schedule_storing(chunk);
 		goto out;
@@ -332,6 +345,64 @@ void chunk_store(struct chunk *chunk)
 	bio->bi_end_io = chunk_io_endio;
 	bio->bi_private = NULL;
 	submit_bio_noacct(bio);
+}
+
+int chunk_load_and_postpone_io(struct chunk *chunk, struct chunk_postpone_ctx *ctx)
+{
+	struct diff_buffer *diff_buffer;
+	unsigned int page_idx = 0;
+	struct bio *bio;
+	struct chunk_bio *cbio;
+	struct block_device *bdev;
+	sector_t sector, count;
+
+	diff_buffer = diff_buffer_take(chunk->diff_area);
+	if (IS_ERR(diff_buffer))
+		return PTR_ERR(diff_buffer);
+	chunk->diff_buffer = diff_buffer;
+
+	chunk_state_set(chunk, CHUNK_ST_LOADING);
+
+	bdev = chunk->diff_area->orig_bdev;
+	sector = chunk_sector(chunk);
+	count = chunk->sector_count;
+
+	bio = bio_alloc_bioset(bdev, calc_max_vecs(count),
+			       REQ_OP_READ, GFP_NOIO, &chunk_io_bioset);
+	bio->bi_iter.bi_sector = sector;
+	bio_set_flag(bio, BIO_FILTERED);
+
+	while (count) {
+		sector_t portion = min_t(sector_t, count, PAGE_SECTORS);
+		unsigned int bytes = portion << SECTOR_SHIFT;
+
+		if (bio_add_page(bio, chunk->diff_buffer->pages[page_idx],
+				 bytes, 0) != bytes) {
+			struct bio *next;
+
+			next = bio_alloc_bioset(bdev, calc_max_vecs(count),
+						REQ_OP_READ, GFP_NOIO,
+						&chunk_io_bioset);
+			next->bi_iter.bi_sector = bio_end_sector(bio);
+			bio_set_flag(next, BIO_FILTERED);
+			bio_chain(bio, next);
+			submit_bio_noacct(bio);
+			bio = next;
+		}
+		page_idx++;
+		count -= portion;
+	}
+
+	cbio = container_of(bio, struct chunk_bio, bio);
+	INIT_WORK(&cbio->work, chunk_notify_load);
+	cbio->chunk = chunk;
+	cbio->orig_bio = NULL;
+	bio->bi_end_io = chunk_io_endio;
+	bio->bi_private = ctx;
+	kref_get(&ctx->kref);
+	submit_bio_noacct(bio);
+
+	return 0;
 }
 
 int chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio)

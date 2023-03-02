@@ -681,7 +681,15 @@ static void __submit_bio_noacct_mq(struct bio *bio)
 
 	current->bio_list = NULL;
 }
-
+/**
+ * submit_bio_noacct_nocheck - re-submit a bio to the block device layer for I/O
+ *	from block device filter.
+ * @bio:  The bio describing the location in memory and on the device.
+ *
+ * This is a version of submit_bio() that shall only be used for I/O that is
+ * resubmitted to lower level by block device filters.  All file  systems and
+ * other upper level users of the block layer should use submit_bio() instead.
+ */
 void submit_bio_noacct_nocheck(struct bio *bio)
 {
 	/*
@@ -706,6 +714,7 @@ void submit_bio_noacct_nocheck(struct bio *bio)
 	else
 		__submit_bio_noacct(bio);
 }
+EXPORT_SYMBOL_GPL(submit_bio_noacct_nocheck);
 
 /**
  * submit_bio_noacct - re-submit a bio to the block device layer for I/O
