@@ -34,74 +34,22 @@ static bool tracker_submit_bio(struct bio *bio)
 {
 	struct blkfilter *flt = bio->bi_bdev->bd_filter;
 	struct tracker *tracker = container_of(flt, struct tracker, filter);
-	struct bio_list bio_list_on_stack[2] = { };
-	struct bio *new_bio;
-	int err;
-	sector_t sector;
 	sector_t count = bio_sectors(bio);
-	unsigned int current_flag;
+	struct bvec_iter copy_iter;
 
 	if (!op_is_write(bio_op(bio)) || !count)
 		return false;
 
-	sector = bio->bi_iter.bi_sector;
+	copy_iter = bio->bi_iter;
 	if (bio_flagged(bio, BIO_REMAPPED))
-		sector -= bio->bi_bdev->bd_start_sect;
+		copy_iter.bi_sector -= bio->bi_bdev->bd_start_sect;
 
-	current_flag = memalloc_noio_save();
-	err = cbt_map_set(tracker->cbt_map, sector, count);
-	memalloc_noio_restore(current_flag);
-
-	if (err ||
+	if (cbt_map_set(tracker->cbt_map, copy_iter.bi_sector, count) ||
 	    !atomic_read(&tracker->snapshot_is_taken) ||
 	    diff_area_is_corrupted(tracker->diff_area))
 		return false;
 
-	current_flag = memalloc_noio_save();
-	bio_list_init(&bio_list_on_stack[0]);
-	current->bio_list = bio_list_on_stack;
-
-	err = diff_area_cow(tracker->diff_area, bio);
-
-	current->bio_list = NULL;
-	memalloc_noio_restore(current_flag);
-
-	if (unlikely(err)) {
-		if (err == -EAGAIN) {
-			/*
-			 * Writing to the diff area may split the bio or block,
-			 * so don't try to handle nowait requests.  Just let
-			 * the caller retry from a context where it can block.
-			 */
-			bio_wouldblock_error(bio);
-			return true;
-		}
-
-		pr_err("Failed to copy data to diff storage with error %d\n",
-		       abs(err));
-		return false;
-	}
-	/*
-	 * If the list is empty, then the bio can be passed.
-	 */
-	if (bio_list_empty(&bio_list_on_stack[0]))
-		return false;
-
-	/*
-	 * If there are bios in the bio_list, then the original bio has been
-	 * postponed. The asynchronous COW algorithm execution is required.
-	 */
-	while ((new_bio = bio_list_pop(&bio_list_on_stack[0]))) {
-		/*
-		 * The result from submitting a bio from the
-		 * filter itself does not need to be processed,
-		 * even if this function has a return code.
-		 */
-		bio_set_flag(new_bio, BIO_FILTERED);
-		submit_bio_noacct(new_bio);
-	}
-
-	return true;
+	return diff_area_cow(bio, tracker->diff_area, &copy_iter);
 }
 
 static struct blkfilter_account tracker_acc;

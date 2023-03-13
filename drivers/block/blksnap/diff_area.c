@@ -279,44 +279,52 @@ static inline unsigned int chunk_limit(struct chunk *chunk,
 /*
  * Implements the copy-on-write mechanism.
  */
-int diff_area_cow(struct diff_area *diff_area, struct bio *bio)
+bool diff_area_cow(struct bio *bio, struct diff_area *diff_area,
+		   struct bvec_iter *iter)
 {
-	int ret = 0;
-	unsigned int len;
-	struct chunk_postpone_ctx *ctx = NULL;
-	struct chunk *chunk = NULL;
-	struct bvec_iter copy_iter = bio->bi_iter;
 	bool nowait = bio->bi_opf & REQ_NOWAIT;
+	struct bio *chunk_bio = NULL;
+	int ret = 0;
 
-	if (bio_flagged(bio, BIO_REMAPPED))
-		copy_iter.bi_sector -= bio->bi_bdev->bd_start_sect;
+	while (iter->bi_size) {
+		unsigned long nr = chunk_number(diff_area, iter->bi_sector);
+		struct chunk *chunk = xa_load(&diff_area->chunk_map, nr);
+		unsigned int len;
 
-	while (copy_iter.bi_size) {
-		chunk = xa_load(&diff_area->chunk_map,
-				chunk_number(diff_area, copy_iter.bi_sector));
 		if (!chunk) {
 			diff_area_set_corrupted(diff_area, -EINVAL);
-			return -EINVAL;
+			ret = -EINVAL;
+			goto fail;
 		}
+	
 		if (nowait) {
 			if (down_trylock(&chunk->lock)) {
 				ret = -EAGAIN;
-				break;
+				goto fail;
 			}
 		} else {
 			ret = down_killable(&chunk->lock);
 			if (unlikely(ret))
-				return ret;
+				goto fail;
 		}
 
-		len = chunk_limit(chunk, &copy_iter);
+		len = chunk_limit(chunk, iter);
+		if (unlikely(chunk_state_check(chunk, CHUNK_ST_LOADING |
+						      CHUNK_ST_STORING))) {
+			up(&chunk->lock);
+			pr_err("Invalid chunk state\n");
+			ret = -EFAULT;
+			goto fail;
+		}
+
 		if (chunk_state_check(chunk, CHUNK_ST_FAILED |
-			CHUNK_ST_BUFFER_READY | CHUNK_ST_STORE_READY)) {
+					     CHUNK_ST_BUFFER_READY |
+					     CHUNK_ST_STORE_READY)) {
 			/*
 			 * The chunk has already been:
-			 * - failed, when the snapshot is corrupted
-			 * - read into the buffer
-			 * - stored into the diff storage
+			 *   - failed, when the snapshot is corrupted
+			 *   - read into the buffer
+			 *   - stored into the diff storage
 			 * In this case, we do not change the chunk.
 			 */
 			up(&chunk->lock);
@@ -328,48 +336,39 @@ int diff_area_cow(struct diff_area *diff_area, struct bio *bio)
 				 * impossible to process the I/O write unit with
 				 * the NOWAIT flag.
 				 */
+				up(&chunk->lock);
 				ret = -EAGAIN;
-				up(&chunk->lock);
-				break;
+				goto fail;
 			}
-
-			if (unlikely(chunk_state_check(chunk,
-				CHUNK_ST_LOADING | CHUNK_ST_STORING))) {
-
-				pr_err("Invalid chunk state\n");
-				ret = -EFAULT;
-				up(&chunk->lock);
-				break;
-			}
-
-			if (!ctx) {
-				ctx = chunk_postpone_ctx_new(bio);
-				if (!ctx) {
-					ret = -ENOMEM;
-					up(&chunk->lock);
-					break;
-				}
-			}
+	
 			/*
-			 * Starts asynchronous loading of a chunk from
-			 * the original block device.
+			 * Load the chunk asynchronously.
 			 */
-			ret = chunk_load_and_postpone_io(chunk, ctx);
+			ret = chunk_load_and_postpone_io(chunk, &chunk_bio);
 			if (ret) {
 				up(&chunk->lock);
-				break;
+				goto fail;
 			}
 		}
-		bio_advance_iter_single(bio, &copy_iter, len);
+		bio_advance_iter_single(bio, iter, len);
 	}
 
-	/*
-	 * If the context counter remains equal to one, then there are no
-	 * postponed I/O units in it, so we can just free memory.
-	 */
-	if (ctx && refcount_dec_and_test(&ctx->kref.refcount))
-		kfree(ctx);
-	return ret;
+	if (chunk_bio) {
+		chunk_bio->bi_private = bio;
+		chunk_submit_bio(chunk_bio);
+		return true;
+	}
+
+	return false;
+
+fail:
+	if (chunk_bio) {
+		chunk_bio->bi_status = errno_to_blk_status(ret);
+		bio_endio(chunk_bio);
+	}
+	bio->bi_status = errno_to_blk_status(ret);
+	bio_endio(bio);
+	return true;
 }
 
 static struct chunk *diff_area_image_get_chunk(struct diff_area *diff_area,

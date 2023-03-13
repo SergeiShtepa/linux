@@ -681,6 +681,25 @@ static void __submit_bio_noacct_mq(struct bio *bio)
 
 	current->bio_list = NULL;
 }
+
+static bool submit_bio_filter(struct bio *bio)
+{
+	struct bio_list bio_list_on_stack[2] = { };
+	bool ret;
+
+	current->bio_list = bio_list_on_stack;
+	bio_set_flag(bio, BIO_FILTERED);
+	ret = bio->bi_bdev->bd_filter->acc->ops->submit_bio(bio);
+	current->bio_list = NULL;
+
+	while ((bio = bio_list_pop(&bio_list_on_stack[0]))) {
+		bio_set_flag(bio, BIO_FILTERED);
+		submit_bio_noacct(bio);
+	}
+
+	return ret;
+}
+
 /**
  * submit_bio_noacct_nocheck - re-submit a bio to the block device layer for I/O
  *	from block device filter.
@@ -704,8 +723,7 @@ void submit_bio_noacct_nocheck(struct bio *bio)
 	}
 
 	if (bio->bi_bdev->bd_filter && !bio_flagged(bio, BIO_FILTERED)) {
-		bio_set_flag(bio, BIO_FILTERED);
-		if (bio->bi_bdev->bd_filter->acc->ops->submit_bio(bio))
+		if (submit_bio_filter(bio))
 			return;
 	}
 

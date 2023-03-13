@@ -117,9 +117,8 @@ static inline sector_t diff_area_chunk_sectors(struct diff_area *diff_area)
 {
 	return (sector_t)(1ull << (diff_area->chunk_shift - SECTOR_SHIFT));
 };
-int diff_area_cow(struct diff_area *diff_area, struct bio *bio);
-int diff_area_wait(struct diff_area *diff_area, sector_t sector,
-		   sector_t count);
+bool diff_area_cow(struct bio *bio, struct diff_area *diff_area,
+		   struct bvec_iter *iter);
 
 void diff_area_submit_bio(struct diff_area *diff_area, struct bio *bio);
 void diff_area_rw_chunk(struct kref *kref);
