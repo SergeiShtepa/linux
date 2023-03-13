@@ -232,7 +232,7 @@ difference storage. In this case, the data is read or written in a buffer in
 memory.
 
 If, when processing the write I/O unit, it turns out that the data of the
-refered chunk has not yet been stored to the difference storage or has not
+referred chunk has not yet been stored to the difference storage or has not
 even been read from the original device, then an I/O unit to read data from the
 original device is initiated beforehand. After the reading from original device
 is performed, their data from the I/O unit is partially overwritten directly in

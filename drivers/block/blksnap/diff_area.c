@@ -324,7 +324,7 @@ int diff_area_cow(struct diff_area *diff_area, struct bio *bio)
 			if (nowait) {
 				/*
 				 * If the data of this chunk has not yet been
-				 * copyed to the difference storage, then it is
+				 * copied to the difference storage, then it is
 				 * impossible to process the I/O write unit with
 				 * the NOWAIT flag.
 				 */

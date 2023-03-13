@@ -16,7 +16,7 @@ struct diff_storage;
 struct chunk;
 
 /**
- * struct diff_area - Discribes the difference area for one original device.
+ * struct diff_area - Describes the difference area for one original device.
  *
  * @orig_bdev:
  *	A pointer to the structure of an opened block device.
