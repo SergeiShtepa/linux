@@ -12,7 +12,7 @@
 
 struct chunk_bio {
 	struct work_struct work;
-	struct chunk *chunk;
+	struct list_head chunks;
 	struct bio *orig_bio;
 	struct bvec_iter orig_iter;
 	struct bio bio;
@@ -182,66 +182,87 @@ void chunk_clone_bio(struct chunk *chunk, struct bio *bio)
 	submit_bio_noacct(new_bio);
 }
 
+static inline void chunk_list_store_fail(struct list_head *chunks, int err)
+{
+	struct chunk *chunk;
+
+	while (!list_empty(chunks)){
+		chunk = list_first_entry(chunks, struct chunk, link);
+		list_del_init(&chunk->link);
+		chunk_store_failed(chunk, err);
+	}
+}
+
 static void chunk_notify_load(struct work_struct *work)
 {
 	struct chunk_bio *cbio = container_of(work, struct chunk_bio, work);
-	struct chunk *chunk = cbio->chunk;
+	struct chunk *chunk;
 
 	if (unlikely(cbio->bio.bi_status != BLK_STS_OK)) {
-		chunk_store_failed(chunk, -EIO);
+		chunk_list_store_fail(&cbio->chunks, -EIO);
 		goto out;
 	}
 
-	if (likely(chunk_state_check(chunk, CHUNK_ST_LOADING))) {
-		chunk_state_unset(chunk, CHUNK_ST_LOADING);
-		chunk_state_set(chunk, CHUNK_ST_BUFFER_READY);
-		if (cbio->orig_bio) {
-			chunk_copy_bio(chunk, cbio->orig_bio, &cbio->orig_iter);
-			bio_endio(cbio->orig_bio);
-		} else if (cbio->bio.bi_private) {
-			/* submit the original bio fed into the tracker */
-			submit_bio_noacct_nocheck(cbio->bio.bi_private);
+	while (!list_empty(&cbio->chunks)){
+		chunk = list_first_entry(&cbio->chunks, struct chunk, link);
+		list_del_init(&chunk->link);
+
+		if (likely(chunk_state_check(chunk, CHUNK_ST_LOADING))) {
+			chunk_state_unset(chunk, CHUNK_ST_LOADING);
+			chunk_state_set(chunk, CHUNK_ST_BUFFER_READY);
+			if (cbio->orig_bio) {
+				chunk_copy_bio(chunk, cbio->orig_bio, &cbio->orig_iter);
+				bio_endio(cbio->orig_bio);
+			}
+			chunk_schedule_storing(chunk);
+		} else {
+			if (chunk_state_check(chunk, CHUNK_ST_FAILED))
+				pr_err("Chunk in a failed state\n");
+			else
+				pr_err("invalid chunk state 0x%x\n", atomic_read(&chunk->state));
+			up(&chunk->lock);
 		}
-		chunk_schedule_storing(chunk);
-		goto out;
 	}
-
-	if (chunk_state_check(chunk, CHUNK_ST_FAILED))
-		pr_err("Chunk in a failed state\n");
-	else
-		pr_err("invalid chunk state 0x%x\n", atomic_read(&chunk->state));
-	up(&chunk->lock);
 out:
+	if (cbio->bio.bi_private) {
+		/* submit the original bio fed into the tracker */
+		submit_bio_noacct_nocheck(cbio->bio.bi_private);
+	}
 	bio_put(&cbio->bio);
 }
 
 static void chunk_notify_store(struct work_struct *work)
 {
 	struct chunk_bio *cbio = container_of(work, struct chunk_bio, work);
-	struct chunk *chunk = cbio->chunk;
+	struct chunk *chunk;
 
 	if (unlikely(cbio->bio.bi_status != BLK_STS_OK)) {
-		chunk_store_failed(chunk, -EIO);
+		chunk_list_store_fail(&cbio->chunks, -EIO);
 		goto out;
 	}
 
-	if (unlikely(chunk_state_check(chunk, CHUNK_ST_FAILED))) {
-		pr_err("Chunk in a failed state\n");
-		chunk_store_failed(chunk, 0);
-		goto out;
+	while (!list_empty(&cbio->chunks)){
+		chunk = list_first_entry(&cbio->chunks, struct chunk, link);
+		list_del_init(&chunk->link);
+
+		if (unlikely(chunk_state_check(chunk, CHUNK_ST_FAILED))) {
+			pr_err("Chunk in a failed state\n");
+			chunk_store_failed(chunk, 0);
+			continue;
+		}
+
+		if (chunk_state_check(chunk, CHUNK_ST_STORING)) {
+			chunk_state_unset(chunk, CHUNK_ST_STORING);
+			chunk_state_set(chunk, CHUNK_ST_STORE_READY);
+
+			if (chunk_state_check(chunk, CHUNK_ST_DIRTY))
+				chunk_state_unset(chunk, CHUNK_ST_DIRTY);
+
+			chunk_diff_buffer_release(chunk);
+		} else
+			pr_err("invalid chunk state 0x%x\n", atomic_read(&chunk->state));
+		up(&chunk->lock);
 	}
-
-	if (chunk_state_check(chunk, CHUNK_ST_STORING)) {
-		chunk_state_unset(chunk, CHUNK_ST_STORING);
-		chunk_state_set(chunk, CHUNK_ST_STORE_READY);
-
-		if (chunk_state_check(chunk, CHUNK_ST_DIRTY))
-			chunk_state_unset(chunk, CHUNK_ST_DIRTY);
-
-		chunk_diff_buffer_release(chunk);
-	} else
-		pr_err("invalid chunk state 0x%x\n", atomic_read(&chunk->state));
-	up(&chunk->lock);
 out:
 	bio_put(&cbio->bio);
 }
@@ -336,7 +357,8 @@ void chunk_store(struct chunk *chunk)
 	cbio = container_of(bio, struct chunk_bio, bio);
 
 	INIT_WORK(&cbio->work, chunk_notify_store);
-	cbio->chunk = chunk;
+	INIT_LIST_HEAD(&cbio->chunks);
+	list_add_tail(&chunk->link, &cbio->chunks);
 	cbio->orig_bio = NULL;
 	chunk_submit_bio(bio);
 }
@@ -391,12 +413,6 @@ static struct bio *__chunk_load(struct chunk *chunk)
 		page_idx++;
 		count -= portion;
 	}
-
-	cbio = container_of(bio, struct chunk_bio, bio);
-	INIT_WORK(&cbio->work, chunk_notify_load);
-	cbio->chunk = chunk;
-	cbio->orig_bio = NULL;
-
 	return bio;
 }
 
@@ -417,6 +433,27 @@ int chunk_load_and_postpone_io(struct chunk *chunk, struct bio **chunk_bio)
 	return 0;
 }
 
+void chunk_load_and_postpone_io_finish(struct list_head *chunks,
+				struct bio *chunk_bio, struct bio *orig_bio)
+{
+	struct chunk_bio *cbio;
+
+	cbio = container_of(chunk_bio, struct chunk_bio, bio);
+	INIT_LIST_HEAD(&cbio->chunks);
+	while (!list_empty(chunks)) {
+		struct chunk *it;
+
+		it = list_first_entry(chunks, struct chunk, link);
+		list_del_init(&it->link);
+
+		list_add_tail(&it->link, &cbio->chunks);
+	}
+	INIT_WORK(&cbio->work, chunk_notify_load);
+	cbio->orig_bio = NULL;
+	chunk_bio->bi_private = orig_bio;
+	chunk_submit_bio(chunk_bio);
+}
+
 int chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio)
 {
 	struct chunk_bio *cbio;
@@ -427,7 +464,11 @@ int chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio)
 		return PTR_ERR(bio);
 
 	cbio = container_of(bio, struct chunk_bio, bio);
+	INIT_LIST_HEAD(&cbio->chunks);
+	list_add_tail(&chunk->link, &cbio->chunks);
+	INIT_WORK(&cbio->work, chunk_notify_load);
 	cbio->orig_bio = orig_bio;
+	bio->bi_private = NULL;
 	if (orig_bio) {
 		cbio->orig_iter = orig_bio->bi_iter;
 		bio_advance_iter_single(orig_bio, &orig_bio->bi_iter,

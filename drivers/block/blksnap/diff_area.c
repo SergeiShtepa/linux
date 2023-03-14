@@ -284,6 +284,7 @@ bool diff_area_cow(struct bio *bio, struct diff_area *diff_area,
 {
 	bool nowait = bio->bi_opf & REQ_NOWAIT;
 	struct bio *chunk_bio = NULL;
+	LIST_HEAD(chunks);
 	int ret = 0;
 
 	while (iter->bi_size) {
@@ -296,7 +297,7 @@ bool diff_area_cow(struct bio *bio, struct diff_area *diff_area,
 			ret = -EINVAL;
 			goto fail;
 		}
-	
+
 		if (nowait) {
 			if (down_trylock(&chunk->lock)) {
 				ret = -EAGAIN;
@@ -340,7 +341,7 @@ bool diff_area_cow(struct bio *bio, struct diff_area *diff_area,
 				ret = -EAGAIN;
 				goto fail;
 			}
-	
+
 			/*
 			 * Load the chunk asynchronously.
 			 */
@@ -349,16 +350,17 @@ bool diff_area_cow(struct bio *bio, struct diff_area *diff_area,
 				up(&chunk->lock);
 				goto fail;
 			}
+			list_add_tail(&chunk->link, &chunks);
 		}
 		bio_advance_iter_single(bio, iter, len);
 	}
 
 	if (chunk_bio) {
-		chunk_bio->bi_private = bio;
-		chunk_submit_bio(chunk_bio);
+		/* Postpone bio processing in a callback. */
+		chunk_load_and_postpone_io_finish(&chunks, chunk_bio, bio);
 		return true;
 	}
-
+	/* Pass bio to the low level */
 	return false;
 
 fail:
@@ -366,9 +368,19 @@ fail:
 		chunk_bio->bi_status = errno_to_blk_status(ret);
 		bio_endio(chunk_bio);
 	}
-	bio->bi_status = errno_to_blk_status(ret);
-	bio_endio(bio);
-	return true;
+
+	if (ret == -EAGAIN){
+		/*
+		 * The -EAGAIN error code means that it is not possible to
+		 * process a I/O unit with a flag REQ_NOWAIT.
+		 * I/O unit processing is being completed with such error.
+		 */
+		bio->bi_status = BLK_STS_AGAIN;
+		bio_endio(bio);
+		return true;
+	}
+	/* In any other case, the processing of the I/O unit continues.	*/
+	return false;
 }
 
 static struct chunk *diff_area_image_get_chunk(struct diff_area *diff_area,
