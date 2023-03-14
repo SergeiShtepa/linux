@@ -685,11 +685,11 @@ static void __submit_bio_noacct_mq(struct bio *bio)
 static bool submit_bio_filter(struct bio *bio)
 {
 	struct bio_list bio_list_on_stack[2] = { };
-	bool ret;
+	bool skip_bio;
 
 	current->bio_list = bio_list_on_stack;
 	bio_set_flag(bio, BIO_FILTERED);
-	ret = bio->bi_bdev->bd_filter->acc->ops->submit_bio(bio);
+	skip_bio = bio->bi_bdev->bd_filter->acc->ops->submit_bio(bio);
 	current->bio_list = NULL;
 
 	while ((bio = bio_list_pop(&bio_list_on_stack[0]))) {
@@ -697,7 +697,7 @@ static bool submit_bio_filter(struct bio *bio)
 		submit_bio_noacct(bio);
 	}
 
-	return ret;
+	return skip_bio;
 }
 
 /**
