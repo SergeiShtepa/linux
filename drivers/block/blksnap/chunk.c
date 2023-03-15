@@ -397,7 +397,6 @@ static struct bio *__chunk_load(struct chunk *chunk)
 	struct diff_buffer *diff_buffer;
 	unsigned int page_idx = 0;
 	struct bio *bio;
-	struct chunk_bio *cbio;
 	struct block_device *bdev;
 	sector_t sector, count;
 
