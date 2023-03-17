@@ -7,22 +7,28 @@
 static LIST_HEAD(blkfilters);
 static DEFINE_SPINLOCK(blkfilters_lock);
 
-static inline struct blkfilter_account *blkfilter_find_get(const char *name)
+static inline struct blkfilter_operations *__blkfilter_find(const char *name)
 {
-	struct blkfilter_account *acc, *found = NULL;
+	struct blkfilter_operations *ops;
+
+	list_for_each_entry(ops, &blkfilters, link)
+		if (strncmp(ops->name, name, BLKFILTER_NAME_LENGTH) == 0)
+			return ops;
+
+	return NULL;
+}
+
+static inline struct blkfilter_operations *blkfilter_find_get(const char *name)
+{
+	struct blkfilter_operations *ops;
 
 	spin_lock(&blkfilters_lock);
-	list_for_each_entry(acc, &blkfilters, link) {
-		if (strncmp(acc->name, name, BLKFILTER_NAME_LENGTH) == 0) {
-			found = acc;
-			break;
-		}
-	}
-	if (found && !try_module_get(found->owner))
-		found = NULL;
+	ops = __blkfilter_find(name);
+	if (ops && !try_module_get(ops->owner))
+		ops = NULL;
 	spin_unlock(&blkfilters_lock);
 
-	return found;
+	return ops;
 }
 
 /**
@@ -50,12 +56,12 @@ static inline struct blkfilter_account *blkfilter_find_get(const char *name)
  */
 static int blkfilter_attach(struct block_device *bdev, const char *name)
 {
-	struct blkfilter_account *acc;
+	struct blkfilter_operations *ops;
 	struct blkfilter *flt;
 	int ret;
 
-	acc = blkfilter_find_get(name);
-	if (!acc)
+	ops = blkfilter_find_get(name);
+	if (!ops)
 		return -ENOENT;
 
 	ret = freeze_bdev(bdev);
@@ -64,20 +70,20 @@ static int blkfilter_attach(struct block_device *bdev, const char *name)
 	blk_mq_freeze_queue(bdev->bd_queue);
 
 	if (bdev->bd_filter) {
-		if (bdev->bd_filter->acc == acc)
+		if (bdev->bd_filter->ops == ops)
 			ret = -EALREADY;
 		else
 			ret = -EBUSY;
 		goto out_unfreeze;
 	}
 
-	flt = acc->ops->attach(bdev);
+	flt = ops->attach(bdev);
 	if (IS_ERR(flt)) {
 		ret = PTR_ERR(flt);
 		goto out_unfreeze;
 	}
 
-	flt->acc = acc;
+	flt->ops = ops;
 	bdev->bd_filter = flt;
 
 out_unfreeze:
@@ -85,7 +91,7 @@ out_unfreeze:
 	thaw_bdev(bdev);
 out_put_module:
 	if (ret)
-		module_put(acc->owner);
+		module_put(ops->owner);
 	return ret;
 }
 
@@ -112,7 +118,7 @@ out_put_module:
  */
 int blkfilter_detach(struct block_device *bdev, const char *name)
 {
-	const struct blkfilter_account *acc;
+	const struct blkfilter_operations *ops;
 	struct blkfilter *flt;
 	int error = 0;
 
@@ -124,16 +130,16 @@ int blkfilter_detach(struct block_device *bdev, const char *name)
 		error = -ENOENT;
 		goto out_unfreeze;
 	}
-	acc = flt->acc;
-	if (name && strncmp(acc->name, name, BLKFILTER_NAME_LENGTH) != 0) {
+	ops = flt->ops;
+	if (name && strncmp(ops->name, name, BLKFILTER_NAME_LENGTH) != 0) {
 		pr_debug("Block device filter not found\n");
 		error = -EINVAL;
 		goto out_unfreeze;
 	}
 
 	bdev->bd_filter = NULL;
-	acc->ops->detach(flt);
-	module_put(acc->owner);
+	ops->detach(flt);
+	module_put(ops->owner);
 out_unfreeze:
 	blk_mq_unfreeze_queue(bdev->bd_queue);
 
@@ -174,13 +180,13 @@ static int blkfilter_control(struct block_device *bdev, const char *name,
 		return ret;
 
 	flt = bdev->bd_filter;
-	if (!flt || strncmp(flt->acc->name, name, BLKFILTER_NAME_LENGTH) != 0) {
+	if (!flt || strncmp(flt->ops->name, name, BLKFILTER_NAME_LENGTH) != 0) {
 		ret = -ENOENT;
 		goto out_queue_exit;
 	}
 
-	if (flt->acc->ops->ctl)
-		ret = flt->acc->ops->ctl(flt, cmd, buf, plen);
+	if (flt->ops->ctl)
+		ret = flt->ops->ctl(flt, cmd, buf, plen);
 	else
 		ret = -ENOTTY;
 
@@ -210,42 +216,25 @@ int blkfilter_ioctl(struct block_device *bdev,
 }
 
 /**
- * blkfilter_register() - Registration of a new block device filter in
- * 	the system.
- *
- * @new_acc:
- *	The new block device filter account - a pointer to a structure
- *	with a description of the filter that is being registered.
- *
- * A block device filter can be a loadable module. When the module is loaded,
- * it registers its account so that its callback functions are available to
- * the system. It is best to call this function from the init function.
+ * blkfilter_unregister() - Register block device filter operations
+ * @ops:	The operations to register.
  *
  * Return:
  * 	0 if succeeded,
- *	-EALREADY if this block device filter account is already registered,
- *	-EBUSY if a block device filter account with same name is already
+ *	-EBUSY if a block device filter with the same name is already
  *	registered.
  */
-int blkfilter_register(struct blkfilter_account *new_acc)
+int blkfilter_register(struct blkfilter_operations *ops)
 {
-	struct blkfilter_account *acc;
+	struct blkfilter_operations *found;
 	int ret = 0;
 
 	spin_lock(&blkfilters_lock);
-	list_for_each_entry(acc, &blkfilters, link) {
-		if (new_acc == acc) {
-			ret = -EALREADY;
-			break;
-		}
-		if (strncmp(new_acc->name, acc->name,
-			    BLKFILTER_NAME_LENGTH) == 0) {
-			ret = -EBUSY;
-			break;
-		}
-	}
-	if (!ret)
-		list_add_tail(&new_acc->link, &blkfilters);
+	found = __blkfilter_find(ops->name);
+	if (found)
+		ret = -EBUSY;
+	else
+		list_add_tail(&ops->link, &blkfilters);
 	spin_unlock(&blkfilters_lock);
 
 	return ret;
@@ -253,28 +242,17 @@ int blkfilter_register(struct blkfilter_account *new_acc)
 EXPORT_SYMBOL_GPL(blkfilter_register);
 
 /**
- * blkfilter_unregister() - Unregistration of a block device filter from
- * 	the system.
- *
- * @acc:
- *	The block device filter account - a pointer to a structure with
- *	a description of the filter.
- *
- * A block device filter can be a loadable module. When the module is unloaded,
- * it must unregister its account. It is best to call this function from
- * the exit function.
+ * blkfilter_unregister() - Unregister block device filter operations
+ * @ops:	The operations to unregister.
  *
  * Important: before unloading, it is necessary to detach the filter from all
  * block devices.
  *
  */
-void blkfilter_unregister(struct blkfilter_account *acc)
+void blkfilter_unregister(struct blkfilter_operations *ops)
 {
-	WARN(acc->owner && (module_refcount(acc->owner) != -1),
-	     "The filter should be unregistered when the module is unloading");
-
 	spin_lock(&blkfilters_lock);
-	list_del(&acc->link);
+	list_del(&ops->link);
 	spin_unlock(&blkfilters_lock);
 }
 EXPORT_SYMBOL_GPL(blkfilter_unregister);

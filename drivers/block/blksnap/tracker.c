@@ -52,8 +52,6 @@ static bool tracker_submit_bio(struct bio *bio)
 	return diff_area_cow(bio, tracker->diff_area, &copy_iter);
 }
 
-static struct blkfilter_account tracker_acc;
-
 static struct blkfilter *tracker_attach(struct block_device *bdev)
 {
 	struct tracker *tracker = NULL;
@@ -61,9 +59,6 @@ static struct blkfilter *tracker_attach(struct block_device *bdev)
 
 	pr_debug("Creating tracker for device [%u:%u]\n",
 		 MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
-
-	if (tracker_acc.owner)
-		pr_debug("module_refcount=%d", module_refcount(tracker_acc.owner));
 
 	cbt_map = cbt_map_create(bdev);
 	if (!cbt_map) {
@@ -97,9 +92,6 @@ static void tracker_detach(struct blkfilter *flt)
 
 	pr_debug("Detach tracker from device [%u:%u]\n",
 		 MAJOR(tracker->dev_id), MINOR(tracker->dev_id));
-
-	if (flt->acc->owner)
-		pr_debug("module_refcount=%d", module_refcount(flt->acc->owner));
 
 	tracker_put(tracker);
 }
@@ -244,17 +236,13 @@ static int tracker_ctl(struct blkfilter *flt, const unsigned int cmd,
 	return ctl_table[cmd](tracker, buf, plen);
 }
 
-static const struct blkfilter_operations tracker_ops = {
+static struct blkfilter_operations tracker_ops = {
+	.owner		= THIS_MODULE,
+	.name		= "blksnap",
 	.attach		= tracker_attach,
 	.detach		= tracker_detach,
 	.ctl		= tracker_ctl,
 	.submit_bio	= tracker_submit_bio,
-};
-
-static struct blkfilter_account tracker_acc = {
-	.name		= "blksnap",
-	.owner		= THIS_MODULE,
-	.ops		= &tracker_ops,
 };
 
 int tracker_take_snapshot(struct tracker *tracker)
@@ -319,17 +307,14 @@ void tracker_release_snapshot(struct tracker *tracker)
 
 int __init tracker_init(void)
 {
-	pr_debug("Register filter '%s'", tracker_acc.name);
+	pr_debug("Register filter '%s'", tracker_ops.name);
 
-	return blkfilter_register(&tracker_acc);
+	return blkfilter_register(&tracker_ops);
 }
 
 void tracker_done(void)
 {
-	pr_debug("Unregister filter '%s'", tracker_acc.name);
+	pr_debug("Unregister filter '%s'", tracker_ops.name);
 
-	if (tracker_acc.owner)
-		pr_debug("module_refcount=%d", module_refcount(tracker_acc.owner));
-
-	blkfilter_unregister(&tracker_acc);
+	blkfilter_unregister(&tracker_ops);
 }
