@@ -28,8 +28,8 @@
  * nr_file rlimit, so it's safe to set up a ridiculously high absolute
  * upper limit on files-per-process.
  *
- * Some programs (notably those using select()) may have to be
- * recompiled to take full advantage of the new limits..
+ * Some programs (notably those using select()) may have to be 
+ * recompiled to take full advantage of the new limits..  
  */
 
 /* Fixed constants first: */
@@ -185,35 +185,6 @@ struct fsxattr {
 #define BLKROTATIONAL _IO(0x12,126)
 #define BLKZEROOUT _IO(0x12,127)
 #define BLKGETDISKSEQ _IOR(0x12,128,__u64)
-
-enum {
-	BLKFILTER_CMD_ATTACH,
-	BLKFILTER_CMD_DETACH,
-	BLKFILTER_CMD_CTL,
-};
-#define BLKFILTER_NAME_LENGTH	32
-
-/**
- * struct blkfilter_ctl - parameter for BLKFILTER ioctl
- *
- * @name:
- *	 Name of block device filter.
- * @cmd:
- *	Command code BLKFILTER_CMD_ATTACH, BLKFILTER_CMD_DETACH,
- *	BLKFILTER_CMD_CTL or higher.
- * @optlen:
- *	Buffer size with options.
- * @opt:
- *	Buffer with options.
- */
-struct blkfilter_ctl {
-	__u8 name[BLKFILTER_NAME_LENGTH];
-	__u32 cmd;
-	__u32 optlen;
-	__u8 *opt;
-};
-
-/* BLKFILTER - allows to control the filters of block devices */
 #define BLKFILTER _IOWR(0x12, 129, struct blkfilter_ctl)
 
 /*

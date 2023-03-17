@@ -3,6 +3,7 @@
 #ifndef __BLKSNAP_TRACKER_H
 #define __BLKSNAP_TRACKER_H
 
+#include <linux/blk-filter.h>
 #include <linux/kref.h>
 #include <linux/spinlock.h>
 #include <linux/list.h>

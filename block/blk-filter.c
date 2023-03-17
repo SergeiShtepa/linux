@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (C) 2023 Veeam Software Group GmbH */
+#include <linux/blk-filter.h>
 #include <linux/blk-mq.h>
 #include <linux/module.h>
 
@@ -47,7 +48,7 @@ static inline struct blkfilter_account *blkfilter_find_get(const char *name)
  *	otherwise, another negative error occurred as a result of the filters
  *	attach() callback.
  */
-int blkfilter_attach(struct block_device *bdev, const char *name)
+static int blkfilter_attach(struct block_device *bdev, const char *name)
 {
 	struct blkfilter_account *acc;
 	struct blkfilter *flt;
@@ -162,8 +163,8 @@ out_unfreeze:
  * Return:
  *	0 if succeeded, negative errno otherwise.
  */
-int blkfilter_control(struct block_device *bdev, const char *name,
-		      const unsigned int cmd, __u8 __user *buf, __u32 *plen)
+static int blkfilter_control(struct block_device *bdev, const char *name,
+		const unsigned int cmd, __u8 __user *buf, __u32 *plen)
 {
 	struct blkfilter *flt;
 	int ret;
@@ -186,6 +187,26 @@ int blkfilter_control(struct block_device *bdev, const char *name,
 out_queue_exit:
 	blk_queue_exit(bdev_get_queue(bdev));
 	return ret;
+}
+
+int blkfilter_ioctl(struct block_device *bdev,
+		    struct blkfilter_ctl __user *argp)
+{
+	struct blkfilter_ctl ctl;
+
+	if (copy_from_user(&ctl, argp, sizeof(ctl)))
+		return -EFAULT;
+
+	switch (ctl.cmd) {
+	case BLKFILTER_CMD_ATTACH:
+		return blkfilter_attach(bdev, ctl.name);
+	case BLKFILTER_CMD_DETACH:
+		return blkfilter_detach(bdev, ctl.name);
+	default:
+		return blkfilter_control(bdev, ctl.name,
+					 ctl.cmd - BLKFILTER_CMD_CTL,
+					 ctl.opt, &ctl.optlen);
+	}
 }
 
 /**

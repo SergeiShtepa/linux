@@ -36,7 +36,6 @@ struct blk_flush_queue;
 struct kiocb;
 struct pr_ops;
 struct rq_qos;
-struct blkfilter;
 struct blk_queue_stats;
 struct blk_stat_callback;
 struct blk_crypto_profile;
@@ -1531,71 +1530,5 @@ struct io_comp_batch {
 };
 
 #define DEFINE_IO_COMP_BATCH(name)	struct io_comp_batch name = { }
-
-/**
- * struct blkfilter - Block device filter.
- *
- * @acc:
- *	Block device filter account.
- *
- * For each filtered block device, the filter creates a data structure
- * associated with this device. The data in this structure is specific to the
- * filter, but it must contain a pointer to the block device filter account.
- */
-struct blkfilter {
-	const struct blkfilter_account *acc;
-};
-
-/**
- * struct blkfilter_operations - Block device filter callback functions.
- *
- * @attach:
- *	Attach the filter to the block device.
- * @detach:
- *	Detach the filter from the block device.
- * @ctl:
- *	Send a control command to the filter.
- * @submit_bio:
- *	A function for I/O unit handling.
- */
-struct blkfilter_operations {
-	struct blkfilter * (*attach)(struct block_device *bdev);
-	void (*detach)(struct blkfilter *flt);
-	int (*ctl)(struct blkfilter *flt, const unsigned int cmd,
-		   __u8 __user *buf, __u32 *plen);
-	bool (*submit_bio)(struct bio *bio);
-};
-
-/**
- * struct blkfilter_account - Block device filter account.
- *
- * @link:
- *	Allows to link structures into lists.
- * @owner:
- *	The filter can be implemented as a unloadable module. In this case,
- *	it is necessary to prevent its unloading until it is detached from all
- *	block devices.
- * @name:
- *	The name of the block device filter.
- * @ops:
- *	Block device filter callback functions.
- *
- * The block device account stores information about the filter registered in
- * the system.
- */
-struct blkfilter_account {
-	struct list_head link;
-	struct module *owner;
-	const char *name;
-	const struct blkfilter_operations *ops;
-};
-
-int blkfilter_register(struct blkfilter_account *acc);
-void blkfilter_unregister(struct blkfilter_account *acc);
-
-int blkfilter_attach(struct block_device *bdev, const char *name);
-int blkfilter_detach(struct block_device *bdev, const char *name);
-int blkfilter_control(struct block_device *bdev, const char *name,
-		      const unsigned int cmd, __u8 __user *buf, __u32 *plen);
 
 #endif /* _LINUX_BLKDEV_H */
