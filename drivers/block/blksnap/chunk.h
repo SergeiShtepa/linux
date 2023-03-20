@@ -16,8 +16,6 @@ enum chunk_st_bits {
 	__CHUNK_ST_DIRTY,
 	__CHUNK_ST_BUFFER_READY,
 	__CHUNK_ST_STORE_READY,
-	__CHUNK_ST_LOADING,
-	__CHUNK_ST_STORING,
 };
 
 /**
@@ -37,19 +35,13 @@ enum chunk_st_bits {
  * @CHUNK_ST_STORE_READY:
  *	The data of the chunk has been written to the difference storage.
  *	The flag cannot be removed.
- * @CHUNK_ST_LOADING:
- *	The data is being read from the original block device.
- *	The flag is replaced with the CHUNK_ST_BUFFER_READY flag.
- * @CHUNK_ST_STORING:
- *	The data is being saved to the difference storage.
- *	The flag is replaced with the CHUNK_ST_STORE_READY flag.
  *
  * Chunks life circle.
  * Copy-on-write when writing to original:
- *	0 -> LOADING -> BUFFER_READY -> BUFFER_READY | STORING ->
+ *	0 -> LOADING -> BUFFER_READY -> BUFFER_READY  ->
  *	BUFFER_READY | STORE_READY -> STORE_READY
  * Write to snapshot image:
- *	0 -> LOADING -> BUFFER_READY | DIRTY -> DIRTY | STORING ->
+ *	0 -> LOADING -> BUFFER_READY | DIRTY ->
  *	BUFFER_READY | STORE_READY -> STORE_READY
  */
 
@@ -58,8 +50,6 @@ enum chunk_st {
 	CHUNK_ST_DIRTY = (1 << __CHUNK_ST_DIRTY),
 	CHUNK_ST_BUFFER_READY = (1 << __CHUNK_ST_BUFFER_READY),
 	CHUNK_ST_STORE_READY = (1 << __CHUNK_ST_STORE_READY),
-	CHUNK_ST_LOADING = (1 << __CHUNK_ST_LOADING),
-	CHUNK_ST_STORING = (1 << __CHUNK_ST_STORING),
 };
 
 /**

@@ -310,14 +310,6 @@ bool diff_area_cow(struct bio *bio, struct diff_area *diff_area,
 		}
 
 		len = chunk_limit(chunk, iter);
-		if (unlikely(chunk_state_check(chunk, CHUNK_ST_LOADING |
-						      CHUNK_ST_STORING))) {
-			up(&chunk->lock);
-			pr_err("Invalid chunk state\n");
-			ret = -EFAULT;
-			goto fail;
-		}
-
 		if (chunk_state_check(chunk, CHUNK_ST_FAILED |
 					     CHUNK_ST_BUFFER_READY |
 					     CHUNK_ST_STORE_READY)) {
