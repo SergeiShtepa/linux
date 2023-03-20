@@ -145,10 +145,9 @@ static void diff_area_store_queue_work(struct work_struct *work)
 
 		/*
 		 * Skip storing data into the diff storage if it is already
-		 * stored there and there is no flag DIRTY.
+		 * stored there.
 		 */
-		if (chunk_state_check(chunk, CHUNK_ST_STORE_READY) &&
-		    !chunk_state_check(chunk, CHUNK_ST_DIRTY)) {
+		if (chunk_state_check(chunk, CHUNK_ST_STORE_READY)) {
 			chunk_diff_buffer_release(chunk);
 			up(&chunk->lock);
 			continue;

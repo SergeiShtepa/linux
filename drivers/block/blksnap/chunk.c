@@ -274,9 +274,6 @@ static void chunk_notify_store(struct work_struct *work)
 
 		chunk_state_set(chunk, CHUNK_ST_STORE_READY);
 
-		if (chunk_state_check(chunk, CHUNK_ST_DIRTY))
-			chunk_state_unset(chunk, CHUNK_ST_DIRTY);
-
 		chunk_diff_buffer_release(chunk);
 		up(&chunk->lock);
 	}

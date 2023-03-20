@@ -13,7 +13,6 @@ struct diff_region;
 
 enum chunk_st_bits {
 	__CHUNK_ST_FAILED,
-	__CHUNK_ST_DIRTY,
 	__CHUNK_ST_BUFFER_READY,
 	__CHUNK_ST_STORE_READY,
 };
@@ -23,11 +22,6 @@ enum chunk_st_bits {
  *
  * @CHUNK_ST_FAILED:
  *	An error occurred while processing the chunk data.
- * @CHUNK_ST_DIRTY:
- *	The chunk is in the dirty state. The chunk is marked dirty in case
- *	there was a write operation to the snapshot image.
- *	The flag is removed when the data of the chunk is stored in the
- *	difference storage.
  * @CHUNK_ST_BUFFER_READY:
  *	The data of the chunk is ready to be read from the RAM buffer.
  *	The flag is removed when a chunk is removed from the store queue
@@ -47,7 +41,6 @@ enum chunk_st_bits {
 
 enum chunk_st {
 	CHUNK_ST_FAILED = (1 << __CHUNK_ST_FAILED),
-	CHUNK_ST_DIRTY = (1 << __CHUNK_ST_DIRTY),
 	CHUNK_ST_BUFFER_READY = (1 << __CHUNK_ST_BUFFER_READY),
 	CHUNK_ST_STORE_READY = (1 << __CHUNK_ST_STORE_READY),
 };
