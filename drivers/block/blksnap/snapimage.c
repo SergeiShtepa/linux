@@ -25,6 +25,14 @@ static void snapimage_submit_bio(struct bio *bio)
 		return;
 	}
 
+	/*
+	 * The change tracking table should represent that the snapshot data
+	 * has been changed.
+	 */
+	if (op_is_write(bio_op(bio)))
+		cbt_map_set_both(tracker->cbt_map, bio->bi_iter.bi_sector,
+				 bio_sectors(bio));
+
 	diff_area_submit_bio(diff_area, bio);
 }
 
