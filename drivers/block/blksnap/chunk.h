@@ -11,38 +11,29 @@
 struct diff_area;
 struct diff_region;
 
-enum chunk_st_bits {
-	__CHUNK_ST_FAILED,
-	__CHUNK_ST_BUFFER_READY,
-	__CHUNK_ST_STORE_READY,
-};
-
 /**
  * enum chunk_st - Possible states for a chunk.
  *
- * @CHUNK_ST_FAILED:
- *	An error occurred while processing the chunk data.
- * @CHUNK_ST_BUFFER_READY:
+ * @CHUNK_ST_NEW:
+ *	No data is associated with the chunk.
+ * @CHUNK_ST_IN_MEMORY:
  *	The data of the chunk is ready to be read from the RAM buffer.
  *	The flag is removed when a chunk is removed from the store queue
  *	and its buffer is released.
- * @CHUNK_ST_STORE_READY:
+ * @CHUNK_ST_STORED:
  *	The data of the chunk has been written to the difference storage.
- *	The flag cannot be removed.
+ * @CHUNK_ST_FAILED:
+ *	An error occurred while processing the chunk data.
  *
- * Chunks life circle.
- * Copy-on-write when writing to original:
- *	0 -> LOADING -> BUFFER_READY -> BUFFER_READY  ->
- *	BUFFER_READY | STORE_READY -> STORE_READY
- * Write to snapshot image:
- *	0 -> LOADING -> BUFFER_READY | DIRTY ->
- *	BUFFER_READY | STORE_READY -> STORE_READY
+ * Chunks life circle:
+ *	CHUNK_ST_NEW -> CHUNK_ST_IN_MEMORY -> CHUNK_ST_STORED
  */
 
 enum chunk_st {
-	CHUNK_ST_FAILED = (1 << __CHUNK_ST_FAILED),
-	CHUNK_ST_BUFFER_READY = (1 << __CHUNK_ST_BUFFER_READY),
-	CHUNK_ST_STORE_READY = (1 << __CHUNK_ST_STORE_READY),
+	CHUNK_ST_NEW,
+	CHUNK_ST_IN_MEMORY,
+	CHUNK_ST_STORED,
+	CHUNK_ST_FAILED,
 };
 
 /**
@@ -61,7 +52,7 @@ enum chunk_st {
  *	Binary semaphore. Syncs access to the chunks fields: state,
  *	diff_buffer and diff_region.
  * @state:
- *	Defines the state of a chunk. May contain CHUNK_ST_* bits.
+ *	Defines the state of a chunk.
  * @diff_buffer:
  *	Pointer to &struct diff_buffer. Describes a buffer in the memory
  *	for storing the chunk data.
@@ -90,24 +81,9 @@ struct chunk {
 
 	struct semaphore lock;
 
-	atomic_t state;
+	enum chunk_st state;
 	struct diff_buffer *diff_buffer;
 	struct diff_region *diff_region;
-};
-
-static inline void chunk_state_set(struct chunk *chunk, int st)
-{
-	atomic_or(st, &chunk->state);
-};
-
-static inline void chunk_state_unset(struct chunk *chunk, int st)
-{
-	atomic_and(~st, &chunk->state);
-};
-
-static inline bool chunk_state_check(struct chunk *chunk, int st)
-{
-	return !!(atomic_read(&chunk->state) & st);
 };
 
 struct chunk *chunk_alloc(struct diff_area *diff_area, unsigned long number);
@@ -116,7 +92,6 @@ void chunk_free(struct chunk *chunk);
 void chunk_diff_buffer_release(struct chunk *chunk);
 void chunk_store_failed(struct chunk *chunk, int error);
 
-void chunk_schedule_storing(struct chunk *chunk);
 void chunk_copy_bio(struct chunk *chunk, struct bio *bio,
 		    struct bvec_iter *iter);
 void chunk_clone_bio(struct chunk *chunk, struct bio *bio);

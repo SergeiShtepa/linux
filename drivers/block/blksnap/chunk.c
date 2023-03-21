@@ -32,7 +32,6 @@ void chunk_diff_buffer_release(struct chunk *chunk)
 	if (unlikely(!chunk->diff_buffer))
 		return;
 
-	chunk_state_unset(chunk, CHUNK_ST_BUFFER_READY);
 	diff_buffer_release(chunk->diff_area, chunk->diff_buffer);
 	chunk->diff_buffer = NULL;
 }
@@ -41,7 +40,10 @@ void chunk_store_failed(struct chunk *chunk, int error)
 {
 	struct diff_area *diff_area = chunk->diff_area;
 
-	chunk_state_set(chunk, CHUNK_ST_FAILED);
+	WARN_ON_ONCE(chunk->state != CHUNK_ST_NEW &&
+		     chunk->state != CHUNK_ST_IN_MEMORY);
+	chunk->state = CHUNK_ST_FAILED;
+
 	chunk_diff_buffer_release(chunk);
 	diff_storage_free_region(chunk->diff_region);
 	chunk->diff_region = NULL;
@@ -51,30 +53,17 @@ void chunk_store_failed(struct chunk *chunk, int error)
 		diff_area_set_corrupted(diff_area, error);
 };
 
-void chunk_schedule_storing(struct chunk *chunk)
+static void chunk_schedule_storing(struct chunk *chunk)
 {
-	int queue_count = 0;
 	struct diff_area *diff_area = chunk->diff_area;
+	int queue_count;
 
-	might_sleep();
+	WARN_ON_ONCE(chunk->state != CHUNK_ST_NEW);
+	chunk->state = CHUNK_ST_IN_MEMORY;
 
 	spin_lock(&diff_area->store_queue_lock);
-
-	/*
-	 * The locked chunk cannot be in the queue.
-	 * If the check reveals that the chunk is in the queue, then something
-	 * is wrong in the algorithm.
-	 */
-	if (WARN(!list_is_first(&chunk->link, &chunk->link),
-		 "The chunk already in the queue")) {
-		spin_unlock(&diff_area->store_queue_lock);
-		chunk_store_failed(chunk, 0);
-		return;
-	}
-
 	list_add_tail(&chunk->link, &diff_area->store_queue);
 	queue_count = atomic_inc_return(&diff_area->store_queue_count);
-
 	spin_unlock(&diff_area->store_queue_lock);
 
 	up(&chunk->lock);
@@ -162,7 +151,7 @@ void chunk_clone_bio(struct chunk *chunk, struct bio *bio)
 	struct block_device *bdev;
 	sector_t sector;
 
-	if (chunk_state_check(chunk, CHUNK_ST_STORE_READY)) {
+	if (chunk->state == CHUNK_ST_STORED) {
 		bdev = chunk->diff_region->bdev;
 		sector = chunk->diff_region->sector;
 	} else {
@@ -182,15 +171,14 @@ void chunk_clone_bio(struct chunk *chunk, struct bio *bio)
 	submit_bio_noacct(new_bio);
 }
 
-static inline void chunk_list_store_fail(struct list_head *chunks, int err)
+static struct chunk *get_chunk_from_cbio(struct chunk_bio *cbio)
 {
-	struct chunk *chunk;
+	struct chunk *chunk = list_first_entry_or_null(&cbio->chunks,
+						       struct chunk, link);
 
-	while (!list_empty(chunks)){
-		chunk = list_first_entry(chunks, struct chunk, link);
+	if (chunk)
 		list_del_init(&chunk->link);
-		chunk_store_failed(chunk, err);
-	}
+	return chunk;
 }
 
 static void notify_load_and_schedule_io(struct work_struct *work)
@@ -198,28 +186,18 @@ static void notify_load_and_schedule_io(struct work_struct *work)
 	struct chunk_bio *cbio = container_of(work, struct chunk_bio, work);
 	struct chunk *chunk;
 
-	if (unlikely(cbio->bio.bi_status != BLK_STS_OK)) {
-		chunk_list_store_fail(&cbio->chunks, -EIO);
-		goto out;
-	}
-
-	while (!list_empty(&cbio->chunks)){
-		chunk = list_first_entry(&cbio->chunks, struct chunk, link);
-		list_del_init(&chunk->link);
-
-		if (chunk_state_check(chunk, CHUNK_ST_FAILED)) {
-			up(&chunk->lock);
+	while ((chunk = get_chunk_from_cbio(cbio))) {
+		if (unlikely(cbio->bio.bi_status != BLK_STS_OK)) {
+			chunk_store_failed(chunk, -EIO);
 			continue;
 		}
-
-		chunk_state_set(chunk, CHUNK_ST_BUFFER_READY);
 
 		chunk_copy_bio(chunk, cbio->orig_bio, &cbio->orig_iter);
 		bio_endio(cbio->orig_bio);
 
 		chunk_schedule_storing(chunk);
 	}
-out:
+
 	bio_put(&cbio->bio);
 }
 
@@ -228,27 +206,17 @@ static void notify_load_and_postpone_io(struct work_struct *work)
 	struct chunk_bio *cbio = container_of(work, struct chunk_bio, work);
 	struct chunk *chunk;
 
-	if (unlikely(cbio->bio.bi_status != BLK_STS_OK)) {
-		chunk_list_store_fail(&cbio->chunks, -EIO);
-		goto out;
-	}
-
-	while (!list_empty(&cbio->chunks)){
-		chunk = list_first_entry(&cbio->chunks, struct chunk, link);
-		list_del_init(&chunk->link);
-
-		if (chunk_state_check(chunk, CHUNK_ST_FAILED)) {
-			up(&chunk->lock);
+	while ((chunk = get_chunk_from_cbio(cbio))) {
+		if (unlikely(cbio->bio.bi_status != BLK_STS_OK)) {
+			chunk_store_failed(chunk, -EIO);
 			continue;
 		}
 
-		chunk_state_set(chunk, CHUNK_ST_BUFFER_READY);
 		chunk_schedule_storing(chunk);
 	}
-out:
+
 	/* submit the original bio fed into the tracker */
 	submit_bio_noacct_nocheck(cbio->orig_bio);
-
 	bio_put(&cbio->bio);
 }
 
@@ -257,27 +225,19 @@ static void chunk_notify_store(struct work_struct *work)
 	struct chunk_bio *cbio = container_of(work, struct chunk_bio, work);
 	struct chunk *chunk;
 
-	if (unlikely(cbio->bio.bi_status != BLK_STS_OK)) {
-		chunk_list_store_fail(&cbio->chunks, -EIO);
-		goto out;
-	}
-
-	while (!list_empty(&cbio->chunks)){
-		chunk = list_first_entry(&cbio->chunks, struct chunk, link);
-		list_del_init(&chunk->link);
-
-		if (unlikely(chunk_state_check(chunk, CHUNK_ST_FAILED))) {
-			pr_err("Chunk in a failed state\n");
-			chunk_store_failed(chunk, 0);
+	while ((chunk = get_chunk_from_cbio(cbio))) {
+		if (unlikely(cbio->bio.bi_status != BLK_STS_OK)) {
+			chunk_store_failed(chunk, -EIO);
 			continue;
 		}
 
-		chunk_state_set(chunk, CHUNK_ST_STORE_READY);
+		WARN_ON_ONCE(chunk->state != CHUNK_ST_IN_MEMORY);
+		chunk->state = CHUNK_ST_STORED;
 
 		chunk_diff_buffer_release(chunk);
 		up(&chunk->lock);
 	}
-out:
+
 	bio_put(&cbio->bio);
 }
 
@@ -293,7 +253,7 @@ struct chunk *chunk_alloc(struct diff_area *diff_area, unsigned long number)
 	sema_init(&chunk->lock, 1);
 	chunk->diff_area = diff_area;
 	chunk->number = number;
-	atomic_set(&chunk->state, 0);
+	chunk->state = CHUNK_ST_NEW;
 	return chunk;
 }
 
@@ -305,7 +265,6 @@ void chunk_free(struct chunk *chunk)
 	down(&chunk->lock);
 	chunk_diff_buffer_release(chunk);
 	diff_storage_free_region(chunk->diff_region);
-	chunk_state_set(chunk, CHUNK_ST_FAILED);
 	up(&chunk->lock);
 
 	kfree(chunk);
@@ -388,7 +347,7 @@ static struct bio *__chunk_load(struct chunk *chunk)
 		return ERR_CAST(diff_buffer);
 	chunk->diff_buffer = diff_buffer;
 
-	if (chunk_state_check(chunk, CHUNK_ST_STORE_READY)) {
+	if (chunk->state == CHUNK_ST_STORED) {
 		bdev = chunk->diff_region->bdev;
 		sector = chunk->diff_region->sector;
 		count = chunk->diff_region->count;

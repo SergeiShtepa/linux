@@ -15,6 +15,12 @@
 #include "chunk.h"
 #include "cbt_map.h"
 
+/*
+ * The snapshot supports write operations.  This allows for example to delete
+ * some files from the file system before backing up the volume. The data can
+ * be stored only in the difference storage. Therefore, before partially
+ * overwriting this data, it should be read from the original block device.
+ */
 static void snapimage_submit_bio(struct bio *bio)
 {
 	struct tracker *tracker = bio->bi_bdev->bd_disk->private_data;
@@ -33,7 +39,13 @@ static void snapimage_submit_bio(struct bio *bio)
 		cbt_map_set_both(tracker->cbt_map, bio->bi_iter.bi_sector,
 				 bio_sectors(bio));
 
-	diff_area_submit_bio(diff_area, bio);
+	while (bio->bi_iter.bi_size) {
+		if (!diff_area_submit_chunk(diff_area, bio)) {
+			bio_io_error(bio);
+			return;
+		}
+	}
+	bio_endio(bio);
 }
 
 const struct block_device_operations bd_ops = {

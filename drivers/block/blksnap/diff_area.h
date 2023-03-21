@@ -120,7 +120,7 @@ static inline sector_t diff_area_chunk_sectors(struct diff_area *diff_area)
 bool diff_area_cow(struct bio *bio, struct diff_area *diff_area,
 		   struct bvec_iter *iter);
 
-void diff_area_submit_bio(struct diff_area *diff_area, struct bio *bio);
+bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio);
 void diff_area_rw_chunk(struct kref *kref);
 //void diff_area_throttling_io(struct diff_area *diff_area);
 

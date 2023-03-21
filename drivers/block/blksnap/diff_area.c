@@ -97,16 +97,16 @@ void diff_area_free(struct diff_area *diff_area)
 	kfree(diff_area);
 }
 
-static struct chunk *diff_area_lock_and_get_chunk_from_queue(
-					struct diff_area *diff_area)
+static bool diff_area_store_one(struct diff_area *diff_area)
 {
-	struct chunk *iter;
-	struct chunk *chunk = NULL;
+	struct chunk *iter, *chunk = NULL;
 
 	spin_lock(&diff_area->store_queue_lock);
 	list_for_each_entry(iter, &diff_area->store_queue, link) {
 		if (!down_trylock(&iter->lock)) {
 			chunk = iter;
+			atomic_dec(&diff_area->store_queue_count);
+			list_del_init(&chunk->link);
 			break;
 		}
 		/*
@@ -115,67 +115,53 @@ static struct chunk *diff_area_lock_and_get_chunk_from_queue(
 		 * next chunk.
 		 */
 	}
-	if (likely(chunk)) {
-		atomic_dec(&diff_area->store_queue_count);
-		list_del_init(&chunk->link);
-	}
 	spin_unlock(&diff_area->store_queue_lock);
+	if (!chunk)
+		return false;
 
-	return chunk;
+	if (chunk->state != CHUNK_ST_IN_MEMORY) {
+		/*
+		 * There cannot be a chunk in the store queue whose buffer has
+		 * not been read into memory.
+		 */
+		up(&chunk->lock);
+		pr_warn("Cannot release empty buffer for chunk #%ld",
+			chunk->number);
+		return true;
+	}
+
+	if (diff_area_is_corrupted(diff_area)) {
+		chunk_store_failed(chunk, 0);
+		return true;
+	}
+
+	if (!chunk->diff_region) {
+		struct diff_region *diff_region;
+
+		diff_region = diff_storage_new_region(
+			diff_area->diff_storage,
+			diff_area_chunk_sectors(diff_area),
+			diff_area->logical_blksz);
+
+		if (IS_ERR(diff_region)) {
+			pr_debug("Cannot get store for chunk #%ld\n",
+				 chunk->number);
+			chunk_store_failed(chunk, PTR_ERR(diff_region));
+			return true;
+		}
+		chunk->diff_region = diff_region;
+	}
+	chunk_store(chunk);
+	return true;
 }
 
 static void diff_area_store_queue_work(struct work_struct *work)
 {
 	struct diff_area *diff_area = container_of(
 		work, struct diff_area, store_queue_work);
-	struct chunk *chunk;
 
-	while ((chunk = diff_area_lock_and_get_chunk_from_queue(diff_area))) {
-
-		/*
-		 * There cannot be a chunk in the store queue whose buffer is
-		 * not ready.
-		 */
-		if (WARN(!chunk_state_check(chunk, CHUNK_ST_BUFFER_READY),
-			 "Cannot release empty buffer for chunk #%ld",
-			 chunk->number)) {
-			up(&chunk->lock);
-			continue;
-		}
-
-		/*
-		 * Skip storing data into the diff storage if it is already
-		 * stored there.
-		 */
-		if (chunk_state_check(chunk, CHUNK_ST_STORE_READY)) {
-			chunk_diff_buffer_release(chunk);
-			up(&chunk->lock);
-			continue;
-		}
-
-		if (diff_area_is_corrupted(diff_area)) {
-			chunk_store_failed(chunk, 0);
-			continue;
-		}
-
-		if (!chunk->diff_region) {
-			struct diff_region *diff_region;
-
-			diff_region = diff_storage_new_region(
-				diff_area->diff_storage,
-				diff_area_chunk_sectors(diff_area),
-				diff_area->logical_blksz);
-
-			if (IS_ERR(diff_region)) {
-				pr_debug("Cannot get store for chunk #%ld\n",
-					 chunk->number);
-				chunk_store_failed(chunk, PTR_ERR(diff_region));
-				continue;
-			}
-			chunk->diff_region = diff_region;
-		}
-		chunk_store(chunk);
-	}
+	while (diff_area_store_one(diff_area))
+		;
 }
 
 struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
@@ -309,18 +295,7 @@ bool diff_area_cow(struct bio *bio, struct diff_area *diff_area,
 		}
 
 		len = chunk_limit(chunk, iter);
-		if (chunk_state_check(chunk, CHUNK_ST_FAILED |
-					     CHUNK_ST_BUFFER_READY |
-					     CHUNK_ST_STORE_READY)) {
-			/*
-			 * The chunk has already been:
-			 *   - failed, when the snapshot is corrupted
-			 *   - read into the buffer
-			 *   - stored into the diff storage
-			 * In this case, we do not change the chunk.
-			 */
-			up(&chunk->lock);
-		} else {
+		if (chunk->state == CHUNK_ST_NEW) {
 			if (nowait) {
 				/*
 				 * If the data of this chunk has not yet been
@@ -342,6 +317,15 @@ bool diff_area_cow(struct bio *bio, struct diff_area *diff_area,
 				goto fail;
 			}
 			list_add_tail(&chunk->link, &chunks);
+		} else {
+			/*
+			 * The chunk has already been:
+			 *   - failed, when the snapshot is corrupted
+			 *   - read into the buffer
+			 *   - stored into the diff storage
+			 * In this case, we do not change the chunk.
+			 */
+			up(&chunk->lock);
 		}
 		bio_advance_iter_single(bio, iter, len);
 	}
@@ -374,95 +358,63 @@ fail:
 	return false;
 }
 
-static struct chunk *diff_area_image_get_chunk(struct diff_area *diff_area,
-					       sector_t sector)
+bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 {
-	unsigned long new_chunk_number = chunk_number(diff_area, sector);
 	struct chunk *chunk;
-	int ret;
 
-	chunk = xa_load(&diff_area->chunk_map, new_chunk_number);
+	chunk = xa_load(&diff_area->chunk_map,
+			chunk_number(diff_area, bio->bi_iter.bi_sector));
 	if (unlikely(!chunk))
-		return ERR_PTR(-EINVAL);
+		return false;
 
-	ret = down_killable(&chunk->lock);
-	if (ret)
-		return ERR_PTR(ret);
+	if (down_killable(&chunk->lock))
+		return false;
 
-	if (unlikely(chunk_state_check(chunk, CHUNK_ST_FAILED))) {
+	switch (chunk->state) {
+	case CHUNK_ST_FAILED:
 		pr_err("Chunk #%ld corrupted\n", chunk->number);
-
-		pr_debug("new_chunk_number=%ld\n", new_chunk_number);
-		pr_debug("sector=%llu\n", sector);
-		pr_debug("Chunk size %llu in bytes\n",
-		       (1ull << diff_area->chunk_shift));
-		pr_debug("Chunk count %lu\n", diff_area->chunk_count);
-
-		ret = -EIO;
-		goto fail_unlock_chunk;
-	}
-
-	return chunk;
-
-fail_unlock_chunk:
-	pr_err("Failed to load chunk #%ld\n", chunk->number);
-	up(&chunk->lock);
-	return ERR_PTR(ret);
-}
-
-/*
- * The snapshot supports write operations.  This allows for example to delete
- * some files from the file system before backing up the volume. The data can
- * be stored only in the difference storage. Therefore, before partially
- * overwriting this data, it should be read from the original block device.
- */
-void diff_area_submit_bio(struct diff_area *diff_area, struct bio *bio)
-{
-	struct chunk *chunk;
-
-	while (bio->bi_iter.bi_size) {
-		chunk = diff_area_image_get_chunk(diff_area,
-			bio->bi_iter.bi_sector);
-		if (IS_ERR(chunk))
-			goto fail;
-
-		if (chunk_state_check(chunk, CHUNK_ST_BUFFER_READY)) {
-			/*
-			 * Directly copy data from the in-memory chunk or
-			 * copy to the in-memory chunk for write operation.
-			 */
-			chunk_copy_bio(chunk, bio, &bio->bi_iter);
-			up(&chunk->lock);
-			continue;
-		}
-
-		if (chunk_state_check(chunk, CHUNK_ST_STORE_READY) ||
-			 !op_is_write(bio_op(bio))) {
+		pr_debug("sector=%llu, size=%llu, count=%lu\n",
+			 bio->bi_iter.bi_sector,
+			 (1Ull << diff_area->chunk_shift),
+			 diff_area->chunk_count);
+		up(&chunk->lock);
+		return false;
+	case CHUNK_ST_IN_MEMORY:
+		/*
+		 * Directly copy data from the in-memory chunk or copy to the
+		 * in-memory chunk for write operation.
+		 */
+		chunk_copy_bio(chunk, bio, &bio->bi_iter);
+		up(&chunk->lock);
+		return true;
+	case CHUNK_ST_STORED:
+		if (bio_op(bio) == REQ_OP_READ) {
 			/*
 			 * Submit a bio to:
 			 * - read data from the chunk on original device or
 			 *   difference storage
-			 * - write data to the chunk on difference storage.
+			 * - write data to the chunk on difference storage
 			 */
 			chunk_clone_bio(chunk, bio);
 			up(&chunk->lock);
-			continue;
+			return true;
 		}
-
+		fallthrough;
+	case CHUNK_ST_NEW:
 		/*
-		 * Starts asynchronous loading of a chunk from the original
-		 * block device and schedule copying data to (or from) the
-		 * in-memory chunk.
+		 * Starts asynchronous loading of a chunk from the
+		 * original block device and schedule copying data to
+		 * (or from) the in-memory chunk.
 		 */
 		if (chunk_load_and_schedule_io(chunk, bio)) {
 			up(&chunk->lock);
-			goto fail;
+			return false;
 		}
+		return true;
+	default: /* invalid state */
+		WARN_ON_ONCE(1);
+		return false;
 	}
-	bio_endio(bio);
-	return;
-fail:
-	bio_io_error(bio);
 }
 
 static inline void diff_area_event_corrupted(struct diff_area *diff_area)
