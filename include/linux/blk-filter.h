@@ -48,4 +48,8 @@ struct blkfilter_operations {
 int blkfilter_register(struct blkfilter_operations *ops);
 void blkfilter_unregister(struct blkfilter_operations *ops);
 
+int blkfilter_ioctl(struct block_device *bdev,
+                    struct blkfilter_ctl __user *argp);
+int blkfilter_detach(struct block_device *bdev, const char *name);
+
 #endif /* _UAPI_LINUX_BLK_FILTER_H */

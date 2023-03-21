@@ -446,10 +446,6 @@ extern struct attribute_group blk_trace_attr_group;
 long blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg);
 long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg);
 
-int blkfilter_ioctl(struct block_device *bdev,
-		    struct blkfilter_ctl __user *argp);
-int blkfilter_detach(struct block_device *bdev, const char *name);
-
 extern const struct address_space_operations def_blk_aops;
 
 int disk_register_independent_access_ranges(struct gendisk *disk);

@@ -10,6 +10,7 @@
 #include <linux/ctype.h>
 #include <linux/vmalloc.h>
 #include <linux/raid/detect.h>
+#include <linux/blk-filter.h>
 #include "check.h"
 
 static int (*check_part[])(struct parsed_partitions *) = {

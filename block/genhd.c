@@ -25,6 +25,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/badblocks.h>
 #include <linux/part_stat.h>
+#include <linux/blk-filter.h>
 #include "blk-throttle.h"
 
 #include "blk.h"
