@@ -26,7 +26,7 @@ struct diff_region;
  *	An error occurred while processing the chunk data.
  *
  * Chunks life circle:
- *	CHUNK_ST_NEW -> CHUNK_ST_IN_MEMORY -> CHUNK_ST_STORED
+ *	CHUNK_ST_NEW -> CHUNK_ST_IN_MEMORY <-> CHUNK_ST_STORED
  */
 
 enum chunk_st {

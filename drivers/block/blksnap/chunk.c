@@ -58,7 +58,8 @@ static void chunk_schedule_storing(struct chunk *chunk)
 	struct diff_area *diff_area = chunk->diff_area;
 	int queue_count;
 
-	WARN_ON_ONCE(chunk->state != CHUNK_ST_NEW);
+	WARN_ON_ONCE(chunk->state != CHUNK_ST_NEW &&
+		     chunk->state != CHUNK_ST_STORED);
 	chunk->state = CHUNK_ST_IN_MEMORY;
 
 	spin_lock(&diff_area->store_queue_lock);
@@ -171,7 +172,7 @@ void chunk_clone_bio(struct chunk *chunk, struct bio *bio)
 	submit_bio_noacct(new_bio);
 }
 
-static struct chunk *get_chunk_from_cbio(struct chunk_bio *cbio)
+static inline struct chunk *get_chunk_from_cbio(struct chunk_bio *cbio)
 {
 	struct chunk *chunk = list_first_entry_or_null(&cbio->chunks,
 						       struct chunk, link);
@@ -189,6 +190,10 @@ static void notify_load_and_schedule_io(struct work_struct *work)
 	while ((chunk = get_chunk_from_cbio(cbio))) {
 		if (unlikely(cbio->bio.bi_status != BLK_STS_OK)) {
 			chunk_store_failed(chunk, -EIO);
+			continue;
+		}
+		if (chunk->state == CHUNK_ST_FAILED) {
+			up(&chunk->lock);
 			continue;
 		}
 
@@ -209,6 +214,10 @@ static void notify_load_and_postpone_io(struct work_struct *work)
 	while ((chunk = get_chunk_from_cbio(cbio))) {
 		if (unlikely(cbio->bio.bi_status != BLK_STS_OK)) {
 			chunk_store_failed(chunk, -EIO);
+			continue;
+		}
+		if (chunk->state == CHUNK_ST_FAILED) {
+			up(&chunk->lock);
 			continue;
 		}
 
@@ -265,6 +274,8 @@ void chunk_free(struct chunk *chunk)
 	down(&chunk->lock);
 	chunk_diff_buffer_release(chunk);
 	diff_storage_free_region(chunk->diff_region);
+	chunk->diff_region = NULL;
+	chunk->state = CHUNK_ST_FAILED;
 	up(&chunk->lock);
 
 	kfree(chunk);
@@ -436,12 +447,11 @@ int chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio)
 	list_add_tail(&chunk->link, &cbio->chunks);
 	INIT_WORK(&cbio->work, notify_load_and_schedule_io);
 	cbio->orig_bio = orig_bio;
-	if (orig_bio) {
-		cbio->orig_iter = orig_bio->bi_iter;
-		bio_advance_iter_single(orig_bio, &orig_bio->bi_iter,
-					chunk_limit(chunk, orig_bio));
-		bio_inc_remaining(orig_bio);
-	}
+	cbio->orig_iter = orig_bio->bi_iter;
+	bio_advance_iter_single(orig_bio, &orig_bio->bi_iter,
+				chunk_limit(chunk, orig_bio));
+	bio_inc_remaining(orig_bio);
+
 	chunk_submit_bio(bio);
 	return 0;
 }

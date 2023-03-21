@@ -390,21 +390,22 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 	case CHUNK_ST_STORED:
 		if (bio_op(bio) == REQ_OP_READ) {
 			/*
-			 * Submit a bio to:
-			 * - read data from the chunk on original device or
-			 *   difference storage
-			 * - write data to the chunk on difference storage
+			 * Read data from the chunk on original device or
+			 * difference storage.
 			 */
 			chunk_clone_bio(chunk, bio);
 			up(&chunk->lock);
 			return true;
 		}
+		/*
+		 * Write data to the chunk on difference storage.
+		 */
 		fallthrough;
 	case CHUNK_ST_NEW:
 		/*
 		 * Starts asynchronous loading of a chunk from the
-		 * original block device and schedule copying data to
-		 * (or from) the in-memory chunk.
+		 * original block device or difference storage and
+		 * schedule copying data to (or from) the in-memory chunk.
 		 */
 		if (chunk_load_and_schedule_io(chunk, bio)) {
 			up(&chunk->lock);
