@@ -3732,6 +3732,8 @@ L:	linux-block@vger.kernel.org
 S:	Supported
 F:	Documentation/block/blkfilter.rst
 F:	block/blk-filter.c
+F:	inlcude/linux/blk-filter.h
+F:	inlcude/uapi/linux/blk-filter.h
 
 BLOCK DEVICE SNAPSHOTS MODULE
 M:	Sergei Shtepa <sergei.shtepa@veeam.com>
