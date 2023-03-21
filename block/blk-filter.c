@@ -161,8 +161,8 @@ out_unfreeze:
  *	A pointer to the buffer size with command options. If the command
  *	returns a result, the variable will contain the size of the result.
  *
- * The function is called during processing ioctl BLKFILTER with command
- * BLKFILTER_CMD_CTL.
+ * Allows to send the control command directly to the filter of the block
+ * device.
  *
  * Context:
  *	May sleep.
@@ -195,6 +195,21 @@ out_queue_exit:
 	return ret;
 }
 
+/**
+ * blkfilter_ioctl() - Processor for BLKFILTER ioctl.
+ *
+ * @bdev:
+ *	The block device.
+ * @argp:
+ *	A pointer to the arguments of the control command.
+ *
+ * The function is called during processing ioctl BLKFILTER.
+ *
+ * Context:
+ *	May sleep.
+ * Return:
+ *	0 if succeeded, negative errno otherwise.
+ */
 int blkfilter_ioctl(struct block_device *bdev,
 		    struct blkfilter_ctl __user *argp)
 {
