@@ -97,7 +97,7 @@ void diff_area_free(struct diff_area *diff_area)
 	kfree(diff_area);
 }
 
-static bool diff_area_store_one(struct diff_area *diff_area)
+static inline bool diff_area_store_one(struct diff_area *diff_area)
 {
 	struct chunk *iter, *chunk = NULL;
 
@@ -370,8 +370,7 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 	if (down_killable(&chunk->lock))
 		return false;
 
-	switch (chunk->state) {
-	case CHUNK_ST_FAILED:
+	if (unlikely(chunk->state == CHUNK_ST_FAILED)) {
 		pr_err("Chunk #%ld corrupted\n", chunk->number);
 		pr_debug("sector=%llu, size=%llu, count=%lu\n",
 			 bio->bi_iter.bi_sector,
@@ -379,43 +378,34 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 			 diff_area->chunk_count);
 		up(&chunk->lock);
 		return false;
-	case CHUNK_ST_IN_MEMORY:
+	}
+	if (chunk->state == CHUNK_ST_IN_MEMORY) {
 		/*
-		 * Directly copy data from the in-memory chunk or copy to the
-		 * in-memory chunk for write operation.
+		 * Directly copy data from the in-memory chunk or
+		 * copy to the in-memory chunk for write operation.
 		 */
 		chunk_copy_bio(chunk, bio, &bio->bi_iter);
 		up(&chunk->lock);
 		return true;
-	case CHUNK_ST_STORED:
-		if (bio_op(bio) == REQ_OP_READ) {
-			/*
-			 * Read data from the chunk on original device or
-			 * difference storage.
-			 */
-			chunk_clone_bio(chunk, bio);
-			up(&chunk->lock);
-			return true;
-		}
+	}
+	if ((chunk->state == CHUNK_ST_STORED) || !op_is_write(bio_op(bio))) {
 		/*
-		 * Write data to the chunk on difference storage.
+		 * Read data from the chunk on difference storage.
 		 */
-		fallthrough;
-	case CHUNK_ST_NEW:
-		/*
-		 * Starts asynchronous loading of a chunk from the
-		 * original block device or difference storage and
-		 * schedule copying data to (or from) the in-memory chunk.
-		 */
-		if (chunk_load_and_schedule_io(chunk, bio)) {
-			up(&chunk->lock);
-			return false;
-		}
+		chunk_clone_bio(chunk, bio);
+		up(&chunk->lock);
 		return true;
-	default: /* invalid state */
-		WARN_ON_ONCE(1);
+	}
+	/*
+	 * Starts asynchronous loading of a chunk from the original block device
+	 * or difference storage and schedule copying data to (or from) the
+	 * in-memory chunk.
+	 */
+	if (chunk_load_and_schedule_io(chunk, bio)) {
+		up(&chunk->lock);
 		return false;
 	}
+	return true;
 }
 
 static inline void diff_area_event_corrupted(struct diff_area *diff_area)
