@@ -99,7 +99,7 @@ void chunk_store(struct chunk *chunk);
 int chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio);
 int chunk_load_and_postpone_io(struct chunk *chunk, struct bio **chunk_bio);
 void chunk_load_and_postpone_io_finish(struct list_head *chunks,
-                                struct bio *chunk_bio, struct bio *orig_bio);
+				struct bio *chunk_bio, struct bio *orig_bio);
 void chunk_submit_bio(struct bio *bio);
 
 int __init chunk_init(void);
