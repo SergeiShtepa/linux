@@ -32,6 +32,15 @@ int tracking_block_minimum_shift = 16;
 int tracking_block_maximum_count = 2097152;
 
 /*
+ * The power of 2 for maximum tracking block size.
+ * On very large capacity disks, the block size may be too large. To prevent
+ * this, the maximum block size is limited.
+ * If the limit on the maximum block size has been reached, then the number of
+ * blocks may exceed the tracking_block_maximum_count.
+ */
+int tracking_block_maximum_shift = 26;
+
+/*
  * The power of 2 for minimum chunk size.
  * The size of the chunk depends on how much data will be copied to the
  * difference storage when at least one sector of the block device is changed.
@@ -51,6 +60,14 @@ int chunk_minimum_shift = 18;
  */
 int chunk_maximum_count = 2097152;
 
+/*
+ * The power of 2 for maximum chunk size.
+ * On very large capacity disks, the block size may be too large. To prevent
+ * this, the maximum block size is limited.
+ * If the limit on the maximum block size has been reached, then the number of
+ * blocks may exceed the chunk_maximum_count.
+ */
+int chunk_maximum_shift = 26;
 /*
  * The maximum number of chunks in queue.
  * The chunk is not immediately stored to the difference storage. The chunks
@@ -89,6 +106,10 @@ int get_tracking_block_minimum_shift(void)
 {
 	return tracking_block_minimum_shift;
 }
+int get_tracking_block_maximum_shift(void)
+{
+	return tracking_block_maximum_shift;
+}
 int get_tracking_block_maximum_count(void)
 {
 	return tracking_block_maximum_count;
@@ -96,6 +117,10 @@ int get_tracking_block_maximum_count(void)
 int get_chunk_minimum_shift(void)
 {
 	return chunk_minimum_shift;
+}
+int get_chunk_maximum_shift(void)
+{
+	return chunk_maximum_shift;
 }
 int get_chunk_maximum_count(void)
 {
@@ -373,12 +398,19 @@ module_param_named(tracking_block_maximum_count, tracking_block_maximum_count,
 		   int, 0644);
 MODULE_PARM_DESC(tracking_block_maximum_count,
 		 "The maximum number of tracking blocks");
+module_param_named(tracking_block_maximum_shift, tracking_block_maximum_shift,
+		   int, 0644);
+MODULE_PARM_DESC(tracking_block_maximum_shift,
+		 "The power of 2 for maximum trackings block size");
 module_param_named(chunk_minimum_shift, chunk_minimum_shift, int, 0644);
 MODULE_PARM_DESC(chunk_minimum_shift,
 		 "The power of 2 for minimum chunk size");
 module_param_named(chunk_maximum_count, chunk_maximum_count, int, 0644);
 MODULE_PARM_DESC(chunk_maximum_count,
 		 "The maximum number of chunks");
+module_param_named(chunk_maximum_shift, chunk_maximum_shift, int, 0644);
+MODULE_PARM_DESC(chunk_maximum_shift,
+		 "The power of 2 for maximum snapshots chunk size");
 module_param_named(chunk_maximum_in_queue, chunk_maximum_in_queue, int, 0644);
 MODULE_PARM_DESC(chunk_maximum_in_queue,
 		 "The maximum number of chunks in store queue");

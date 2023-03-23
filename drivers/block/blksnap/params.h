@@ -4,8 +4,10 @@
 #define __BLKSNAP_PARAMS_H
 
 int get_tracking_block_minimum_shift(void);
+int get_tracking_block_maximum_shift(void);
 int get_tracking_block_maximum_count(void);
 int get_chunk_minimum_shift(void);
+int get_chunk_maximum_shift(void);
 int get_chunk_maximum_count(void);
 int get_chunk_maximum_in_queue(void);
 int get_free_diff_buffer_pool_size(void);

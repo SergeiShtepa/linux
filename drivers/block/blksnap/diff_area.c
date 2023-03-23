@@ -45,8 +45,9 @@ static inline unsigned long long count_by_shift(sector_t capacity,
 
 static void diff_area_calculate_chunk_size(struct diff_area *diff_area)
 {
-	unsigned long long shift = get_chunk_minimum_shift();
 	unsigned long long count;
+	unsigned long long shift = min(get_chunk_minimum_shift(),
+				       get_chunk_maximum_shift());
 	sector_t capacity;
 	sector_t min_io_sect;
 
@@ -60,6 +61,10 @@ static void diff_area_calculate_chunk_size(struct diff_area *diff_area)
 	pr_debug("Chunks count %llu\n", count);
 	while ((count > get_chunk_maximum_count()) ||
 		((1ull << (shift - SECTOR_SHIFT)) < min_io_sect)) {
+		if (shift >= get_chunk_maximum_shift()) {
+			pr_info("The maximum allowable chunk size has been reached.\n");
+			break;
+		}
 		shift = shift + 1ull;
 		count = count_by_shift(capacity, shift);
 		pr_debug("Chunks count %llu\n", count);
