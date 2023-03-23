@@ -270,14 +270,8 @@ void chunk_free(struct chunk *chunk)
 {
 	if (unlikely(!chunk))
 		return;
-
-	down(&chunk->lock);
 	chunk_diff_buffer_release(chunk);
 	diff_storage_free_region(chunk->diff_region);
-	chunk->diff_region = NULL;
-	chunk->state = CHUNK_ST_FAILED;
-	up(&chunk->lock);
-
 	kfree(chunk);
 }
 
