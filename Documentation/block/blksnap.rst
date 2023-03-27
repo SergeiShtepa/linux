@@ -257,16 +257,15 @@ options for managing the module:
 - Using a static C++ library
 - Using the blksnap console tool
 
-Using a BLKFILTER ioctl for block device
-----------------------------------------
+Using a BLKFILTER_CTL for block device
+--------------------------------------
 
-To control the filters of the block device added a BLKFILTER ioctl. It allows to
-attach a filter to a block device or detach it. And it allows to pass a control
-command to the filter on this block device and get the result of its execution.
-The module provides the ``include/uapi/blksnap.h`` header file with
-a description of the commands and their data structures.
+BLKFILTER_CTL allows to send a filter-specific command to the filter on block
+device and get the result of its execution. The module provides the
+``include/uapi/blksnap.h`` header file with a description of the commands and
+their data structures.
 
-1. ``blkfilter_ctl_blksnap_cbtinfo`` allows you to get information from the
+1. ``blkfilter_ctl_blksnap_cbtinfo`` allows to get information from the
    change tracker.
 2. ``blkfilter_ctl_blksnap_cbtmap`` reads the change tracker table. If a write
    operation was performed for the snapshot, then the change tracker takes this
@@ -282,8 +281,8 @@ a description of the commands and their data structures.
 Using ioctl
 -----------
 
-Using a BLKFILTER ioctl does not allow to fully implement the management of the
-blksnap module. A control file ``blksnap-control`` is created to manage
+Using a BLKFILTER_CTL ioctl does not allow to fully implement the management of
+the blksnap module. A control file ``blksnap-control`` is created to manage
 snapshots. The control commands are also described in the file
 ``include/uapi/blksnap.h``.
 
