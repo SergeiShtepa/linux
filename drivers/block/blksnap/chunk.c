@@ -282,7 +282,7 @@ static void chunk_io_endio(struct bio *bio)
 	queue_work(system_wq, &cbio->work);
 }
 
-void chunk_submit_bio(struct bio *bio)
+static void chunk_submit_bio(struct bio *bio)
 {
 	bio->bi_end_io = chunk_io_endio;
 	submit_bio_noacct(bio);
