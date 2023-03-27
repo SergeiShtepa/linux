@@ -85,7 +85,6 @@ static void __blkfilter_detach(struct block_device *bdev)
 	bdev->bd_filter = NULL;
 	ops->detach(flt);
 	module_put(ops->owner);
-
 }
 
 void blkfilter_detach(struct block_device *bdev)
@@ -156,7 +155,7 @@ out_queue_exit:
 }
 
 /**
- * blkfilter_unregister() - Register block device filter operations
+ * blkfilter_register() - Register block device filter operations
  * @ops:	The operations to register.
  *
  * Return:
