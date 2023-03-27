@@ -10,6 +10,7 @@
 #include <linux/ctype.h>
 #include <linux/vmalloc.h>
 #include <linux/raid/detect.h>
+#include <linux/blk-filter.h>
 #include "check.h"
 
 static int (*check_part[])(struct parsed_partitions *) = {
@@ -277,6 +278,7 @@ static void delete_partition(struct block_device *part)
 
 	fsync_bdev(part);
 	__invalidate_device(part, true);
+	blkfilter_detach(part);
 
 	xa_erase(&part->bd_disk->part_tbl, part->bd_partno);
 	kobject_put(part->bd_holder_dir);

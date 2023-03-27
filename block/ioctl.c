@@ -2,6 +2,7 @@
 #include <linux/capability.h>
 #include <linux/compat.h>
 #include <linux/blkdev.h>
+#include <linux/blk-filter.h>
 #include <linux/export.h>
 #include <linux/gfp.h>
 #include <linux/blkpg.h>
@@ -545,6 +546,12 @@ static int blkdev_common_ioctl(struct block_device *bdev, fmode_t mode,
 		return blkdev_pr_preempt(bdev, argp, true);
 	case IOC_PR_CLEAR:
 		return blkdev_pr_clear(bdev, argp);
+	case BLKFILTER_ATTACH:
+		return blkfilter_ioctl_attach(bdev, argp);
+	case BLKFILTER_DETACH:
+		return blkfilter_ioctl_detach(bdev, argp);
+	case BLKFILTER_CTL:
+		return blkfilter_ioctl_ctl(bdev, argp);
 	default:
 		return -ENOIOCTLCMD;
 	}

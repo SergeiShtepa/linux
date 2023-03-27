@@ -25,6 +25,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/badblocks.h>
 #include <linux/part_stat.h>
+#include <linux/blk-filter.h>
 #include "blk-throttle.h"
 
 #include "blk.h"
@@ -625,6 +626,7 @@ void del_gendisk(struct gendisk *disk)
 
 	fsync_bdev(disk->part0);
 	__invalidate_device(disk->part0, true);
+	blkfilter_detach(disk->part0);
 
 	/*
 	 * Fail any new I/O.
