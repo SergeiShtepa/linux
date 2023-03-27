@@ -668,7 +668,6 @@ rescan:
 		return -EBUSY;
 	sync_blockdev(disk->part0);
 	invalidate_bdev(disk->part0);
-	blkfilter_detach(disk->part0, NULL);
 	blk_drop_partitions(disk);
 
 	clear_bit(GD_NEED_PART_SCAN, &disk->state);
