@@ -6,8 +6,8 @@
 #include <uapi/linux/blk-filter.h>
 
 struct bio;
-struct blkfilter;
 struct block_device;
+struct blkfilter_operations;
 
 /**
  * struct blkfilter - Block device filter.
