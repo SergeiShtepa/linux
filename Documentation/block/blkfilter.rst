@@ -31,7 +31,7 @@ Design
 The block device filtering mechanism provides registration and unregistration
 for filters account. The account contains a pointer to the callback functions
 for the filter. After registering the filter account, filter can be managed
-using block device ioctl BLKFILTER.
+using block device ioctl BLKFILTER_ATTACH, BLKFILTER_DETACH and BLKFILTER_CTL.
 
 When the filter is attached, the callback function is called for each I/O unit
 for a block device, providing I/O unit filtering. Depending on the result of
@@ -45,26 +45,19 @@ devices.
 Interface description
 =====================
 
-The ioctl BLKFILTER use structure blkfilter_ctl. It allows to attach a filter
-to a block device, detach it and send it a control command.
+The ioctl BLKFILTER_ATTACH and BLKFILTER_DETACH use structure blkfilter_name.
+It allows to attach a filter to a block device or detach it.
 
-.. kernel-doc:: include/uapi/linux/fs.h
-	:functions: blkfilter_ctl
+The ioctl BLKFILTER_CTL use structure blkfilter_ctl. It allows to send a
+filter-specific command.
+
+.. kernel-doc:: include/uapi/linux/blk-filter.h
 
 To register in the system, the filter creates its own account, which contains
 callback functions, unique filter name and module owner. This filter account is
 used by the registration functions.
 
-.. kernel-doc:: include/linux/blkdev.h
-   :functions: blkfilter blkfilter_operations blkfilter_account
+.. kernel-doc:: include/linux/blk-filter.h
+
 .. kernel-doc:: block/blk-filter.c
    :export:
-
-Internal interface description
-==============================
-
-Description of functions that are not available for kernel modules, but are
-necessary for interacting with other parts of the kernel.
-
-.. kernel-doc:: block/blk-filter.c
-   :internal:
