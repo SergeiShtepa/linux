@@ -5,13 +5,11 @@
 
 #include <linux/types.h>
 
-enum {
-	BLKFILTER_CMD_ATTACH,
-	BLKFILTER_CMD_DETACH,
-	BLKFILTER_CMD_CTL,
-};
-
 #define BLKFILTER_NAME_LENGTH	32
+
+struct blkfilter_name {
+	__u8 name[BLKFILTER_NAME_LENGTH];
+};
 
 /**
  * struct blkfilter_ctl - parameter for BLKFILTER ioctl
@@ -25,7 +23,7 @@ struct blkfilter_ctl {
 	__u8 name[BLKFILTER_NAME_LENGTH];
 	__u32 cmd;
 	__u32 optlen;
-	__u8 *opt;
+	__u64 opt;
 };
 
 #endif /* _UAPI_LINUX_BLK_FILTER_H */

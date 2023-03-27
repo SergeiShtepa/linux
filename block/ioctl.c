@@ -547,8 +547,12 @@ static int blkdev_common_ioctl(struct file *file, fmode_t mode, unsigned cmd,
 		return blkdev_pr_preempt(bdev, argp, true);
 	case IOC_PR_CLEAR:
 		return blkdev_pr_clear(bdev, argp);
-	case BLKFILTER:
-		return blkfilter_ioctl(bdev, argp);
+	case BLKFILTER_ATTACH:
+		return blkfilter_ioctl_attach(bdev, argp);
+	case BLKFILTER_DETACH:
+		return blkfilter_ioctl_detach(bdev, argp);
+	case BLKFILTER_CTL:
+		return blkfilter_ioctl_ctl(bdev, argp);
 	default:
 		return -ENOIOCTLCMD;
 	}

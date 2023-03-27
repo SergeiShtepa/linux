@@ -185,7 +185,10 @@ struct fsxattr {
 #define BLKROTATIONAL _IO(0x12,126)
 #define BLKZEROOUT _IO(0x12,127)
 #define BLKGETDISKSEQ _IOR(0x12,128,__u64)
-#define BLKFILTER _IOWR(0x12, 129, struct blkfilter_ctl)
+/* 13* is defined in linux/blkzoned.h */
+#define BLKFILTER_ATTACH	_IOWR(0x12, 140, struct blkfilter_name)
+#define BLKFILTER_DETACH	_IOWR(0x12, 141, struct blkfilter_name)
+#define BLKFILTER_CTL		_IOWR(0x12, 142, struct blkfilter_ctl)
 
 /*
  * A jump here: 130-136 are reserved for zoned block devices

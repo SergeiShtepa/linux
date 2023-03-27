@@ -607,7 +607,7 @@ void del_gendisk(struct gendisk *disk)
 
 	fsync_bdev(disk->part0);
 	__invalidate_device(disk->part0, true);
-	blkfilter_detach(disk->part0, NULL);
+	blkfilter_detach(disk->part0);
 
 	/*
 	 * Fail any new I/O.
