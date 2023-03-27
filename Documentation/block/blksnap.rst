@@ -112,7 +112,10 @@ the minimum block size for tracking, while ``tracking_block_maximum_count``
 defines the maximum allowed number of blocks. The size of the change tracker
 block is determined depending on the size of the block device when adding
 a tracking device, that is, when the snapshot is taken for the first time.
-The block size must be a power of two.
+The block size must be a power of two. The ``tracking_block_maximum_shift``
+module parameter allows to limit the maximum block size for tracking. If the
+block size reaches the allowable limit, the number of blocks will exceed the
+``tracking_block_maximum_count`` parameter.
 
 The byte of the change map stores a number from 0 to 255. This is the
 snapshot number, since the creation of which there have been changes in
@@ -149,12 +152,17 @@ The size of the chunk is determined by the ``chunk_minimum_shift`` and
 parameter limits the minimum size of the chunk, while ``chunk_maximum_count``
 defines the maximum allowed number of chunks. The size of the chunk is
 determined depending on the size of the block device at the time of taking the
-snapshot. The size of the chunk must be a power of two. One chunk is described
-by the ``struct chunk`` structure. An array of structures is created for each
-block device. The structure contains all the necessary information to copy
-the chunks data from the original block device to the difference storage.
-This information allows to describe the snapshot image. A semaphore is located
-in the structure, which allows synchronization of threads accessing the chunk.
+snapshot. The size of the chunk must be a power of two. The module parameter
+``chunk_maximum_shift`` allows to limit the maximum chunk size. If the chunk
+size reaches the allowable limit, the number of chunks will exceed the
+``chunk_maximum_count`` parameter.
+
+One chunk is described by the ``struct chunk`` structure. An array of structures
+is created for each block device. The structure contains all the necessary
+information to copy the chunks data from the original block device to the
+difference storage. This information allows to describe the snapshot image.
+A semaphore is located in the structure, which allows synchronization of threads
+accessing the chunk.
 
 The block level has a feature. If a read I/O unit was sent, and a write I/O
 unit was sent after it, then a write can be performed first, and only then
