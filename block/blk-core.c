@@ -592,9 +592,31 @@ static inline blk_status_t blk_check_zone_append(struct request_queue *q,
 	return BLK_STS_OK;
 }
 
+static bool submit_bio_filter(struct bio *bio)
+{
+	/*
+	 * If this bio came from the filter driver, send it straight down to the
+	 * actual device and clear the filtered flag, as the bio could be passed
+	 * on to another device that might have a filter attached again.
+	 */
+	if (bio_flagged(bio, BIO_FILTERED)) {
+		bio_clear_flag(bio, BIO_FILTERED);
+		return false;
+	}
+	bio_set_flag(bio, BIO_FILTERED);
+	return bio->bi_bdev->bd_filter->ops->submit_bio(bio);
+}
+
 static void __submit_bio(struct bio *bio)
 {
 	struct gendisk *disk = bio->bi_bdev->bd_disk;
+
+	/*
+	 * If there is a filter driver attached, check if the BIO needs to go to
+	 * the filter driver first, which can then pass on the bio or consume it.
+	 */
+	if (bio->bi_bdev->bd_filter && submit_bio_filter(bio))
+		return;
 
 	if (unlikely(!blk_crypto_bio_prep(&bio)))
 		return;
@@ -683,24 +705,6 @@ static void __submit_bio_noacct_mq(struct bio *bio)
 	current->bio_list = NULL;
 }
 
-static bool submit_bio_filter(struct bio *bio)
-{
-	struct bio_list bio_list_on_stack[2] = { };
-	bool skip_bio;
-
-	current->bio_list = bio_list_on_stack;
-	bio_set_flag(bio, BIO_FILTERED);
-	skip_bio = bio->bi_bdev->bd_filter->ops->submit_bio(bio);
-	current->bio_list = NULL;
-
-	while ((bio = bio_list_pop(&bio_list_on_stack[0]))) {
-		bio_set_flag(bio, BIO_FILTERED);
-		submit_bio_noacct(bio);
-	}
-
-	return skip_bio;
-}
-
 /**
  * submit_bio_noacct_nocheck - re-submit a bio to the block device layer for I/O
  *	from block device filter.
@@ -721,11 +725,6 @@ void submit_bio_noacct_nocheck(struct bio *bio)
 	if (current->bio_list) {
 		bio_list_add(&current->bio_list[0], bio);
 		return;
-	}
-
-	if (bio->bi_bdev->bd_filter && !bio_flagged(bio, BIO_FILTERED)) {
-		if (submit_bio_filter(bio))
-			return;
 	}
 
 	if (!bio->bi_bdev->bd_disk->fops->submit_bio)
