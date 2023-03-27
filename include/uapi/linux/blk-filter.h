@@ -7,17 +7,23 @@
 
 #define BLKFILTER_NAME_LENGTH	32
 
+/**
+ * struct blkfilter_name - parameter for BLKFILTER_ATTACH and BLKFILTER_DETACH
+ *      ioctl.
+ *
+ * @name:       Name of block device filter.
+ */
 struct blkfilter_name {
 	__u8 name[BLKFILTER_NAME_LENGTH];
 };
 
 /**
- * struct blkfilter_ctl - parameter for BLKFILTER ioctl
+ * struct blkfilter_ctl - parameter for BLKFILTER_CTL ioctl
  *
  * @name:	Name of block device filter.
- * @cmd:	Command code opcode (BLKFILTER_CMD_*)
- * @optlen:	Size of data at @opt
- * @opt:	userspace buffer with options
+ * @cmd:	The filter-specific operation code of the command.
+ * @optlen:	Size of data at @opt.
+ * @opt:	Userspace buffer with options.
  */
 struct blkfilter_ctl {
 	__u8 name[BLKFILTER_NAME_LENGTH];
