@@ -17,7 +17,7 @@
  */
 
 /**
- * enum blkfilter_ctl_blksnap - List of commands for BLKFILTER ioctl
+ * enum blkfilter_ctl_blksnap - List of commands for BLKFILTER_CTL ioctl
  *
  * @blkfilter_ctl_blksnap_cbtinfo:
  *	Get CBT information.
