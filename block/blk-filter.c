@@ -4,6 +4,8 @@
 #include <linux/blk-mq.h>
 #include <linux/module.h>
 
+#include "blk.h"
+
 static LIST_HEAD(blkfilters);
 static DEFINE_SPINLOCK(blkfilters_lock);
 
