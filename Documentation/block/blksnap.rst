@@ -334,8 +334,6 @@ can be found on the project repository.
 References
 ==========
 
-.. [#btrfs_increment] https://btrfs.wiki.kernel.org/index.php/Incremental_Backup
-
 .. [#userspace_libs] https://github.com/veeam/blksnap/tree/master/lib/blksnap
 
 .. [#userspace_tools] https://github.com/veeam/blksnap/tree/master/tools/blksnap
