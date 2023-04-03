@@ -46,6 +46,12 @@ struct chunk;
  * @free_diff_buffers:
  *	Linked list of free difference buffers allows to reduce the number
  *	of buffer allocation and release operations.
+ * @physical_blksz:
+ *	The physical block size for the snapshot image is equal to the
+ *	physical block size of the original device.
+ * @logical_blksz:
+ *	The logical block size for the snapshot image is equal to the
+ *	logical block size of the original device.
  * @free_diff_buffers_count:
  *	The number of free difference buffers in the linked list.
  * @corrupt_flag:
