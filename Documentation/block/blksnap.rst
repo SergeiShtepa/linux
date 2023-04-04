@@ -334,13 +334,13 @@ can be found on the project repository.
 References
 ==========
 
-.. [#userspace_libs] https://github.com/veeam/blksnap/tree/master/lib/blksnap
+.. [#userspace_libs] https://github.com/veeam/blksnap/tree/stable-v2.0/lib/blksnap
 
-.. [#userspace_tools] https://github.com/veeam/blksnap/tree/master/tools/blksnap
+.. [#userspace_tools] https://github.com/veeam/blksnap/tree/stable-v2.0/tools/blksnap
 
-.. [#userspace_tests] https://github.com/veeam/blksnap/tree/master/tests
+.. [#userspace_tests] https://github.com/veeam/blksnap/tree/stable-v2.0/tests
 
-.. [#userspace_tests_doc] https://github.com/veeam/blksnap/tree/master/doc
+.. [#userspace_tests_doc] https://github.com/veeam/blksnap/tree/stable-v2.0/doc
 
 Module interface description
 ============================
