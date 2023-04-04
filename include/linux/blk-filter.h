@@ -26,7 +26,7 @@ struct blkfilter {
  * struct blkfilter_operations - Block device filter operations.
  *
  * @link:	Entry in the global list of filter drivers
- *		(must not be acceѕsed by the driver).
+ *		(must not be accessed by the driver).
  * @owner:	Module implementing the filter driver.
  * @name:	Name of the filter driver.
  * @attach:	Attach the filter driver to the block device.
