@@ -161,7 +161,7 @@ out_queue_exit:
  * @ops:	The operations to register.
  *
  * Return:
- * 	0 if succeeded,
+ *	0 if succeeded,
  *	-EBUSY if a block device filter with the same name is already
  *	registered.
  */
