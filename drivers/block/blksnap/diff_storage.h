@@ -102,7 +102,7 @@ int diff_storage_append_block(struct diff_storage *diff_storage,
 			      unsigned int range_count);
 struct diff_region *diff_storage_new_region(struct diff_storage *diff_storage,
 					    sector_t count,
-                                            unsigned int logical_blksz);
+					    unsigned int logical_blksz);
 
 static inline void diff_storage_free_region(struct diff_region *region)
 {

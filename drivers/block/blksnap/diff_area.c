@@ -349,7 +349,7 @@ fail:
 		bio_endio(chunk_bio);
 	}
 
-	if (ret == -EAGAIN){
+	if (ret == -EAGAIN) {
 		/*
 		 * The -EAGAIN error code means that it is not possible to
 		 * process a I/O unit with a flag REQ_NOWAIT.
