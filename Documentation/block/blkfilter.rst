@@ -14,8 +14,8 @@ Introduction
 The idea of handling I/O units on block devices is not new. Back in the
 2.6 kernel, there was an undocumented possibility of handling I/O units
 by substituting the make_request_fn() function, which belonged to the
-request_queue structure. But no kernel module used this feature, and it
-was eliminated in the 5.10 kernel.
+request_queue structure. But none of the in-tree kernel modules used this
+feature, and it was eliminated in the 5.10 kernel.
 
 The block device filtering mechanism returns the ability to handle I/O units.
 It is possible to safely attach filter to a block device "on the fly" without
@@ -29,9 +29,10 @@ Design
 ======
 
 The block device filtering mechanism provides registration and unregistration
-for filters account. The account contains a pointer to the callback functions
-for the filter. After registering the filter account, filter can be managed
-using block device ioctl BLKFILTER_ATTACH, BLKFILTER_DETACH and BLKFILTER_CTL.
+for filter operations. The struct blkfilter_operations contains a pointer to
+the callback functions for the filter. After registering the filter operations,
+filter can be managed using block device ioctl BLKFILTER_ATTACH,
+BLKFILTER_DETACH and BLKFILTER_CTL.
 
 When the filter is attached, the callback function is called for each I/O unit
 for a block device, providing I/O unit filtering. Depending on the result of
