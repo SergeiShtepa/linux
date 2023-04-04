@@ -328,19 +328,16 @@ Tests
 A set of tests was created for regression testing [#userspace_tests]_.
 Tests with simple algorithms that use the ``blksnap`` console tool to
 control the module are written in Bash. More complex testing algorithms
-are implemented in C++. Documentation [#userspace_tests_doc]_ about them
-can be found on the project repository.
+are implemented in C++.
 
 References
 ==========
 
-.. [#userspace_libs] https://github.com/veeam/blksnap/tree/stable-v2.0/lib/blksnap
+.. [#userspace_libs] https://github.com/veeam/blksnap/tree/stable-v2.0/lib
 
-.. [#userspace_tools] https://github.com/veeam/blksnap/tree/stable-v2.0/tools/blksnap
+.. [#userspace_tools] https://github.com/veeam/blksnap/tree/stable-v2.0/tools
 
 .. [#userspace_tests] https://github.com/veeam/blksnap/tree/stable-v2.0/tests
-
-.. [#userspace_tests_doc] https://github.com/veeam/blksnap/tree/stable-v2.0/doc
 
 Module interface description
 ============================
