@@ -39,9 +39,9 @@ for a block device, providing I/O unit filtering. Depending on the result of
 filtering the I/O unit, it can either be passed for subsequent processing by
 the block layer, or skipped.
 
-The filter can be implemented as a loadable module. In this case, module
-unloading is blocked while the filter is attached to at least one of the block
-devices.
+The filter can be implemented as a loadable module. In this case, the filter
+module cannot be unloaded while the filter is attached to at least one of the
+block devices.
 
 Interface description
 =====================

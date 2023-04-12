@@ -21,7 +21,7 @@ The main properties that a backup tool should have are:
 - Minimal consumption of system resources during backup
 - Minimal time required for recovery or replication of the entire system
 
-Therefore, the features of the blksnap module are:
+Taking above properties into account, blksnap module features:
 
 - Change tracker
 - Snapshots at the block device level
@@ -37,9 +37,9 @@ Change tracker
 
 The change tracker allows to determine which blocks were changed during the
 time between the last snapshot created and any of the previous snapshots.
-Having a map of changes, it is enough to copy only the changed blocks, and
-no need to reread the entire block device completely. The change tracker
-allows to implement the logic of both incremental and differential backups.
+With a map of changes, it is enough to copy only the changed blocks, and no
+need to reread the entire block device completely. The change tracker allows
+to implement the logic of both incremental and differential backups.
 Incremental backup is critical for large file repositories whose size can be
 hundreds of terabytes and whose full backup time can take more than a day.
 On such servers, the use of backup tools without a change tracker becomes
@@ -311,9 +311,9 @@ proprietary application can be dynamically linked.
 blksnap console tool
 --------------------
 
-The blksnap [#userspace_tools]_ console tool allows to control the module
-from the command line. The tool contains detailed built-in help. To get
-the list of commands, enter the ``blksnap --help`` command. The ``blksnap
+The blksnap [#userspace_tools]_ console tool allows to control the module from
+the command line. The tool contains detailed built-in help. To get list of
+commands with usage description, see ``blksnap --help`` command. The ``blksnap
 <command name> --help`` command allows to get detailed information about the
 parameters of each command call. This option may be convenient when creating
 proprietary software, as it allows not to compile with the open source code.
