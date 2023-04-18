@@ -138,6 +138,5 @@ bool diff_area_cow(struct bio *bio, struct diff_area *diff_area,
 
 bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio);
 void diff_area_rw_chunk(struct kref *kref);
-//void diff_area_throttling_io(struct diff_area *diff_area);
 
 #endif /* __BLKSNAP_DIFF_AREA_H */
