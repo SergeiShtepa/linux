@@ -7,6 +7,7 @@
 #include <linux/blkdev.h>
 #include <linux/rwsem.h>
 #include <linux/atomic.h>
+#include "diff_area.h"
 
 struct diff_area;
 struct diff_region;
@@ -41,8 +42,6 @@ enum chunk_st {
  *
  * @link:
  *	The list header allows to create queue of chunks.
- * @diff_area:
- *	Pointer to the difference area - the storage of changes for a specific device.
  * @number:
  *	Sequential number of the chunk.
  * @sector_count:
@@ -51,6 +50,10 @@ enum chunk_st {
  * @lock:
  *	Binary semaphore. Syncs access to the chunks fields: state,
  *	diff_buffer and diff_region.
+ * @diff_area:
+ *	Pointer to the difference area - the difference storage area for a
+ *	specific device. This field is only available when the chunk is locked.
+ *	Allows to protect the difference area from early release.
  * @state:
  *	Defines the state of a chunk.
  * @diff_buffer:
@@ -74,22 +77,26 @@ enum chunk_st {
  */
 struct chunk {
 	struct list_head link;
-	struct diff_area *diff_area;
-
 	unsigned long number;
 	sector_t sector_count;
 
 	struct semaphore lock;
+	struct diff_area *diff_area;
 
 	enum chunk_st state;
 	struct diff_buffer *diff_buffer;
 	struct diff_region *diff_region;
 };
 
-struct chunk *chunk_alloc(struct diff_area *diff_area, unsigned long number);
-void chunk_free(struct chunk *chunk);
+static inline void chunk_up(struct chunk *chunk)
+{
+	struct diff_area *diff_area = chunk->diff_area;
 
-void chunk_diff_buffer_release(struct chunk *chunk);
+	chunk->diff_area = NULL;
+	up(&chunk->lock);
+	diff_area_put(diff_area);
+};
+
 void chunk_store_failed(struct chunk *chunk, int error);
 
 void chunk_copy_bio(struct chunk *chunk, struct bio *bio,

@@ -6,7 +6,6 @@
 #include <linux/slab.h>
 #include "chunk.h"
 #include "diff_buffer.h"
-#include "diff_area.h"
 #include "diff_storage.h"
 #include "params.h"
 
@@ -27,35 +26,30 @@ static inline sector_t chunk_sector(struct chunk *chunk)
 	       << (chunk->diff_area->chunk_shift - SECTOR_SHIFT);
 }
 
-void chunk_diff_buffer_release(struct chunk *chunk)
-{
-	if (unlikely(!chunk->diff_buffer))
-		return;
-
-	diff_buffer_release(chunk->diff_area, chunk->diff_buffer);
-	chunk->diff_buffer = NULL;
-}
-
 void chunk_store_failed(struct chunk *chunk, int error)
 {
-	struct diff_area *diff_area = chunk->diff_area;
+	struct diff_area *diff_area = diff_area_get(chunk->diff_area);
 
 	WARN_ON_ONCE(chunk->state != CHUNK_ST_NEW &&
 		     chunk->state != CHUNK_ST_IN_MEMORY);
 	chunk->state = CHUNK_ST_FAILED;
 
-	chunk_diff_buffer_release(chunk);
+	if (likely(chunk->diff_buffer)) {
+		diff_buffer_release(diff_area, chunk->diff_buffer);
+		chunk->diff_buffer = NULL;
+	}
 	diff_storage_free_region(chunk->diff_region);
 	chunk->diff_region = NULL;
 
-	up(&chunk->lock);
+	chunk_up(chunk);
 	if (error)
 		diff_area_set_corrupted(diff_area, error);
+	diff_area_put(diff_area);
 };
 
 static void chunk_schedule_storing(struct chunk *chunk)
 {
-	struct diff_area *diff_area = chunk->diff_area;
+	struct diff_area *diff_area = diff_area_get(chunk->diff_area);
 	int queue_count;
 
 	WARN_ON_ONCE(chunk->state != CHUNK_ST_NEW &&
@@ -67,11 +61,12 @@ static void chunk_schedule_storing(struct chunk *chunk)
 	queue_count = atomic_inc_return(&diff_area->store_queue_count);
 	spin_unlock(&diff_area->store_queue_lock);
 
-	up(&chunk->lock);
+	chunk_up(chunk);
 
 	/* Initiate the queue clearing process */
 	if (queue_count > get_chunk_maximum_in_queue())
 		queue_work(system_wq, &diff_area->store_queue_work);
+	diff_area_put(diff_area);
 }
 
 void chunk_copy_bio(struct chunk *chunk, struct bio *bio,
@@ -193,7 +188,7 @@ static void notify_load_and_schedule_io(struct work_struct *work)
 			continue;
 		}
 		if (chunk->state == CHUNK_ST_FAILED) {
-			up(&chunk->lock);
+			chunk_up(chunk);
 			continue;
 		}
 
@@ -217,7 +212,7 @@ static void notify_load_and_postpone_io(struct work_struct *work)
 			continue;
 		}
 		if (chunk->state == CHUNK_ST_FAILED) {
-			up(&chunk->lock);
+			chunk_up(chunk);
 			continue;
 		}
 
@@ -243,36 +238,15 @@ static void chunk_notify_store(struct work_struct *work)
 		WARN_ON_ONCE(chunk->state != CHUNK_ST_IN_MEMORY);
 		chunk->state = CHUNK_ST_STORED;
 
-		chunk_diff_buffer_release(chunk);
-		up(&chunk->lock);
+		if (chunk->diff_buffer) {
+			diff_buffer_release(chunk->diff_area,
+					    chunk->diff_buffer);
+			chunk->diff_buffer = NULL;
+		}
+		chunk_up(chunk);
 	}
 
 	bio_put(&cbio->bio);
-}
-
-struct chunk *chunk_alloc(struct diff_area *diff_area, unsigned long number)
-{
-	struct chunk *chunk;
-
-	chunk = kzalloc(sizeof(struct chunk), GFP_KERNEL);
-	if (!chunk)
-		return NULL;
-
-	INIT_LIST_HEAD(&chunk->link);
-	sema_init(&chunk->lock, 1);
-	chunk->diff_area = diff_area;
-	chunk->number = number;
-	chunk->state = CHUNK_ST_NEW;
-	return chunk;
-}
-
-void chunk_free(struct chunk *chunk)
-{
-	if (unlikely(!chunk))
-		return;
-	chunk_diff_buffer_release(chunk);
-	diff_storage_free_region(chunk->diff_region);
-	kfree(chunk);
 }
 
 static void chunk_io_endio(struct bio *bio)

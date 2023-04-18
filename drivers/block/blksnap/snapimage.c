@@ -11,7 +11,6 @@
 #include <uapi/linux/blksnap.h>
 #include "snapimage.h"
 #include "tracker.h"
-#include "diff_area.h"
 #include "chunk.h"
 #include "cbt_map.h"
 
@@ -26,6 +25,11 @@ static void snapimage_submit_bio(struct bio *bio)
 	struct tracker *tracker = bio->bi_bdev->bd_disk->private_data;
 	struct diff_area *diff_area = tracker->diff_area;
 
+	/*
+	 * The diff_area is not blocked from releasing now, because
+	 * snapimage_free() is calling before diff_area_put() in
+	 * tracker_release_snapshot().
+	 */
 	if (diff_area_is_corrupted(diff_area)) {
 		bio_io_error(bio);
 		return;

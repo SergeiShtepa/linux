@@ -87,6 +87,7 @@ struct chunk;
  *
  */
 struct diff_area {
+	struct kref kref;
 	struct block_device *orig_bdev;
 	struct diff_storage *diff_storage;
 
@@ -112,7 +113,16 @@ struct diff_area {
 
 struct diff_area *diff_area_new(dev_t dev_id,
 				struct diff_storage *diff_storage);
-void diff_area_free(struct diff_area *diff_area);
+void diff_area_free(struct kref *kref);
+static inline struct diff_area *diff_area_get(struct diff_area *diff_area)
+{
+	kref_get(&diff_area->kref);
+	return diff_area;
+};
+static inline void diff_area_put(struct diff_area *diff_area)
+{
+	kref_put(&diff_area->kref, diff_area_free);
+};
 
 void diff_area_set_corrupted(struct diff_area *diff_area, int err_code);
 static inline bool diff_area_is_corrupted(struct diff_area *diff_area)

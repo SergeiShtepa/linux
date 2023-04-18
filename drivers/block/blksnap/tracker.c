@@ -45,8 +45,14 @@ static bool tracker_submit_bio(struct bio *bio)
 		copy_iter.bi_sector -= bio->bi_bdev->bd_start_sect;
 
 	if (cbt_map_set(tracker->cbt_map, copy_iter.bi_sector, count) ||
-	    !atomic_read(&tracker->snapshot_is_taken) ||
-	    diff_area_is_corrupted(tracker->diff_area))
+	    !atomic_read(&tracker->snapshot_is_taken))
+		return false;
+	/*
+	 * The diff_area is not blocked from releasing now, because
+	 * changing the value of the snapshot_is_taken is performed when
+	 * the block device queue is frozen in tracker_release_snapshot().
+	 */
+	if (diff_area_is_corrupted(tracker->diff_area))
 		return false;
 
 	return diff_area_cow(bio, tracker->diff_area, &copy_iter);
@@ -287,22 +293,24 @@ int tracker_take_snapshot(struct tracker *tracker)
 
 void tracker_release_snapshot(struct tracker *tracker)
 {
-	if (tracker->diff_area) {
-		blk_mq_freeze_queue(tracker->diff_area->orig_bdev->bd_queue);
+	struct diff_area *diff_area = tracker->diff_area;
 
-		pr_debug("Tracker for device [%u:%u] release snapshot\n",
-			 MAJOR(tracker->dev_id), MINOR(tracker->dev_id));
+	if (unlikely(!diff_area))
+		return;
 
-		atomic_set(&tracker->snapshot_is_taken, false);
-
-		blk_mq_unfreeze_queue(tracker->diff_area->orig_bdev->bd_queue);
-	}
 	snapimage_free(tracker);
 
-	if (tracker->diff_area) {
-		diff_area_free(tracker->diff_area);
-		tracker->diff_area = NULL;
-	}
+	blk_mq_freeze_queue(diff_area->orig_bdev->bd_queue);
+
+	pr_debug("Tracker for device [%u:%u] release snapshot\n",
+		 MAJOR(tracker->dev_id), MINOR(tracker->dev_id));
+
+	atomic_set(&tracker->snapshot_is_taken, false);
+	tracker->diff_area = NULL;
+
+	blk_mq_unfreeze_queue(diff_area->orig_bdev->bd_queue);
+
+	diff_area_put(diff_area);
 }
 
 int __init tracker_init(void)
