@@ -280,7 +280,7 @@ struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
 	}
 
 	if (ret) {
-		diff_area_free(diff_area);
+		diff_area_put(diff_area);
 		return ERR_PTR(ret);
 	}
 

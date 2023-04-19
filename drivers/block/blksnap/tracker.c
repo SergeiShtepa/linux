@@ -23,7 +23,7 @@ void tracker_free(struct kref *kref)
 		 MINOR(tracker->dev_id));
 
 	if (tracker->diff_area)
-		diff_area_free(tracker->diff_area);
+		diff_area_put(tracker->diff_area);
 	if (tracker->cbt_map)
 		cbt_map_destroy(tracker->cbt_map);
 
