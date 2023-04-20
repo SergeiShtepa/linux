@@ -18,13 +18,15 @@ struct chunk;
 /**
  * struct diff_area - Describes the difference area for one original device.
  *
+ * @kref:
+ *	The reference counter allows to manage the lifetime of an object.
  * @orig_bdev:
  *	A pointer to the structure of an opened block device.
  * @diff_storage:
  *	Pointer to difference storage for storing difference data.
  * @chunk_shift:
- *	Power of 2 used to specify the chunk size. This allows to set different chunk sizes for
- *	huge and small block devices.
+ *	Power of 2 used to specify the chunk size. This allows to set different
+ *	chunk sizes for huge and small block devices.
  * @chunk_count:
  *	Count of chunks. The number of chunks into which the block device
  *	is divided.
