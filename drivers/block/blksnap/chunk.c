@@ -283,25 +283,26 @@ void chunk_store(struct chunk *chunk)
 	bio_set_flag(bio, BIO_FILTERED);
 
 	while (count) {
+		struct bio *next;
 		sector_t portion = min_t(sector_t, count, PAGE_SECTORS);
 		unsigned int bytes = portion << SECTOR_SHIFT;
 
 		if (bio_add_page(bio, chunk->diff_buffer->pages[page_idx],
-				 bytes, 0) != bytes) {
-			struct bio *next;
+				 bytes, 0) == bytes) {
+			page_idx++;
+			count -= portion;
+			continue;
+		}
 
-			next = bio_alloc_bioset(bdev,
-					calc_max_vecs(count),
+		/* Create next bio */
+		next = bio_alloc_bioset(bdev, calc_max_vecs(count),
 					REQ_OP_WRITE | REQ_SYNC | REQ_FUA,
 					GFP_NOIO, &chunk_io_bioset);
-			next->bi_iter.bi_sector = bio_end_sector(bio);
-			bio_set_flag(next, BIO_FILTERED);
-			bio_chain(bio, next);
-			submit_bio_noacct(bio);
-			bio = next;
-		}
-		page_idx++;
-		count -= portion;
+		next->bi_iter.bi_sector = bio_end_sector(bio);
+		bio_set_flag(next, BIO_FILTERED);
+		bio_chain(bio, next);
+		submit_bio_noacct(bio);
+		bio = next;
 	}
 
 	cbio = container_of(bio, struct chunk_bio, bio);
@@ -342,24 +343,26 @@ static struct bio *__chunk_load(struct chunk *chunk)
 	bio_set_flag(bio, BIO_FILTERED);
 
 	while (count) {
+		struct bio *next;
 		sector_t portion = min_t(sector_t, count, PAGE_SECTORS);
 		unsigned int bytes = portion << SECTOR_SHIFT;
 
 		if (bio_add_page(bio, chunk->diff_buffer->pages[page_idx],
-				 bytes, 0) != bytes) {
-			struct bio *next;
-
-			next = bio_alloc_bioset(bdev, calc_max_vecs(count),
-						REQ_OP_READ, GFP_NOIO,
-						&chunk_io_bioset);
-			next->bi_iter.bi_sector = bio_end_sector(bio);
-			bio_set_flag(next, BIO_FILTERED);
-			bio_chain(bio, next);
-			submit_bio_noacct(bio);
-			bio = next;
+				 bytes, 0) == bytes) {
+			page_idx++;
+			count -= portion;
+			continue;
 		}
-		page_idx++;
-		count -= portion;
+
+		/* Create next bio */
+		next = bio_alloc_bioset(bdev, calc_max_vecs(count),
+					REQ_OP_READ, GFP_NOIO,
+					&chunk_io_bioset);
+		next->bi_iter.bi_sector = bio_end_sector(bio);
+		bio_set_flag(next, BIO_FILTERED);
+		bio_chain(bio, next);
+		submit_bio_noacct(bio);
+		bio = next;
 	}
 	return bio;
 }
