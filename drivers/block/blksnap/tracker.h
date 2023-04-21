@@ -19,6 +19,9 @@ struct diff_area;
  *
  * @filter:
  *	The block device filter structure.
+ * @ctl_lock:
+ *	The mutex blocks simultaneous management of the tracker from different
+ *	treads.
  * @link:
  *	List header. Allows to combine trackers into a list in a snapshot.
  * @kref:
@@ -41,6 +44,7 @@ struct diff_area;
  */
 struct tracker {
 	struct blkfilter filter;
+	struct mutex ctl_lock;
 	struct list_head link;
 	struct kref kref;
 	dev_t dev_id;

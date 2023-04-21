@@ -79,6 +79,7 @@ static struct blkfilter *tracker_attach(struct block_device *bdev)
 		return ERR_PTR(-ENOMEM);
 	}
 
+	mutex_init(&tracker->ctl_lock);
 	INIT_LIST_HEAD(&tracker->link);
 	kref_init(&tracker->kref);
 	tracker->dev_id = bdev->bd_dev;
@@ -234,12 +235,17 @@ static int (*const ctl_table[])(struct tracker *tracker,
 static int tracker_ctl(struct blkfilter *flt, const unsigned int cmd,
 		       __u8 __user *buf, __u32 *plen)
 {
+	int ret = 0;
 	struct tracker *tracker = container_of(flt, struct tracker, filter);
 
 	if (cmd > ARRAY_SIZE(ctl_table))
 		return -ENOTTY;
 
-	return ctl_table[cmd](tracker, buf, plen);
+	mutex_lock(&tracker->ctl_lock);
+	ret = ctl_table[cmd](tracker, buf, plen);
+	mutex_unlock(&tracker->ctl_lock);
+
+	return ret;
 }
 
 static struct blkfilter_operations tracker_ops = {

@@ -28,7 +28,7 @@ static void snapshot_free(struct kref *kref)
 
 		tracker = list_first_entry(&snapshot->trackers, struct tracker,
 					   link);
-		list_del(&tracker->link);
+		list_del_init(&tracker->link);
 		tracker_release_snapshot(tracker);
 		tracker_put(tracker);
 	}
@@ -160,14 +160,17 @@ int snapshot_add_device(const uuid_t *id, struct tracker *tracker)
 		}
 	}
 	if (!ret) {
-		tracker_get(tracker);
-		list_add_tail(&tracker->link, &snapshot->trackers);
+		if (list_empty(&tracker->link)) {
+			tracker_get(tracker);
+			list_add_tail(&tracker->link, &snapshot->trackers);
+		} else
+			ret = -EBUSY;
 	}
 	up_write(&snapshot->rw_lock);
 
 	snapshot_put(snapshot);
 
-	return 0;
+	return ret;
 }
 
 int snapshot_destroy(const uuid_t *id)
