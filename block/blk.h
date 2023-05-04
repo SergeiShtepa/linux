@@ -463,6 +463,7 @@ int blkfilter_ioctl_detach(struct block_device *bdev,
 int blkfilter_ioctl_ctl(struct block_device *bdev,
 		    struct blkfilter_ctl __user *argp);
 void blkfilter_detach(struct block_device *bdev);
+ssize_t blkfilter_show(struct block_device *bdev, char *buf);
 
 int disk_register_independent_access_ranges(struct gendisk *disk);
 void disk_unregister_independent_access_ranges(struct gendisk *disk);

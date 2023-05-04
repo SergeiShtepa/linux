@@ -156,6 +156,20 @@ out_queue_exit:
 	return ret;
 }
 
+ssize_t blkfilter_show(struct block_device *bdev, char *buf)
+{
+	ssize_t ret = 0;
+
+	blk_mq_freeze_queue(bdev->bd_queue);
+	if (bdev->bd_filter)
+		ret = sprintf(buf, "%s\n", bdev->bd_filter->ops->name);
+	else
+		ret = sprintf(buf, "\n");
+	blk_mq_unfreeze_queue(bdev->bd_queue);
+
+	return ret;
+}
+
 /**
  * blkfilter_register() - Register block device filter operations
  * @ops:	The operations to register.
