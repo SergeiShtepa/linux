@@ -98,6 +98,7 @@ static inline void chunk_up(struct chunk *chunk)
 };
 
 void chunk_store_failed(struct chunk *chunk, int error);
+struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio);
 
 void chunk_copy_bio(struct chunk *chunk, struct bio *bio,
 		    struct bvec_iter *iter);

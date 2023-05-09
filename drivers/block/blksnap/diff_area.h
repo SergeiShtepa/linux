@@ -93,7 +93,7 @@ struct diff_area {
 	struct block_device *orig_bdev;
 	struct diff_storage *diff_storage;
 
-	unsigned long long chunk_shift;
+	unsigned long chunk_shift;
 	unsigned long chunk_count;
 	struct xarray chunk_map;
 

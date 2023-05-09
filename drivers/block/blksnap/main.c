@@ -51,14 +51,17 @@ int tracking_block_maximum_shift = 26;
 int chunk_minimum_shift = 18;
 
 /*
- * The maximum number of chunks.
- * To store information about the state of all the chunks, a table is created
+ * The power of 2 for maximum number of chunks.
+ * To store information about the state of the chunks, a table is created
  * in RAM. So, if the size of the chunk is small, then the size of the table
  * turns out to be large and memory is consumed inefficiently.
  * As the size of the block device grows, the size of the chunk should also
  * grow. For this purpose, the maximum number of chunks is set.
+ * The table expands dynamically when new chunks are allocated. Therefore,
+ * memory consumption also depends on the intensity of writing to the block
+ * device under the snapshot.
  */
-int chunk_maximum_count = 2097152;
+int chunk_maximum_count_shift = 48;
 
 /*
  * The power of 2 for maximum chunk size.
@@ -122,9 +125,9 @@ int get_chunk_maximum_shift(void)
 {
 	return chunk_maximum_shift;
 }
-int get_chunk_maximum_count(void)
+unsigned long get_chunk_maximum_count(void)
 {
-	return chunk_maximum_count;
+	return (1ul << chunk_maximum_count_shift);
 }
 int get_chunk_maximum_in_queue(void)
 {
@@ -334,22 +337,56 @@ static struct miscdevice blksnap_ctrl_misc = {
 	.fops		= &blksnap_ctrl_fops,
 };
 
+static int __init parameters_init(void)
+{
+	pr_debug("tracking_block_minimum_shift: %d\n",
+		 tracking_block_minimum_shift);
+	pr_debug("tracking_block_maximum_shift: %d\n",
+		 tracking_block_maximum_shift);
+	pr_debug("tracking_block_maximum_count: %d\n",
+		 tracking_block_maximum_count);
+
+	pr_debug("chunk_minimum_shift: %d\n", chunk_minimum_shift);
+	pr_debug("chunk_maximum_shift: %d\n", chunk_maximum_shift);
+	pr_debug("chunk_maximum_count_shift: %d\n", chunk_maximum_count_shift);
+
+	pr_debug("chunk_maximum_in_queue: %d\n", chunk_maximum_in_queue);
+	pr_debug("free_diff_buffer_pool_size: %d\n",
+		 free_diff_buffer_pool_size);
+	pr_debug("diff_storage_minimum: %d\n", diff_storage_minimum);
+
+	if (tracking_block_maximum_shift < tracking_block_minimum_shift) {
+		tracking_block_maximum_shift = tracking_block_minimum_shift;
+		pr_warn("fixed tracking_block_maximum_shift: %d\n",
+			 tracking_block_maximum_shift);
+	}
+
+	if (chunk_maximum_shift < chunk_minimum_shift) {
+		chunk_maximum_shift = chunk_minimum_shift;
+		pr_warn("fixed chunk_maximum_shift: %d\n",
+			 chunk_maximum_shift);
+	}
+
+	if (sizeof(unsigned long) < 4)
+		chunk_maximum_count_shift = min(16ul, chunk_maximum_count_shift);
+	else if (sizeof(unsigned long) == 4)
+		chunk_maximum_count_shift = min(32ul, chunk_maximum_count_shift);
+	else if (sizeof(unsigned long) >= 8)
+		chunk_maximum_count_shift = min(64ul, chunk_maximum_count_shift);
+
+	return 0;
+}
+
 static int __init blksnap_init(void)
 {
 	int ret;
 
 	pr_debug("Loading\n");
 	pr_debug("Version: %s\n", VERSION_STR);
-	pr_debug("tracking_block_minimum_shift: %d\n",
-		 tracking_block_minimum_shift);
-	pr_debug("tracking_block_maximum_count: %d\n",
-		 tracking_block_maximum_count);
-	pr_debug("chunk_minimum_shift: %d\n", chunk_minimum_shift);
-	pr_debug("chunk_maximum_count: %d\n", chunk_maximum_count);
-	pr_debug("chunk_maximum_in_queue: %d\n", chunk_maximum_in_queue);
-	pr_debug("free_diff_buffer_pool_size: %d\n",
-		 free_diff_buffer_pool_size);
-	pr_debug("diff_storage_minimum: %d\n", diff_storage_minimum);
+
+	ret = parameters_init();
+	if (ret)
+		return ret;
 
 	ret = chunk_init();
 	if (ret)
@@ -405,9 +442,10 @@ MODULE_PARM_DESC(tracking_block_maximum_shift,
 module_param_named(chunk_minimum_shift, chunk_minimum_shift, int, 0644);
 MODULE_PARM_DESC(chunk_minimum_shift,
 		 "The power of 2 for minimum chunk size");
-module_param_named(chunk_maximum_count, chunk_maximum_count, int, 0644);
-MODULE_PARM_DESC(chunk_maximum_count,
-		 "The maximum number of chunks");
+module_param_named(chunk_maximum_count_shift, chunk_maximum_count_shift,
+		   int, 0644);
+MODULE_PARM_DESC(chunk_maximum_count_shift,
+		 "The power of 2 for maximum number of chunks");
 module_param_named(chunk_maximum_shift, chunk_maximum_shift, int, 0644);
 MODULE_PARM_DESC(chunk_maximum_shift,
 		 "The power of 2 for maximum snapshots chunk size");

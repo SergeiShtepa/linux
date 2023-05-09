@@ -141,6 +141,11 @@ static inline unsigned int chunk_limit(struct chunk *chunk, struct bio *bio)
 	return min(bio->bi_iter.bi_size, chunk_left);
 }
 
+struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio)
+{
+	return bio_alloc_clone(bdev, bio, GFP_NOIO, &chunk_clone_bioset);
+}
+
 void chunk_clone_bio(struct chunk *chunk, struct bio *bio)
 {
 	struct bio *new_bio;
@@ -155,7 +160,9 @@ void chunk_clone_bio(struct chunk *chunk, struct bio *bio)
 		sector = chunk_sector(chunk);
 	}
 
-	new_bio = bio_alloc_clone(bdev, bio, GFP_NOIO, &chunk_clone_bioset);
+	new_bio = chunk_alloc_clone(bdev, bio);
+	WARN_ON(!new_bio);
+
 	chunk_limit_iter(chunk, bio, sector, &new_bio->bi_iter);
 	bio_set_flag(new_bio, BIO_FILTERED);
 	new_bio->bi_end_io = chunk_clone_endio;
