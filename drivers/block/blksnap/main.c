@@ -61,7 +61,7 @@ int chunk_minimum_shift = 18;
  * memory consumption also depends on the intensity of writing to the block
  * device under the snapshot.
  */
-int chunk_maximum_count_shift = 48;
+int chunk_maximum_count_shift = 40;
 
 /*
  * The power of 2 for maximum chunk size.
@@ -367,6 +367,11 @@ static int __init parameters_init(void)
 			 chunk_maximum_shift);
 	}
 
+	/*
+	 * The XArray is used to store chunks. And 'unsigned long' is used as
+	 * chunk number parameter. So, The number of chunks cannot exceed the
+	 * limits of ULONG_MAX.
+	 */
 	if (sizeof(unsigned long) < 4)
 		chunk_maximum_count_shift = min(16ul, chunk_maximum_count_shift);
 	else if (sizeof(unsigned long) == 4)

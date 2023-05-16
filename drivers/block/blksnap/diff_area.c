@@ -100,11 +100,6 @@ static void diff_area_calculate_chunk_size(struct diff_area *diff_area)
 
 	count = count_by_shift(capacity, shift);
 	pr_debug("Chunks count %llu\n", count);
-	/*
-	 * The XArray is used to store chunks. And 'unsigned long' is used as
-	 * chunk number parameter. So, The number of chunks cannot exceed the
-	 * limits of ULONG_MAX.
-	 */
 	while ((count > get_chunk_maximum_count()) ||
 		((1ul << (shift - SECTOR_SHIFT)) < min_io_sect)) {
 		shift++;
