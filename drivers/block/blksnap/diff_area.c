@@ -53,7 +53,7 @@ static inline struct chunk *chunk_alloc(struct diff_area *diff_area,
 {
 	struct chunk *chunk;
 
-	chunk = kzalloc(sizeof(struct chunk), GFP_KERNEL);
+	chunk = kzalloc(sizeof(struct chunk), GFP_NOIO);
 	if (!chunk)
 		return NULL;
 
