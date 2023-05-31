@@ -18,6 +18,7 @@
 #include <linux/blkdev.h>
 #include <linux/blk-pm.h>
 #include <linux/blk-integrity.h>
+#include <linux/blk-filter.h>
 #include <linux/highmem.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
@@ -585,8 +586,30 @@ static inline blk_status_t blk_check_zone_append(struct request_queue *q,
 	return BLK_STS_OK;
 }
 
+static bool submit_bio_filter(struct bio *bio)
+{
+	/*
+	 * If this bio came from the filter driver, send it straight down to the
+	 * actual device and clear the filtered flag, as the bio could be passed
+	 * on to another device that might have a filter attached again.
+	 */
+	if (bio_flagged(bio, BIO_FILTERED)) {
+		bio_clear_flag(bio, BIO_FILTERED);
+		return false;
+	}
+	bio_set_flag(bio, BIO_FILTERED);
+	return bio->bi_bdev->bd_filter->ops->submit_bio(bio);
+}
+
 static void __submit_bio(struct bio *bio)
 {
+	/*
+	 * If there is a filter driver attached, check if the BIO needs to go to
+	 * the filter driver first, which can then pass on the bio or consume it.
+	 */
+	if (bio->bi_bdev->bd_filter && submit_bio_filter(bio))
+		return;
+
 	if (unlikely(!blk_crypto_bio_prep(&bio)))
 		return;
 
@@ -676,6 +699,15 @@ static void __submit_bio_noacct_mq(struct bio *bio)
 	current->bio_list = NULL;
 }
 
+/**
+ * submit_bio_noacct_nocheck - re-submit a bio to the block device layer for I/O
+ *	from block device filter.
+ * @bio:  The bio describing the location in memory and on the device.
+ *
+ * This is a version of submit_bio() that shall only be used for I/O that is
+ * resubmitted to lower level by block device filters.  All file  systems and
+ * other upper level users of the block layer should use submit_bio() instead.
+ */
 void submit_bio_noacct_nocheck(struct bio *bio)
 {
 	blk_cgroup_bio_start(bio);
@@ -703,6 +735,7 @@ void submit_bio_noacct_nocheck(struct bio *bio)
 	else
 		__submit_bio_noacct(bio);
 }
+EXPORT_SYMBOL_GPL(submit_bio_noacct_nocheck);
 
 /**
  * submit_bio_noacct - re-submit a bio to the block device layer for I/O
