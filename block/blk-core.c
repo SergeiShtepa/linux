@@ -588,15 +588,9 @@ static inline blk_status_t blk_check_zone_append(struct request_queue *q,
 
 static bool submit_bio_filter(struct bio *bio)
 {
-	/*
-	 * If this bio came from the filter driver, send it straight down to the
-	 * actual device and clear the filtered flag, as the bio could be passed
-	 * on to another device that might have a filter attached again.
-	 */
-	if (bio_flagged(bio, BIO_FILTERED)) {
-		bio_clear_flag(bio, BIO_FILTERED);
+	if (bio_flagged(bio, BIO_FILTERED))
 		return false;
-	}
+
 	bio_set_flag(bio, BIO_FILTERED);
 	return bio->bi_bdev->bd_filter->ops->submit_bio(bio);
 }
