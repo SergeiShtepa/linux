@@ -104,7 +104,7 @@ struct blksnap_cbtinfo {
 struct blksnap_cbtmap {
 	__u32 offset;
 	__u32 length;
-	__u8 *buffer;
+	__u64 buffer;
 };
 
 /**
@@ -131,7 +131,7 @@ struct blksnap_sectors {
  */
 struct blksnap_cbtdirty {
 	__u32 count;
-	struct blksnap_sectors *dirty_sectors;
+	__u64 dirty_sectors;
 };
 
 /**
@@ -261,7 +261,7 @@ struct blksnap_version {
  */
 struct blksnap_snapshot_append_storage {
 	struct blksnap_uuid id;
-	__u8 *bdev_path;
+	__u64 bdev_path;
 	__u32 bdev_path_size;
 	__u32 count;
 	struct blksnap_sectors *ranges;
@@ -301,11 +301,11 @@ struct blksnap_snapshot_append_storage {
  * @count:
  *	Size of &blksnap_snapshot_collect.ids in the number of 16-byte UUID.
  * @ids:
- *	Pointer to the array with the snapshot ID for output.
+ *	Pointer to the array of struct blksnap_uuid for output.
  */
 struct blksnap_snapshot_collect {
 	__u32 count;
-	struct blksnap_uuid *ids;
+	__u64 ids;
 };
 
 /**

@@ -202,7 +202,8 @@ static int ioctl_snapshot_append_storage(unsigned long arg)
 		return -EINVAL;
 	}
 
-	bdev_path = strndup_user(karg.bdev_path, karg.bdev_path_size);
+	bdev_path = strndup_user(u64_to_user_ptr(karg.bdev_path),
+				 karg.bdev_path_size);
 	if (IS_ERR(bdev_path)) {
 		pr_err("Unable to append difference storage: invalid block device name buffer\n");
 		return PTR_ERR(bdev_path);
@@ -237,7 +238,7 @@ static int ioctl_snapshot_collect(unsigned long arg)
 		return -ENODATA;
 	}
 
-	ret = snapshot_collect(&karg.count, karg.ids);
+	ret = snapshot_collect(&karg.count, u64_to_user_ptr(karg.ids));
 
 	if (copy_to_user((void *)arg, &karg, sizeof(karg))) {
 		pr_err("Unable to collect available snapshots: invalid user buffer\n");
