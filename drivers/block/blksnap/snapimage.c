@@ -52,7 +52,7 @@ static void snapimage_submit_bio(struct bio *bio)
 	bio_endio(bio);
 }
 
-const struct block_device_operations bd_ops = {
+static const struct block_device_operations bd_ops = {
 	.owner = THIS_MODULE,
 	.submit_bio = snapimage_submit_bio,
 };

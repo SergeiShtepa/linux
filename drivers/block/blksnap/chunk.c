@@ -17,8 +17,8 @@ struct chunk_bio {
 	struct bio bio;
 };
 
-struct bio_set chunk_io_bioset;
-struct bio_set chunk_clone_bioset;
+static struct bio_set chunk_io_bioset;
+static struct bio_set chunk_clone_bioset;
 
 static inline sector_t chunk_sector(struct chunk *chunk)
 {

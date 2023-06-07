@@ -264,7 +264,7 @@ struct blksnap_snapshot_append_storage {
 	__u64 bdev_path;
 	__u32 bdev_path_size;
 	__u32 count;
-	struct blksnap_sectors *ranges;
+	__u64 ranges;
 };
 
 /**

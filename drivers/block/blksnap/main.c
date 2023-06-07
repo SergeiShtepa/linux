@@ -18,7 +18,7 @@
  * about the changes, but the size of the change tracker table will be too
  * large, which will lead to inefficient memory usage.
  */
-int tracking_block_minimum_shift = 16;
+static int tracking_block_minimum_shift = 16;
 
 /*
  * The maximum number of tracking blocks.
@@ -29,7 +29,7 @@ int tracking_block_minimum_shift = 16;
  * size should also grow. For this purpose, the limit of the maximum
  * number of block size is set.
  */
-int tracking_block_maximum_count = 2097152;
+static int tracking_block_maximum_count = 2097152;
 
 /*
  * The power of 2 for maximum tracking block size.
@@ -38,7 +38,7 @@ int tracking_block_maximum_count = 2097152;
  * If the limit on the maximum block size has been reached, then the number of
  * blocks may exceed the tracking_block_maximum_count.
  */
-int tracking_block_maximum_shift = 26;
+static int tracking_block_maximum_shift = 26;
 
 /*
  * The power of 2 for minimum chunk size.
@@ -48,7 +48,7 @@ int tracking_block_maximum_shift = 26;
  * reduce performance. Too large a chunk size will lead to inefficient use of
  * the difference storage.
  */
-int chunk_minimum_shift = 18;
+static int chunk_minimum_shift = 18;
 
 /*
  * The power of 2 for maximum number of chunks.
@@ -61,7 +61,7 @@ int chunk_minimum_shift = 18;
  * memory consumption also depends on the intensity of writing to the block
  * device under the snapshot.
  */
-int chunk_maximum_count_shift = 40;
+static int chunk_maximum_count_shift = 40;
 
 /*
  * The power of 2 for maximum chunk size.
@@ -70,7 +70,7 @@ int chunk_maximum_count_shift = 40;
  * If the limit on the maximum block size has been reached, then the number of
  * blocks may exceed the chunk_maximum_count.
  */
-int chunk_maximum_shift = 26;
+static int chunk_maximum_shift = 26;
 /*
  * The maximum number of chunks in queue.
  * The chunk is not immediately stored to the difference storage. The chunks
@@ -78,7 +78,7 @@ int chunk_maximum_shift = 26;
  * of storing a chunks data to the difference storage and perform it later in
  * the worker thread.
  */
-int chunk_maximum_in_queue = 16;
+static int chunk_maximum_in_queue = 16;
 
 /*
  * The size of the pool of preallocated difference buffers.
@@ -87,7 +87,7 @@ int chunk_maximum_in_queue = 16;
  * However, if there are too many free buffers in the pool, then these free
  * buffers will be released immediately.
  */
-int free_diff_buffer_pool_size = 128;
+static int free_diff_buffer_pool_size = 128;
 
 /*
  * The minimum allowable size of the difference storage in sectors.
@@ -95,7 +95,7 @@ int free_diff_buffer_pool_size = 128;
  * snapshot data. If there is less free space in the storage than the minimum,
  * an event is generated about the lack of free space.
  */
-int diff_storage_minimum = 2097152;
+static int diff_storage_minimum = 2097152;
 
 #define VERSION_STR "2.0.0.0"
 static const struct blksnap_version version = {
@@ -144,7 +144,8 @@ int get_diff_storage_minimum(void)
 
 static int ioctl_version(unsigned long arg)
 {
-	struct blksnap_version __user *user_version = (void *)arg;
+	struct blksnap_version __user *user_version =
+		(struct blksnap_version __user *)arg;
 
 	if (copy_to_user(user_version, &version, sizeof(version))) {
 		pr_err("Unable to get version: invalid user buffer\n");
@@ -159,7 +160,7 @@ static_assert(sizeof(uuid_t) == sizeof(struct blksnap_uuid),
 
 static int ioctl_snapshot_create(unsigned long arg)
 {
-	struct blksnap_uuid __user *user_id = (void *)arg;
+	struct blksnap_uuid __user *user_id = (struct blksnap_uuid __user *)arg;
 	uuid_t kernel_id;
 	int ret;
 
@@ -177,7 +178,7 @@ static int ioctl_snapshot_create(unsigned long arg)
 
 static int ioctl_snapshot_destroy(unsigned long arg)
 {
-	struct blksnap_uuid __user *user_id = (void *)arg;
+	struct blksnap_uuid __user *user_id = (struct blksnap_uuid __user *)arg;
 	uuid_t kernel_id;
 
 	if (copy_from_user(kernel_id.b, user_id->b, sizeof(uuid_t))) {
@@ -191,7 +192,8 @@ static int ioctl_snapshot_destroy(unsigned long arg)
 static int ioctl_snapshot_append_storage(unsigned long arg)
 {
 	int ret;
-	struct blksnap_snapshot_append_storage __user *uarg = (void *)arg;
+	struct blksnap_snapshot_append_storage __user *uarg =
+		(struct blksnap_snapshot_append_storage __user *)arg;
 	struct blksnap_snapshot_append_storage karg;
 	char *bdev_path = NULL;
 
@@ -210,14 +212,14 @@ static int ioctl_snapshot_append_storage(unsigned long arg)
 	}
 
 	ret = snapshot_append_storage((uuid_t *)karg.id.b, bdev_path,
-				       karg.ranges, karg.count);
+				      u64_to_user_ptr(karg.ranges), karg.count);
 	kfree(bdev_path);
 	return ret;
 }
 
 static int ioctl_snapshot_take(unsigned long arg)
 {
-	struct blksnap_uuid __user *user_id = (void *)arg;
+	struct blksnap_uuid __user *user_id = (struct blksnap_uuid __user *)arg;
 	uuid_t kernel_id;
 
 	if (copy_from_user(kernel_id.b, user_id->b, sizeof(uuid_t))) {
@@ -233,14 +235,14 @@ static int ioctl_snapshot_collect(unsigned long arg)
 	int ret;
 	struct blksnap_snapshot_collect karg;
 
-	if (copy_from_user(&karg, (void *)arg, sizeof(karg))) {
+	if (copy_from_user(&karg, (const void __user *)arg, sizeof(karg))) {
 		pr_err("Unable to collect available snapshots: invalid user buffer\n");
 		return -ENODATA;
 	}
 
 	ret = snapshot_collect(&karg.count, u64_to_user_ptr(karg.ids));
 
-	if (copy_to_user((void *)arg, &karg, sizeof(karg))) {
+	if (copy_to_user((void __user *)arg, &karg, sizeof(karg))) {
 		pr_err("Unable to collect available snapshots: invalid user buffer\n");
 		return -ENODATA;
 	}
@@ -254,7 +256,8 @@ static_assert(sizeof(struct blksnap_snapshot_event) == 4096,
 static int ioctl_snapshot_wait_event(unsigned long arg)
 {
 	int ret = 0;
-	struct blksnap_snapshot_event __user *uarg = (void *)arg;
+	struct blksnap_snapshot_event __user *uarg =
+		(struct blksnap_snapshot_event __user *)arg;
 	struct blksnap_snapshot_event *karg;
 	struct event *ev;
 

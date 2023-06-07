@@ -13,8 +13,8 @@
 #include "snapimage.h"
 #include "cbt_map.h"
 
-LIST_HEAD(snapshots);
-DECLARE_RWSEM(snapshots_lock);
+static LIST_HEAD(snapshots);
+static DECLARE_RWSEM(snapshots_lock);
 
 static void snapshot_free(struct kref *kref)
 {
