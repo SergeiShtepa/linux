@@ -26,7 +26,7 @@
 struct storage_bdev {
 	struct list_head link;
 	struct block_device *bdev;
-	char bdev_path[1];
+	char bdev_path[];
 };
 
 /**
@@ -166,8 +166,8 @@ static struct block_device *diff_storage_add_storage_bdev(
 		return bdev;
 	}
 
-	storage_bdev = kzalloc(sizeof(struct storage_bdev) + strlen(bdev_path),
-			       GFP_KERNEL);
+	storage_bdev = kzalloc(sizeof(struct storage_bdev) +
+			       strlen(bdev_path) + 1, GFP_KERNEL);
 	if (!storage_bdev) {
 		blkdev_put(bdev, FMODE_READ | FMODE_WRITE);
 		return ERR_PTR(-ENOMEM);

@@ -20,7 +20,8 @@
  * @data_size:
  *	The number of bytes in the event data array.
  * @data:
- *	An array of event data.
+ *	An array of event data. The allowed size of the array is limited
+ *      so that the size of the entire structure does not exceed PAGE_SIZE.
  *
  * Events can be different, so they contain different data. The size of the
  * data array is not defined exactly, but it has limitations. The size of
@@ -31,7 +32,7 @@ struct event {
 	ktime_t time;
 	int code;
 	int data_size;
-	char data[1]; /* up to PAGE_SIZE - sizeof(struct blksnap_snapshot_event) */
+	char data[];
 };
 
 /**

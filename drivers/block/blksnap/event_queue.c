@@ -32,7 +32,7 @@ int event_gen(struct event_queue *event_queue, gfp_t flags, int code,
 {
 	struct event *event;
 
-	event = kzalloc(sizeof(struct event) + data_size, flags);
+	event = kzalloc(sizeof(struct event) + data_size + 1, flags);
 	if (!event)
 		return -ENOMEM;
 
