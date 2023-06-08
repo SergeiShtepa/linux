@@ -99,7 +99,7 @@ static void diff_area_calculate_chunk_size(struct diff_area *diff_area)
 	pr_debug("Device capacity %llu sectors\n", capacity);
 
 	count = count_by_shift(capacity, shift);
-	pr_debug("Chunks count %llu\n", count);
+	pr_debug("Chunks count %lu\n", count);
 	while ((count > get_chunk_maximum_count()) ||
 		((1ul << (shift - SECTOR_SHIFT)) < min_io_sect)) {
 		shift++;
