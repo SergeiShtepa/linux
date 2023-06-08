@@ -18,7 +18,7 @@
  * about the changes, but the size of the change tracker table will be too
  * large, which will lead to inefficient memory usage.
  */
-static int tracking_block_minimum_shift = 16;
+static unsigned int tracking_block_minimum_shift = 16;
 
 /*
  * The maximum number of tracking blocks.
@@ -29,7 +29,7 @@ static int tracking_block_minimum_shift = 16;
  * size should also grow. For this purpose, the limit of the maximum
  * number of block size is set.
  */
-static int tracking_block_maximum_count = 2097152;
+static unsigned int tracking_block_maximum_count = 2097152;
 
 /*
  * The power of 2 for maximum tracking block size.
@@ -38,7 +38,7 @@ static int tracking_block_maximum_count = 2097152;
  * If the limit on the maximum block size has been reached, then the number of
  * blocks may exceed the tracking_block_maximum_count.
  */
-static int tracking_block_maximum_shift = 26;
+static unsigned int tracking_block_maximum_shift = 26;
 
 /*
  * The power of 2 for minimum chunk size.
@@ -48,7 +48,7 @@ static int tracking_block_maximum_shift = 26;
  * reduce performance. Too large a chunk size will lead to inefficient use of
  * the difference storage.
  */
-static int chunk_minimum_shift = 18;
+static unsigned int chunk_minimum_shift = 18;
 
 /*
  * The power of 2 for maximum number of chunks.
@@ -61,7 +61,7 @@ static int chunk_minimum_shift = 18;
  * memory consumption also depends on the intensity of writing to the block
  * device under the snapshot.
  */
-static int chunk_maximum_count_shift = 40;
+static unsigned int chunk_maximum_count_shift = 40;
 
 /*
  * The power of 2 for maximum chunk size.
@@ -70,7 +70,7 @@ static int chunk_maximum_count_shift = 40;
  * If the limit on the maximum block size has been reached, then the number of
  * blocks may exceed the chunk_maximum_count.
  */
-static int chunk_maximum_shift = 26;
+static unsigned int chunk_maximum_shift = 26;
 /*
  * The maximum number of chunks in queue.
  * The chunk is not immediately stored to the difference storage. The chunks
@@ -78,7 +78,7 @@ static int chunk_maximum_shift = 26;
  * of storing a chunks data to the difference storage and perform it later in
  * the worker thread.
  */
-static int chunk_maximum_in_queue = 16;
+static unsigned int chunk_maximum_in_queue = 16;
 
 /*
  * The size of the pool of preallocated difference buffers.
@@ -87,7 +87,7 @@ static int chunk_maximum_in_queue = 16;
  * However, if there are too many free buffers in the pool, then these free
  * buffers will be released immediately.
  */
-static int free_diff_buffer_pool_size = 128;
+static unsigned int free_diff_buffer_pool_size = 128;
 
 /*
  * The minimum allowable size of the difference storage in sectors.
@@ -95,7 +95,7 @@ static int free_diff_buffer_pool_size = 128;
  * snapshot data. If there is less free space in the storage than the minimum,
  * an event is generated about the lack of free space.
  */
-static int diff_storage_minimum = 2097152;
+static unsigned int diff_storage_minimum = 2097152;
 
 #define VERSION_STR "2.0.0.0"
 static const struct blksnap_version version = {
@@ -105,39 +105,47 @@ static const struct blksnap_version version = {
 	.build = 0,
 };
 
-int get_tracking_block_minimum_shift(void)
+unsigned int get_tracking_block_minimum_shift(void)
 {
 	return tracking_block_minimum_shift;
 }
-int get_tracking_block_maximum_shift(void)
+
+unsigned int get_tracking_block_maximum_shift(void)
 {
 	return tracking_block_maximum_shift;
 }
-int get_tracking_block_maximum_count(void)
+
+unsigned int get_tracking_block_maximum_count(void)
 {
 	return tracking_block_maximum_count;
 }
-int get_chunk_minimum_shift(void)
+
+unsigned int get_chunk_minimum_shift(void)
 {
 	return chunk_minimum_shift;
 }
-int get_chunk_maximum_shift(void)
+
+unsigned int get_chunk_maximum_shift(void)
 {
 	return chunk_maximum_shift;
 }
+
 unsigned long get_chunk_maximum_count(void)
 {
 	return (1ul << chunk_maximum_count_shift);
 }
-int get_chunk_maximum_in_queue(void)
+
+unsigned int get_chunk_maximum_in_queue(void)
 {
 	return chunk_maximum_in_queue;
 }
-int get_free_diff_buffer_pool_size(void)
+
+unsigned int get_free_diff_buffer_pool_size(void)
 {
 	return free_diff_buffer_pool_size;
 }
-int get_diff_storage_minimum(void)
+
+unsigned int get_diff_storage_minimum(void)
 {
 	return diff_storage_minimum;
 }
@@ -352,7 +360,7 @@ static int __init parameters_init(void)
 
 	pr_debug("chunk_minimum_shift: %d\n", chunk_minimum_shift);
 	pr_debug("chunk_maximum_shift: %d\n", chunk_maximum_shift);
-	pr_debug("chunk_maximum_count_shift: %d\n", chunk_maximum_count_shift);
+	pr_debug("chunk_maximum_count_shift: %u\n", chunk_maximum_count_shift);
 
 	pr_debug("chunk_maximum_in_queue: %d\n", chunk_maximum_in_queue);
 	pr_debug("free_diff_buffer_pool_size: %d\n",
@@ -377,11 +385,11 @@ static int __init parameters_init(void)
 	 * limits of ULONG_MAX.
 	 */
 	if (sizeof(unsigned long) < 4)
-		chunk_maximum_count_shift = min(16ul, chunk_maximum_count_shift);
+		chunk_maximum_count_shift = min(16u, chunk_maximum_count_shift);
 	else if (sizeof(unsigned long) == 4)
-		chunk_maximum_count_shift = min(32ul, chunk_maximum_count_shift);
+		chunk_maximum_count_shift = min(32u, chunk_maximum_count_shift);
 	else if (sizeof(unsigned long) >= 8)
-		chunk_maximum_count_shift = min(64ul, chunk_maximum_count_shift);
+		chunk_maximum_count_shift = min(64u, chunk_maximum_count_shift);
 
 	return 0;
 }
@@ -437,35 +445,35 @@ module_init(blksnap_init);
 module_exit(blksnap_exit);
 
 module_param_named(tracking_block_minimum_shift, tracking_block_minimum_shift,
-		   int, 0644);
+		   uint, 0644);
 MODULE_PARM_DESC(tracking_block_minimum_shift,
 		 "The power of 2 for minimum tracking block size");
 module_param_named(tracking_block_maximum_count, tracking_block_maximum_count,
-		   int, 0644);
+		   uint, 0644);
 MODULE_PARM_DESC(tracking_block_maximum_count,
 		 "The maximum number of tracking blocks");
 module_param_named(tracking_block_maximum_shift, tracking_block_maximum_shift,
-		   int, 0644);
+		   uint, 0644);
 MODULE_PARM_DESC(tracking_block_maximum_shift,
 		 "The power of 2 for maximum trackings block size");
-module_param_named(chunk_minimum_shift, chunk_minimum_shift, int, 0644);
+module_param_named(chunk_minimum_shift, chunk_minimum_shift, uint, 0644);
 MODULE_PARM_DESC(chunk_minimum_shift,
 		 "The power of 2 for minimum chunk size");
 module_param_named(chunk_maximum_count_shift, chunk_maximum_count_shift,
-		   int, 0644);
+		   uint, 0644);
 MODULE_PARM_DESC(chunk_maximum_count_shift,
 		 "The power of 2 for maximum number of chunks");
-module_param_named(chunk_maximum_shift, chunk_maximum_shift, int, 0644);
+module_param_named(chunk_maximum_shift, chunk_maximum_shift, uint, 0644);
 MODULE_PARM_DESC(chunk_maximum_shift,
 		 "The power of 2 for maximum snapshots chunk size");
-module_param_named(chunk_maximum_in_queue, chunk_maximum_in_queue, int, 0644);
+module_param_named(chunk_maximum_in_queue, chunk_maximum_in_queue, uint, 0644);
 MODULE_PARM_DESC(chunk_maximum_in_queue,
 		 "The maximum number of chunks in store queue");
-module_param_named(free_diff_buffer_pool_size, free_diff_buffer_pool_size, int,
-		   0644);
+module_param_named(free_diff_buffer_pool_size, free_diff_buffer_pool_size,
+		   uint, 0644);
 MODULE_PARM_DESC(free_diff_buffer_pool_size,
 		 "The size of the pool of preallocated difference buffers");
-module_param_named(diff_storage_minimum, diff_storage_minimum, int, 0644);
+module_param_named(diff_storage_minimum, diff_storage_minimum, uint, 0644);
 MODULE_PARM_DESC(diff_storage_minimum,
 	"The minimum allowable size of the difference storage in sectors");
 
