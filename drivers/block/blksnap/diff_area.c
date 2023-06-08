@@ -211,8 +211,6 @@ struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
 	int ret = 0;
 	struct diff_area *diff_area = NULL;
 	struct block_device *bdev;
-	unsigned long number;
-	struct chunk *chunk;
 
 	pr_debug("Open device [%u:%u]\n", MAJOR(dev_id), MINOR(dev_id));
 
