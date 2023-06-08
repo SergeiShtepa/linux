@@ -20,13 +20,10 @@
  *	Allows to combine structures into a linked list.
  * @bdev:
  *	A pointer to an open block device.
- * @bdev_path:
- *	A path to the block device.
  */
 struct storage_bdev {
 	struct list_head link;
 	struct block_device *bdev;
-	char bdev_path[];
 };
 
 /**
@@ -135,35 +132,28 @@ void diff_storage_free(struct kref *kref)
 	kfree(diff_storage);
 }
 
-static struct block_device *diff_storage_bdev_by_path(
-	struct diff_storage *diff_storage, const char *bdev_path)
-{
-	struct block_device *bdev = NULL;
-	struct storage_bdev *storage_bdev;
-
-	spin_lock(&diff_storage->lock);
-	list_for_each_entry(storage_bdev, &diff_storage->storage_bdevs, link) {
-		if (strcmp(storage_bdev->bdev_path, bdev_path) == 0) {
-			bdev = storage_bdev->bdev;
-			break;
-		}
-	}
-	spin_unlock(&diff_storage->lock);
-
-	return bdev;
-}
-
 static struct block_device *diff_storage_add_storage_bdev(
-	struct diff_storage *diff_storage, const char *bdev_path)
+		struct diff_storage *diff_storage, const char *bdev_path)
 {
+	struct storage_bdev *storage_bdev, *existing_bdev = NULL;
 	struct block_device *bdev;
-	struct storage_bdev *storage_bdev;
 
 	bdev = blkdev_get_by_path(bdev_path, FMODE_READ | FMODE_WRITE, NULL);
 	if (IS_ERR(bdev)) {
-		pr_err("Failed to open device. errno=%d\n",
-		       abs((int)PTR_ERR(bdev)));
+		pr_err("Failed to open device. errno=%ld\n", PTR_ERR(bdev));
 		return bdev;
+	}
+
+	spin_lock(&diff_storage->lock);
+	list_for_each_entry(existing_bdev, &diff_storage->storage_bdevs, link) {
+		if (existing_bdev->bdev == bdev)
+			break;
+	}
+	spin_unlock(&diff_storage->lock);
+
+	if (existing_bdev->bdev == bdev) {
+		blkdev_put(bdev, FMODE_READ | FMODE_WRITE);
+		return existing_bdev->bdev;
 	}
 
 	storage_bdev = kzalloc(sizeof(struct storage_bdev) +
@@ -175,7 +165,6 @@ static struct block_device *diff_storage_add_storage_bdev(
 
 	INIT_LIST_HEAD(&storage_bdev->link);
 	storage_bdev->bdev = bdev;
-	strcpy(storage_bdev->bdev_path, bdev_path);
 
 	spin_lock(&diff_storage->lock);
 	list_add_tail(&storage_bdev->link, &diff_storage->storage_bdevs);
@@ -222,12 +211,9 @@ int diff_storage_append_block(struct diff_storage *diff_storage,
 
 	pr_debug("Append %u blocks\n", range_count);
 
-	bdev = diff_storage_bdev_by_path(diff_storage, bdev_path);
-	if (!bdev) {
-		bdev = diff_storage_add_storage_bdev(diff_storage, bdev_path);
-		if (IS_ERR(bdev))
-			return PTR_ERR(bdev);
-	}
+	bdev = diff_storage_add_storage_bdev(diff_storage, bdev_path);
+	if (IS_ERR(bdev))
+		return PTR_ERR(bdev);
 
 	for (inx = 0; inx < range_count; inx++) {
 		if (unlikely(copy_from_user(&range, ranges+inx, sizeof(range))))
