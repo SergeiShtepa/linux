@@ -4,8 +4,8 @@
 Block Device Filtering Mechanism
 ================================
 
-The block device filtering mechanism is an API that allows to attach block
-device filters. Block device filters allow perform additional processing
+The block device filtering mechanism provides the ability to attach block
+device filters. Block device filters allow performing additional processing
 for I/O units.
 
 Introduction
@@ -18,8 +18,8 @@ request_queue structure. But none of the in-tree kernel modules used this
 feature, and it was eliminated in the 5.10 kernel.
 
 The block device filtering mechanism returns the ability to handle I/O units.
-It is possible to safely attach filter to a block device "on the fly" without
-changing the structure of block devices stack.
+It is possible to safely attach a filter to a block device "on the fly" without
+changing the structure of the block device's stack.
 
 It supports attaching one filter to one block device, because there is only
 one filter implementation in the kernel yet.
@@ -31,7 +31,7 @@ Design
 The block device filtering mechanism provides registration and unregistration
 for filter operations. The struct blkfilter_operations contains a pointer to
 the callback functions for the filter. After registering the filter operations,
-filter can be managed using block device ioctl BLKFILTER_ATTACH,
+the filter can be managed using block device ioctls BLKFILTER_ATTACH,
 BLKFILTER_DETACH and BLKFILTER_CTL.
 
 When the filter is attached, the callback function is called for each I/O unit
@@ -46,17 +46,19 @@ block devices.
 Interface description
 =====================
 
-The ioctl BLKFILTER_ATTACH and BLKFILTER_DETACH use structure blkfilter_name.
-It allows to attach a filter to a block device or detach it.
-
-The ioctl BLKFILTER_CTL use structure blkfilter_ctl. It allows to send a
-filter-specific command.
+The ioctl BLKFILTER_ATTACH allows user-space programs to attach a block device
+filter to a block device. The ioctl BLKFILTER_DETACH allows user-space programs
+to detach it. Both ioctls use structure blkfilter_name. The ioctl BLKFILTER_CTL
+allows user-space programs to send a filter-specific command. It use structure
+blkfilter_ctl.
 
 .. kernel-doc:: include/uapi/linux/blk-filter.h
 
-To register in the system, the filter creates its own account, which contains
-callback functions, unique filter name and module owner. This filter account is
-used by the registration functions.
+To register in the system, the filter uses the blkfilter_operations structure,
+which contains callback functions, unique filter name and module owner. When
+attaching a filter to a block device, the filter creates a blkfilter structure.
+The pointer to the blkfilter structure allows the filter to determine for
+which block device the callback functions are being called.
 
 .. kernel-doc:: include/linux/blk-filter.h
 

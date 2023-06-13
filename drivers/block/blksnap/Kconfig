@@ -8,5 +8,5 @@ config BLKSNAP
 	help
 	  Allow to create snapshots and track block changes for block devices.
 	  Designed for creating backups for simple block devices. Snapshots are
-	  temporary and are released then backup is completed. Change block
+	  temporary and are released when backup is completed. Change block
 	  tracking allows to create incremental or differential backups.
