@@ -11,6 +11,11 @@ struct fiemap_extent_info {
 	unsigned int fi_extents_max;	/* Size of fiemap_extent array */
 	struct fiemap_extent __user *fi_extents_start; /* Start of
 							fiemap_extent array */
+	/*
+	 * Start of fiemap_extent array in kernel space.
+	 * The fi_extents_start should be NULL when fi_kern_extents is set.
+	 */
+	struct fiemap_extent *fi_kern_extents;
 };
 
 int fiemap_prep(struct inode *inode, struct fiemap_extent_info *fieinfo,

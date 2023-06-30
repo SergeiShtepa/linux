@@ -115,9 +115,6 @@ static int ioctl_fibmap(struct file *filp, int __user *p)
 int fiemap_fill_next_extent(struct fiemap_extent_info *fieinfo, u64 logical,
 			    u64 phys, u64 len, u32 flags)
 {
-	struct fiemap_extent extent;
-	struct fiemap_extent __user *dest = fieinfo->fi_extents_start;
-
 	/* only count the extents */
 	if (fieinfo->fi_extents_max == 0) {
 		fieinfo->fi_extents_mapped++;
@@ -134,14 +131,28 @@ int fiemap_fill_next_extent(struct fiemap_extent_info *fieinfo, u64 logical,
 	if (flags & SET_NOT_ALIGNED_FLAGS)
 		flags |= FIEMAP_EXTENT_NOT_ALIGNED;
 
-	memset(&extent, 0, sizeof(extent));
-	extent.fe_logical = logical;
-	extent.fe_physical = phys;
-	extent.fe_length = len;
-	extent.fe_flags = flags;
+	if (fieinfo->fi_extents_start) {
+		struct fiemap_extent __user *dest = fieinfo->fi_extents_start;
+		struct fiemap_extent extent;
 
-	dest += fieinfo->fi_extents_mapped;
-	if (copy_to_user(dest, &extent, sizeof(extent)))
+		memset(&extent, 0, sizeof(extent));
+		extent.fe_logical = logical;
+		extent.fe_physical = phys;
+		extent.fe_length = len;
+		extent.fe_flags = flags;
+
+		dest += fieinfo->fi_extents_mapped;
+		if (copy_to_user(dest, &extent, sizeof(extent)))
+			return -EFAULT;
+	} else if (fieinfo->fi_kern_extents) {
+		struct fiemap_extent *extent = fieinfo->fi_kern_extents +
+					       fieinfo->fi_extents_mapped;
+
+		extent->fe_logical = logical;
+		extent->fe_physical = phys;
+		extent->fe_length = len;
+		extent->fe_flags = flags;
+	} else
 		return -EFAULT;
 
 	fieinfo->fi_extents_mapped++;
