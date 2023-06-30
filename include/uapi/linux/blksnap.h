@@ -179,6 +179,7 @@ enum blksnap_ioctl {
 	blksnap_ioctl_snapshot_take,
 	blksnap_ioctl_snapshot_collect,
 	blksnap_ioctl_snapshot_wait_event,
+	blksnap_ioctl_snapshot_append_file,
 };
 
 /**
@@ -257,7 +258,7 @@ struct blksnap_version {
  * @count:
  *	Size of @ranges in the number of &struct blksnap_sectors.
  * @ranges:
- *	Pointer to the array of &struct blksnap_sectors.
+ *	Pointer to the array of &struct blksnap_sectors. Can be NULL.
  */
 struct blksnap_snapshot_append_storage {
 	struct blksnap_uuid id;
@@ -268,8 +269,15 @@ struct blksnap_snapshot_append_storage {
 };
 
 /**
- * define IOCTL_BLKSNAP_SNAPSHOT_APPEND_STORAGE - Append storage to the
+ * define IOCTL_BLKSNAP_SNAPSHOT_APPEND_STORAGE - Append block device to the
  *	difference storage of the snapshot.
+ *
+ * The difference storage gets exclusive access to the block device. This means
+ * that on a block device cannot be a mounted file system and a block device
+ * cannot be added twice.
+ *
+ * The range describes a map of the sectors used by the difference storage.
+ * If @ranges is NULL, the entire block device is added.
  *
  * The snapshot difference storage can be set either before or after creating
  * the snapshot images. This allows to dynamically expand the difference
@@ -280,6 +288,44 @@ struct blksnap_snapshot_append_storage {
 #define IOCTL_BLKSNAP_SNAPSHOT_APPEND_STORAGE					\
 	_IOW(BLKSNAP, blksnap_ioctl_snapshot_append_storage,			\
 	     struct blksnap_snapshot_append_storage)
+
+/**
+ * struct blksnap_snapshot_append_file - Argument for the
+ *      &IOCTL_BLKSNAP_SNAPSHOT_APPEND_FILE control.
+ *
+ * @fname:
+ *	File name string buffer.
+ * @fname_size:
+ *	File name string buffer size.
+ */
+struct blksnap_snapshot_append_file {
+	struct blksnap_uuid id;
+	__u64 fname;
+	__u32 fname_size;
+};
+
+/**
+ * define IOCTL_BLKSNAP_SNAPSHOT_APPEND_FILE - Append file to the
+ *	difference storage of the snapshot.
+ *
+ * The @fname is a full path to regular file on filesystem. The file system
+ * must support FIEMAP ioctl. If the file does not exist, it will be created.
+ * If the file has zero size, then allocation will be performed using fallocate.
+ * In this case, the file size will be determined by the module parameter
+ * diff_storage_minimum.
+ *
+ * When the snapshot is destroyed, all files will be deleted. The user space
+ * doesn't need to take care of these files anymore.
+ *
+ * The snapshot difference storage can be set either before or after creating
+ * the snapshot images. This allows to dynamically expand the difference
+ * storage while holding the snapshot.
+ *
+ * Return: 0 if succeeded, negative errno otherwise.
+ */
+#define IOCTL_BLKSNAP_SNAPSHOT_APPEND_FILE					\
+	_IOW(BLKSNAP, blksnap_ioctl_snapshot_append_file,			\
+	     struct blksnap_snapshot_append_file)
 
 /**
  * define IOCTL_BLKSNAP_SNAPSHOT_TAKE - Take snapshot.

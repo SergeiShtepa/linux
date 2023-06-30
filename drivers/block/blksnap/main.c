@@ -5,6 +5,7 @@
 #include <linux/module.h>
 #include <linux/miscdevice.h>
 #include <linux/build_bug.h>
+#include <linux/fs.h>
 #include <uapi/linux/blksnap.h>
 #include "snapimage.h"
 #include "snapshot.h"
@@ -225,6 +226,32 @@ static int ioctl_snapshot_append_storage(unsigned long arg)
 	return ret;
 }
 
+static int ioctl_snapshot_append_file(unsigned long arg)
+{
+	int ret;
+	struct blksnap_snapshot_append_file __user *uarg =
+		(struct blksnap_snapshot_append_file __user *)arg;
+	struct blksnap_snapshot_append_file karg;
+	char *fname;
+
+	pr_debug("Append difference storage file\n");
+
+	if (copy_from_user(&karg, uarg, sizeof(karg))) {
+		pr_err("Unable to append difference storage file: invalid user buffer\n");
+		return -EINVAL;
+	}
+
+	fname = strndup_user(u64_to_user_ptr(karg.fname), karg.fname_size);
+	if (IS_ERR(fname)) {
+		pr_err("Unable to append difference storage: invalid file name buffer\n");
+		return PTR_ERR(fname);
+	}
+
+	ret = snapshot_append_file((uuid_t *)karg.id.b, fname);
+	kfree(fname);
+	return ret;
+}
+
 static int ioctl_snapshot_take(unsigned long arg)
 {
 	struct blksnap_uuid __user *user_id = (struct blksnap_uuid __user *)arg;
@@ -317,14 +344,15 @@ static int (*const blksnap_ioctl_table[])(unsigned long arg) = {
 	ioctl_snapshot_take,
 	ioctl_snapshot_collect,
 	ioctl_snapshot_wait_event,
+	ioctl_snapshot_append_file,
 };
 
 static_assert(
 	sizeof(blksnap_ioctl_table) ==
-	((blksnap_ioctl_snapshot_wait_event + 1) * sizeof(void *)),
+	((blksnap_ioctl_snapshot_append_file + 1) * sizeof(void *)),
 	"The size of table blksnap_ioctl_table does not match the enum blksnap_ioctl.");
 
-static long ctrl_unlocked_ioctl(struct file *filp, unsigned int cmd,
+static long ctrl_unlocked_ioctl(struct file *file, unsigned int cmd,
 				unsigned long arg)
 {
 	int nr = _IOC_NR(cmd);

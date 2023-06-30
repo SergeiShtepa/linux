@@ -81,6 +81,7 @@ struct diff_storage {
 	atomic_t overflow_flag;
 
 	struct event_queue event_queue;
+	struct list_head files;
 };
 
 struct diff_storage *diff_storage_new(void);
@@ -100,6 +101,8 @@ int diff_storage_append_block(struct diff_storage *diff_storage,
 			      const char *bdev_path,
 			      struct blksnap_sectors __user *ranges,
 			      unsigned int range_count);
+int diff_storage_append_file(struct diff_storage *diff_storage,
+			     const char *fname);
 struct diff_region *diff_storage_new_region(struct diff_storage *diff_storage,
 					    sector_t count,
 					    unsigned int logical_blksz);

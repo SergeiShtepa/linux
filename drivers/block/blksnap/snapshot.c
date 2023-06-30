@@ -213,8 +213,27 @@ int snapshot_append_storage(const uuid_t *id, const char *bdev_path,
 	if (!snapshot)
 		return -ESRCH;
 
+	down_write(&snapshot->rw_lock);
 	ret = diff_storage_append_block(snapshot->diff_storage, bdev_path,
 					ranges, range_count);
+	up_write(&snapshot->rw_lock);
+	snapshot_put(snapshot);
+	return ret;
+}
+
+int snapshot_append_file(const uuid_t *id, const char *fname)
+{
+	int ret = 0;
+	struct snapshot *snapshot;
+
+	snapshot = snapshot_get_by_id(id);
+	if (!snapshot)
+		return -ESRCH;
+
+	down_write(&snapshot->rw_lock);
+	ret = diff_storage_append_file(snapshot->diff_storage, fname);
+	up_write(&snapshot->rw_lock);
+
 	snapshot_put(snapshot);
 	return ret;
 }
