@@ -128,7 +128,7 @@ void diff_area_free(struct kref *kref)
 	xa_destroy(&diff_area->chunk_map);
 
 	if (diff_area->orig_bdev) {
-		blkdev_put(diff_area->orig_bdev, FMODE_READ | FMODE_WRITE);
+		blkdev_put(diff_area->orig_bdev, NULL);
 		diff_area->orig_bdev = NULL;
 	}
 
@@ -214,7 +214,7 @@ struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
 
 	pr_debug("Open device [%u:%u]\n", MAJOR(dev_id), MINOR(dev_id));
 
-	bdev = blkdev_get_by_dev(dev_id, FMODE_READ | FMODE_WRITE, NULL);
+	bdev = blkdev_get_by_dev(dev_id, FMODE_READ | FMODE_WRITE, NULL, NULL);
 	if (IS_ERR(bdev)) {
 		int err = PTR_ERR(bdev);
 
@@ -224,7 +224,7 @@ struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
 
 	diff_area = kzalloc(sizeof(struct diff_area), GFP_KERNEL);
 	if (!diff_area) {
-		blkdev_put(bdev, FMODE_READ | FMODE_WRITE);
+		blkdev_put(bdev, NULL);
 		return ERR_PTR(-ENOMEM);
 	}
 

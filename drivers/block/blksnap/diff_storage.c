@@ -123,7 +123,7 @@ void diff_storage_free(struct kref *kref)
 	}
 
 	while ((storage_bdev = first_storage_bdev(diff_storage))) {
-		blkdev_put(storage_bdev->bdev, FMODE_READ | FMODE_WRITE);
+		blkdev_put(storage_bdev->bdev, NULL);
 		list_del(&storage_bdev->link);
 		kfree(storage_bdev);
 	}
@@ -138,7 +138,7 @@ static struct block_device *diff_storage_add_storage_bdev(
 	struct storage_bdev *storage_bdev, *existing_bdev = NULL;
 	struct block_device *bdev;
 
-	bdev = blkdev_get_by_path(bdev_path, FMODE_READ | FMODE_WRITE, NULL);
+	bdev = blkdev_get_by_path(bdev_path, FMODE_READ | FMODE_WRITE, NULL, NULL);
 	if (IS_ERR(bdev)) {
 		pr_err("Failed to open device. errno=%ld\n", PTR_ERR(bdev));
 		return bdev;
@@ -152,14 +152,14 @@ static struct block_device *diff_storage_add_storage_bdev(
 	spin_unlock(&diff_storage->lock);
 
 	if (existing_bdev->bdev == bdev) {
-		blkdev_put(bdev, FMODE_READ | FMODE_WRITE);
+		blkdev_put(bdev, NULL);
 		return existing_bdev->bdev;
 	}
 
 	storage_bdev = kzalloc(sizeof(struct storage_bdev) +
 			       strlen(bdev_path) + 1, GFP_KERNEL);
 	if (!storage_bdev) {
-		blkdev_put(bdev, FMODE_READ | FMODE_WRITE);
+		blkdev_put(bdev, NULL);
 		return ERR_PTR(-ENOMEM);
 	}
 
