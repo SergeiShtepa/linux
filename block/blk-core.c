@@ -601,7 +601,7 @@ static bool submit_bio_filter(struct bio *bio)
 
 static void __submit_bio(struct bio *bio)
 {
-	struct request_queue *q = bio->bi_bdev->bd_disk->queue;
+	struct request_queue *q = bdev_get_queue(bio->bi_bdev);
 	bool skip_bio;
 
 	if (unlikely(bio_queue_enter(bio)))
