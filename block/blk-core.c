@@ -601,11 +601,15 @@ static bool submit_bio_filter(struct bio *bio)
 
 static void __submit_bio(struct bio *bio)
 {
-	/*
-	 * If there is a filter driver attached, check if the BIO needs to go to
-	 * the filter driver first, which can then pass on the bio or consume it.
-	 */
-	if (bio->bi_bdev->bd_filter && submit_bio_filter(bio))
+	struct request_queue *q = bio->bi_bdev->bd_disk->queue;
+	bool skip_bio;
+
+	if (unlikely(bio_queue_enter(bio)))
+		return;
+
+	skip_bio = (bio->bi_bdev->bd_filter && submit_bio_filter(bio));
+	blk_queue_exit(q);
+	if (skip_bio)
 		return;
 
 	if (unlikely(!blk_crypto_bio_prep(&bio)))
