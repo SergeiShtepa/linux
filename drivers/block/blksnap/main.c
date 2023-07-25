@@ -150,11 +150,8 @@ unsigned int get_diff_storage_minimum(void)
 	return diff_storage_minimum;
 }
 
-static int ioctl_version(unsigned long arg)
+static int ioctl_version(struct blksnap_version __user *user_version)
 {
-	struct blksnap_version __user *user_version =
-		(struct blksnap_version __user *)arg;
-
 	if (copy_to_user(user_version, &version, sizeof(version))) {
 		pr_err("Unable to get version: invalid user buffer\n");
 		return -ENODATA;
@@ -166,9 +163,8 @@ static int ioctl_version(unsigned long arg)
 static_assert(sizeof(uuid_t) == sizeof(struct blksnap_uuid),
 	"Invalid size of struct blksnap_uuid.");
 
-static int ioctl_snapshot_create(unsigned long arg)
+static int ioctl_snapshot_create(struct blksnap_uuid __user *user_id)
 {
-	struct blksnap_uuid __user *user_id = (struct blksnap_uuid __user *)arg;
 	uuid_t kernel_id;
 	int ret;
 
@@ -184,9 +180,8 @@ static int ioctl_snapshot_create(unsigned long arg)
 	return 0;
 }
 
-static int ioctl_snapshot_destroy(unsigned long arg)
+static int ioctl_snapshot_destroy(struct blksnap_uuid __user *user_id)
 {
-	struct blksnap_uuid __user *user_id = (struct blksnap_uuid __user *)arg;
 	uuid_t kernel_id;
 
 	if (copy_from_user(kernel_id.b, user_id->b, sizeof(uuid_t))) {
@@ -197,11 +192,10 @@ static int ioctl_snapshot_destroy(unsigned long arg)
 	return snapshot_destroy(&kernel_id);
 }
 
-static int ioctl_snapshot_append_storage(unsigned long arg)
+static int ioctl_snapshot_append_storage(
+		struct blksnap_snapshot_append_storage __user *uarg)
 {
 	int ret;
-	struct blksnap_snapshot_append_storage __user *uarg =
-		(struct blksnap_snapshot_append_storage __user *)arg;
 	struct blksnap_snapshot_append_storage karg;
 	char *bdev_path = NULL;
 
@@ -225,9 +219,8 @@ static int ioctl_snapshot_append_storage(unsigned long arg)
 	return ret;
 }
 
-static int ioctl_snapshot_take(unsigned long arg)
+static int ioctl_snapshot_take(struct blksnap_uuid __user *user_id)
 {
-	struct blksnap_uuid __user *user_id = (struct blksnap_uuid __user *)arg;
 	uuid_t kernel_id;
 
 	if (copy_from_user(kernel_id.b, user_id->b, sizeof(uuid_t))) {
@@ -238,19 +231,19 @@ static int ioctl_snapshot_take(unsigned long arg)
 	return snapshot_take(&kernel_id);
 }
 
-static int ioctl_snapshot_collect(unsigned long arg)
+static int ioctl_snapshot_collect(struct blksnap_snapshot_collect __user *uarg)
 {
 	int ret;
 	struct blksnap_snapshot_collect karg;
 
-	if (copy_from_user(&karg, (const void __user *)arg, sizeof(karg))) {
+	if (copy_from_user(&karg, uarg, sizeof(karg))) {
 		pr_err("Unable to collect available snapshots: invalid user buffer\n");
 		return -ENODATA;
 	}
 
 	ret = snapshot_collect(&karg.count, u64_to_user_ptr(karg.ids));
 
-	if (copy_to_user((void __user *)arg, &karg, sizeof(karg))) {
+	if (copy_to_user(uarg, &karg, sizeof(karg))) {
 		pr_err("Unable to collect available snapshots: invalid user buffer\n");
 		return -ENODATA;
 	}
@@ -261,11 +254,9 @@ static int ioctl_snapshot_collect(unsigned long arg)
 static_assert(sizeof(struct blksnap_snapshot_event) == 4096,
 	"The size struct blksnap_snapshot_event should be equal to the size of the page.");
 
-static int ioctl_snapshot_wait_event(unsigned long arg)
+static int ioctl_snapshot_wait_event(struct blksnap_snapshot_event __user *uarg)
 {
 	int ret = 0;
-	struct blksnap_snapshot_event __user *uarg =
-		(struct blksnap_snapshot_event __user *)arg;
 	struct blksnap_snapshot_event *karg;
 	struct event *ev;
 
@@ -309,38 +300,35 @@ out:
 	return ret;
 }
 
-static int (*const blksnap_ioctl_table[])(unsigned long arg) = {
-	ioctl_version,
-	ioctl_snapshot_create,
-	ioctl_snapshot_destroy,
-	ioctl_snapshot_append_storage,
-	ioctl_snapshot_take,
-	ioctl_snapshot_collect,
-	ioctl_snapshot_wait_event,
-};
-
-static_assert(
-	sizeof(blksnap_ioctl_table) ==
-	((blksnap_ioctl_snapshot_wait_event + 1) * sizeof(void *)),
-	"The size of table blksnap_ioctl_table does not match the enum blksnap_ioctl.");
-
-static long ctrl_unlocked_ioctl(struct file *filp, unsigned int cmd,
+static long blksnap_ctrl_unlocked_ioctl(struct file *filp, unsigned int cmd,
 				unsigned long arg)
 {
-	int nr = _IOC_NR(cmd);
+	void *argp = (void __user *)arg;
 
-	if (nr > (sizeof(blksnap_ioctl_table) / sizeof(void *)))
+	switch (cmd) {
+	case IOCTL_BLKSNAP_VERSION:
+		return ioctl_version(argp);
+	case IOCTL_BLKSNAP_SNAPSHOT_CREATE:
+		return ioctl_snapshot_create(argp);
+	case IOCTL_BLKSNAP_SNAPSHOT_DESTROY:
+		return ioctl_snapshot_destroy(argp);
+	case IOCTL_BLKSNAP_SNAPSHOT_APPEND_STORAGE:
+		return ioctl_snapshot_append_storage(argp);
+	case IOCTL_BLKSNAP_SNAPSHOT_TAKE:
+		return ioctl_snapshot_take(argp);
+	case IOCTL_BLKSNAP_SNAPSHOT_COLLECT:
+		return ioctl_snapshot_collect(argp);
+	case IOCTL_BLKSNAP_SNAPSHOT_WAIT_EVENT:
+		return ioctl_snapshot_wait_event(argp);
+	default:
 		return -ENOTTY;
+	}
 
-	if (!blksnap_ioctl_table[nr])
-		return -ENOTTY;
-
-	return blksnap_ioctl_table[nr](arg);
 }
 
 static const struct file_operations blksnap_ctrl_fops = {
 	.owner		= THIS_MODULE,
-	.unlocked_ioctl	= ctrl_unlocked_ioctl,
+	.unlocked_ioctl	= blksnap_ctrl_unlocked_ioctl,
 };
 
 static struct miscdevice blksnap_ctrl_misc = {
