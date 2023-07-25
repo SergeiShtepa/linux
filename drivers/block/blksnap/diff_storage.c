@@ -215,19 +215,15 @@ static inline bool is_halffull(const sector_t sectors_left)
 		((get_diff_storage_minimum() >> 1) & ~(PAGE_SECTORS - 1));
 }
 
-struct diff_region *diff_storage_new_region(struct diff_storage *diff_storage,
-					   sector_t count)
+int diff_storage_alloc(struct diff_storage *diff_storage, sector_t count,
+		       unsigned int logical_blksz, struct file **file,
+		       sector_t *sector)
 {
 	int ret = 0;
-	struct diff_region *diff_region;
 	sector_t sectors_left;
 
 	if (atomic_read(&diff_storage->overflow_flag))
-		return ERR_PTR(-ENOSPC);
-
-	diff_region = kzalloc(sizeof(struct diff_region), GFP_NOIO);
-	if (!diff_region)
-		return ERR_PTR(-ENOMEM);
+		return -ENOSPC;
 
 	spin_lock(&diff_storage->lock);
 	do {
@@ -252,10 +248,8 @@ struct diff_region *diff_storage_new_region(struct diff_storage *diff_storage,
 
 		available = storage_block->count - storage_block->used;
 		if (likely(available >= count)) {
-			diff_region->file = storage_block->file;
-			diff_region->sector =
-				storage_block->sector + storage_block->used;
-			diff_region->count = count;
+			*file = storage_block->file;
+			*sector = storage_block->sector + storage_block->used;
 
 			storage_block->used += count;
 			diff_storage->filled += count;
@@ -274,18 +268,13 @@ struct diff_region *diff_storage_new_region(struct diff_storage *diff_storage,
 		 */
 		diff_storage->filled += available;
 	} while (1);
+
 	sectors_left = diff_storage->requested - diff_storage->filled;
 	spin_unlock(&diff_storage->lock);
 
-	if (ret) {
-		pr_err("Cannot get empty storage block\n");
-		diff_storage_free_region(diff_region);
-		return ERR_PTR(ret);
-	}
-
-	if (is_halffull(sectors_left) &&
+	if (!ret && is_halffull(sectors_left) &&
 	    (atomic_inc_return(&diff_storage->low_space_flag) == 1))
 		diff_storage_event_low(diff_storage);
 
-	return diff_region;
+	return ret;
 }
