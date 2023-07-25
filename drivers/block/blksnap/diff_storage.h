@@ -8,22 +8,6 @@
 struct blksnap_sectors;
 
 /**
- * struct diff_region - Describes the location of the chunks data on
- *	difference storage.
- * @bdev:
- *	The target block device.
- * @sector:
- *	The sector offset of the region's first sector.
- * @count:
- *	The count of sectors in the region.
- */
-struct diff_region {
-	struct block_device *bdev;
-	sector_t sector;
-	sector_t count;
-};
-
-/**
  * struct diff_storage - Difference storage.
  *
  * @kref:
@@ -100,12 +84,8 @@ int diff_storage_append_block(struct diff_storage *diff_storage,
 			      const char *bdev_path,
 			      struct blksnap_sectors __user *ranges,
 			      unsigned int range_count);
-struct diff_region *diff_storage_new_region(struct diff_storage *diff_storage,
-					    sector_t count,
-					    unsigned int logical_blksz);
+int diff_storage_alloc(struct diff_storage *diff_storage, sector_t count,
+		       unsigned int logical_blksz, struct block_device **bdev,
+		       sector_t *sector);
 
-static inline void diff_storage_free_region(struct diff_region *region)
-{
-	kfree(region);
-}
 #endif /* __BLKSNAP_DIFF_STORAGE_H */

@@ -80,7 +80,6 @@ static inline void chunk_free(struct diff_area *diff_area, struct chunk *chunk)
 	down(&chunk->lock);
 	if (chunk->diff_buffer)
 		diff_buffer_release(diff_area, chunk->diff_buffer);
-	diff_storage_free_region(chunk->diff_region);
 	up(&chunk->lock);
 	kfree(chunk);
 }
@@ -177,21 +176,20 @@ static inline bool diff_area_store_one(struct diff_area *diff_area)
 		return true;
 	}
 
-	if (!chunk->diff_region) {
-		struct diff_region *diff_region;
+	if (!chunk->snapshot_bdev) {
+		int ret;
 
-		diff_region = diff_storage_new_region(
-			diff_area->diff_storage,
-			diff_area_chunk_sectors(diff_area),
-			diff_area->logical_blksz);
-
-		if (IS_ERR(diff_region)) {
+		ret = diff_storage_alloc(diff_area->diff_storage,
+					 chunk->sector_count,
+					 diff_area->logical_blksz,
+					 &chunk->snapshot_bdev,
+					 &chunk->snapshot_sector);
+		if (ret) {
 			pr_debug("Cannot get store for chunk #%ld\n",
 				 chunk->number);
-			chunk_store_failed(chunk, PTR_ERR(diff_region));
+			chunk_store_failed(chunk, ret);
 			return true;
 		}
-		chunk->diff_region = diff_region;
 	}
 	chunk_store(chunk);
 	return true;

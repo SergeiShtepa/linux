@@ -38,8 +38,6 @@ void chunk_store_failed(struct chunk *chunk, int error)
 		diff_buffer_release(diff_area, chunk->diff_buffer);
 		chunk->diff_buffer = NULL;
 	}
-	diff_storage_free_region(chunk->diff_region);
-	chunk->diff_region = NULL;
 
 	chunk_up(chunk);
 	if (error)
@@ -153,8 +151,8 @@ void chunk_clone_bio(struct chunk *chunk, struct bio *bio)
 	sector_t sector;
 
 	if (chunk->state == CHUNK_ST_STORED) {
-		bdev = chunk->diff_region->bdev;
-		sector = chunk->diff_region->sector;
+		bdev = chunk->snapshot_bdev;
+		sector = chunk->snapshot_sector;
 	} else {
 		bdev = chunk->diff_area->orig_bdev;
 		sector = chunk_sector(chunk);
@@ -276,9 +274,9 @@ static inline unsigned short calc_max_vecs(sector_t left)
 
 void chunk_store(struct chunk *chunk)
 {
-	struct block_device *bdev = chunk->diff_region->bdev;
-	sector_t sector = chunk->diff_region->sector;
-	sector_t count = chunk->diff_region->count;
+	struct block_device *bdev = chunk->snapshot_bdev;
+	sector_t sector = chunk->snapshot_sector;
+	sector_t count = chunk->sector_count;
 	unsigned int page_idx = 0;
 	struct bio *bio;
 	struct chunk_bio *cbio;
@@ -327,7 +325,7 @@ static struct bio *__chunk_load(struct chunk *chunk)
 	unsigned int page_idx = 0;
 	struct bio *bio;
 	struct block_device *bdev;
-	sector_t sector, count;
+	sector_t sector, count = chunk->sector_count;
 
 	diff_buffer = diff_buffer_take(chunk->diff_area);
 	if (IS_ERR(diff_buffer))
@@ -335,13 +333,11 @@ static struct bio *__chunk_load(struct chunk *chunk)
 	chunk->diff_buffer = diff_buffer;
 
 	if (chunk->state == CHUNK_ST_STORED) {
-		bdev = chunk->diff_region->bdev;
-		sector = chunk->diff_region->sector;
-		count = chunk->diff_region->count;
+		bdev = chunk->snapshot_bdev;
+		sector = chunk->snapshot_sector;
 	} else {
 		bdev = chunk->diff_area->orig_bdev;
 		sector = chunk_sector(chunk);
-		count = chunk->sector_count;
 	}
 
 	bio = bio_alloc_bioset(bdev, calc_max_vecs(count),

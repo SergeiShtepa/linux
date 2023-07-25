@@ -10,7 +10,6 @@
 #include "diff_area.h"
 
 struct diff_area;
-struct diff_region;
 
 /**
  * enum chunk_st - Possible states for a chunk.
@@ -49,18 +48,20 @@ enum chunk_st {
  *	for the	last chunk.
  * @lock:
  *	Binary semaphore. Syncs access to the chunks fields: state,
- *	diff_buffer and diff_region.
+ *	diff_buffer, snapshot_bdev and snapshot_sector.
  * @diff_area:
  *	Pointer to the difference area - the difference storage area for a
  *	specific device. This field is only available when the chunk is locked.
  *	Allows to protect the difference area from early release.
  * @state:
  *	Defines the state of a chunk.
+ * @snapshot_bdev:
+ *	The target block device.
+ * @snapshot_sector:
+ *	The sector offset of the region's first sector.
  * @diff_buffer:
  *	Pointer to &struct diff_buffer. Describes a buffer in the memory
  *	for storing the chunk data.
- * @diff_region:
- *	Pointer to &struct diff_region. Describes a copy of the chunk data
  *	on the difference storage.
  *
  * This structure describes the block of data that the module operates
@@ -84,8 +85,11 @@ struct chunk {
 	struct diff_area *diff_area;
 
 	enum chunk_st state;
+
+	struct block_device *snapshot_bdev;
+	sector_t snapshot_sector;
+
 	struct diff_buffer *diff_buffer;
-	struct diff_region *diff_region;
 };
 
 static inline void chunk_up(struct chunk *chunk)
