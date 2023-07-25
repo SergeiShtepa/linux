@@ -6,6 +6,7 @@
 #include <linux/sched/mm.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
+#include <linux/file.h>
 #include <linux/build_bug.h>
 #include <uapi/linux/blksnap.h>
 #include "chunk.h"
@@ -14,16 +15,16 @@
 #include "params.h"
 
 /**
- * struct storage_bdev - Information about the opened block device.
+ * struct storage_bdev - Information about the opened files.
  *
  * @link:
  *	Allows to combine structures into a linked list.
- * @bdev:
- *	A pointer to an open block device.
+ * @file:
+ *	A pointer to an open file.
  */
 struct storage_bdev {
 	struct list_head link;
-	struct block_device *bdev;
+	struct file *file;
 };
 
 /**
@@ -31,8 +32,8 @@ struct storage_bdev {
  *
  * @link:
  *	Allows to combine structures into a linked list.
- * @bdev:
- *	A pointer to a block device.
+ * @file:
+ *	A pointer to a file.
  * @sector:
  *	The number of the first sector of the range of allocated space for
  *	storing the difference.
@@ -45,10 +46,45 @@ struct storage_bdev {
  */
 struct storage_block {
 	struct list_head link;
-	struct block_device *bdev;
+	struct file *file;
 	sector_t sector;
 	sector_t count;
 	sector_t used;
+};
+
+static inline struct storage_block *storage_block_new(struct file *file,
+	sector_t sector, sector_t count)
+{
+	struct storage_block *storage_block = kzalloc(
+				sizeof(struct storage_block), GFP_KERNEL);
+
+	if (storage_block) {
+		INIT_LIST_HEAD(&storage_block->link);
+		storage_block->file = get_file(file);
+		storage_block->sector = sector;
+		storage_block->count = count;
+	}
+	return storage_block;
+}
+
+static inline void storage_block_free(struct storage_block *blk)
+{
+	fput(blk->file);
+	kfree(blk);
+}
+
+static inline struct storage_block *
+first_empty_storage_block(struct diff_storage *diff_storage)
+{
+	return list_first_entry_or_null(&diff_storage->empty_blocks,
+					struct storage_block, link);
+};
+
+static inline struct storage_block *
+first_filled_storage_block(struct diff_storage *diff_storage)
+{
+	return list_first_entry_or_null(&diff_storage->filled_blocks,
+					struct storage_block, link);
 };
 
 static inline void diff_storage_event_low(struct diff_storage *diff_storage)
@@ -84,153 +120,93 @@ struct diff_storage *diff_storage_new(void)
 	return diff_storage;
 }
 
-static inline struct storage_block *
-first_empty_storage_block(struct diff_storage *diff_storage)
-{
-	return list_first_entry_or_null(&diff_storage->empty_blocks,
-					struct storage_block, link);
-};
-
-static inline struct storage_block *
-first_filled_storage_block(struct diff_storage *diff_storage)
-{
-	return list_first_entry_or_null(&diff_storage->filled_blocks,
-					struct storage_block, link);
-};
-
-static inline struct storage_bdev *
-first_storage_bdev(struct diff_storage *diff_storage)
-{
-	return list_first_entry_or_null(&diff_storage->storage_bdevs,
-					struct storage_bdev, link);
-};
-
 void diff_storage_free(struct kref *kref)
 {
 	struct diff_storage *diff_storage =
 		container_of(kref, struct diff_storage, kref);
 	struct storage_block *blk;
-	struct storage_bdev *storage_bdev;
 
 	while ((blk = first_empty_storage_block(diff_storage))) {
 		list_del(&blk->link);
-		kfree(blk);
+		storage_block_free(blk);
 	}
 
 	while ((blk = first_filled_storage_block(diff_storage))) {
 		list_del(&blk->link);
-		kfree(blk);
+		storage_block_free(blk);
 	}
 
-	while ((storage_bdev = first_storage_bdev(diff_storage))) {
-		blkdev_put(storage_bdev->bdev, NULL);
-		list_del(&storage_bdev->link);
-		kfree(storage_bdev);
-	}
 	event_queue_done(&diff_storage->event_queue);
 
 	kfree(diff_storage);
 }
 
-static struct block_device *diff_storage_add_storage_bdev(
-		struct diff_storage *diff_storage, const char *bdev_path)
+/*
+	ssize_t (*read_iter) (struct kiocb *, struct iov_iter *);
+	ssize_t (*write_iter) (struct kiocb *, struct iov_iter *);
+
+diff_storage_read(struct file *file, struct kiocb *iocb, struct iov_iter *iter)
 {
-	struct storage_bdev *storage_bdev, *existing_bdev = NULL;
-	struct block_device *bdev;
+	iocb->ki_filp = file;
 
-	bdev = blkdev_get_by_path(bdev_path, FMODE_READ | FMODE_WRITE, NULL, NULL);
-	if (IS_ERR(bdev)) {
-		pr_err("Failed to open device. errno=%ld\n", PTR_ERR(bdev));
-		return bdev;
-	}
+	file->f_op->read_iter();
+	file->f_op->write_iter();
+	//generic_file_read_iter(
+	//generic_file_write_iter(
 
-	spin_lock(&diff_storage->lock);
-	list_for_each_entry(existing_bdev, &diff_storage->storage_bdevs, link) {
-		if (existing_bdev->bdev == bdev)
-			break;
-	}
-	spin_unlock(&diff_storage->lock);
-
-	if (existing_bdev->bdev == bdev) {
-		blkdev_put(bdev, NULL);
-		return existing_bdev->bdev;
-	}
-
-	storage_bdev = kzalloc(sizeof(struct storage_bdev) +
-			       strlen(bdev_path) + 1, GFP_KERNEL);
-	if (!storage_bdev) {
-		blkdev_put(bdev, NULL);
-		return ERR_PTR(-ENOMEM);
-	}
-
-	INIT_LIST_HEAD(&storage_bdev->link);
-	storage_bdev->bdev = bdev;
-
-	spin_lock(&diff_storage->lock);
-	list_add_tail(&storage_bdev->link, &diff_storage->storage_bdevs);
-	spin_unlock(&diff_storage->lock);
-
-	return bdev;
 }
 
-static inline int diff_storage_add_range(struct diff_storage *diff_storage,
-					 struct block_device *bdev,
-					 sector_t sector, sector_t count)
 {
-	struct storage_block *storage_block;
+	int mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
+	loff_t offset = 0, len;
 
-	pr_debug("Add range to diff storage: [%u:%u] %llu:%llu\n",
-		 MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev), sector, count);
+	ret = vfs_fallocate(file, mode, offset, len);
+	vfs_fsync(file, 1);
 
-	storage_block = kzalloc(sizeof(struct storage_block), GFP_KERNEL);
-	if (!storage_block)
-		return -ENOMEM;
 
-	INIT_LIST_HEAD(&storage_block->link);
-	storage_block->bdev = bdev;
-	storage_block->sector = sector;
-	storage_block->count = count;
+	file = fget(fd);
+	fput(file);
+}
+*/
+
+int diff_storage_append_file(struct diff_storage *diff_storage, unsigned int fd)
+{
+	int ret = 0;
+	struct storage_block *blk;
+	struct file *file;
+
+	pr_debug("Append file\n");
+	file = fget(fd);
+	if (!file) {
+		pr_err("Invalid file descriptor\n");
+		return -EINVAL;
+	}
+
+	loff_t len = i_size_read(file_inode(file));
+	if (len < (1ull << get_chunk_minimum_shift())) {
+		pr_err("The file is too small.\n");
+		ret = -EFAULT;
+		goto out;
+	}
+
+
+	blk = storage_block_new(file, 0, len >> SECTOR_SHIFT);
+	if (unlikely(!blk)) {
+		ret = -ENOMEM;
+		goto out;
+	}
 
 	spin_lock(&diff_storage->lock);
-	list_add_tail(&storage_block->link, &diff_storage->empty_blocks);
-	diff_storage->capacity += count;
+	list_add_tail(&blk->link, &diff_storage->empty_blocks);
+	diff_storage->capacity += len >> SECTOR_SHIFT;
 	spin_unlock(&diff_storage->lock);
-
-	return 0;
-}
-
-int diff_storage_append_block(struct diff_storage *diff_storage,
-			      const char *bdev_path,
-			      struct blksnap_sectors __user *ranges,
-			      unsigned int range_count)
-{
-	int ret;
-	int inx;
-	struct block_device *bdev;
-	struct blksnap_sectors range;
-
-	pr_debug("Append %u blocks\n", range_count);
-
-	bdev = diff_storage_add_storage_bdev(diff_storage, bdev_path);
-	if (IS_ERR(bdev))
-		return PTR_ERR(bdev);
-
-	for (inx = 0; inx < range_count; inx++) {
-		if (unlikely(copy_from_user(&range, ranges+inx, sizeof(range))))
-			return -EINVAL;
-
-		ret = diff_storage_add_range(diff_storage, bdev,
-					     range.offset,
-					     range.count);
-		if (unlikely(ret))
-			return ret;
-	}
 
 	if (atomic_read(&diff_storage->low_space_flag) &&
 	    (diff_storage->capacity >= diff_storage->requested))
 		atomic_set(&diff_storage->low_space_flag, 0);
-
-	return 0;
+out:
+	fput(file);
+	return ret;
 }
 
 static inline bool is_halffull(const sector_t sectors_left)
@@ -240,8 +216,7 @@ static inline bool is_halffull(const sector_t sectors_left)
 }
 
 struct diff_region *diff_storage_new_region(struct diff_storage *diff_storage,
-					   sector_t count,
-					   unsigned int logical_blksz)
+					   sector_t count)
 {
 	int ret = 0;
 	struct diff_region *diff_region;
@@ -258,7 +233,6 @@ struct diff_region *diff_storage_new_region(struct diff_storage *diff_storage,
 	do {
 		struct storage_block *storage_block;
 		sector_t available;
-		struct request_queue *q;
 
 		storage_block = first_empty_storage_block(diff_storage);
 		if (unlikely(!storage_block)) {
@@ -267,16 +241,18 @@ struct diff_region *diff_storage_new_region(struct diff_storage *diff_storage,
 			break;
 		}
 
-		q = storage_block->bdev->bd_queue;
-		if (logical_blksz < q->limits.logical_block_size) {
+		/*
+		 TODO: add real block size check
+		if (unlikely(logical_blksz < SECTOR_SIZE)) {
 			pr_err("Incompatibility of block sizes was detected.");
 			ret = -ENOTBLK;
 			break;
 		}
+		*/
 
 		available = storage_block->count - storage_block->used;
 		if (likely(available >= count)) {
-			diff_region->bdev = storage_block->bdev;
+			diff_region->file = storage_block->file;
 			diff_region->sector =
 				storage_block->sector + storage_block->used;
 			diff_region->count = count;

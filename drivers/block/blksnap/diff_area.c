@@ -182,8 +182,7 @@ static inline bool diff_area_store_one(struct diff_area *diff_area)
 
 		diff_region = diff_storage_new_region(
 			diff_area->diff_storage,
-			diff_area_chunk_sectors(diff_area),
-			diff_area->logical_blksz);
+			diff_area_chunk_sectors(diff_area));
 
 		if (IS_ERR(diff_region)) {
 			pr_debug("Cannot get store for chunk #%ld\n",

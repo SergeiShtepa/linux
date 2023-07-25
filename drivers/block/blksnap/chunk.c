@@ -148,30 +148,37 @@ struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio)
 
 void chunk_clone_bio(struct chunk *chunk, struct bio *bio)
 {
-	struct bio *new_bio;
-	struct block_device *bdev;
-	sector_t sector;
-
 	if (chunk->state == CHUNK_ST_STORED) {
-		bdev = chunk->diff_region->bdev;
+		sector_t sector;
+		struct file *file;
+
+		file = chunk->diff_region->file;
 		sector = chunk->diff_region->sector;
+
+		/*
+		 TODO: async file write
+		*/
 	} else {
+		sector_t sector;
+		struct bio *new_bio;
+		struct block_device *bdev;
+
 		bdev = chunk->diff_area->orig_bdev;
 		sector = chunk_sector(chunk);
+
+		new_bio = chunk_alloc_clone(bdev, bio);
+		WARN_ON(!new_bio);
+
+		chunk_limit_iter(chunk, bio, sector, &new_bio->bi_iter);
+		bio_set_flag(new_bio, BIO_FILTERED);
+		new_bio->bi_end_io = chunk_clone_endio;
+		new_bio->bi_private = bio;
+
+		bio_advance(bio, new_bio->bi_iter.bi_size);
+		bio_inc_remaining(bio);
+
+		submit_bio_noacct(new_bio);
 	}
-
-	new_bio = chunk_alloc_clone(bdev, bio);
-	WARN_ON(!new_bio);
-
-	chunk_limit_iter(chunk, bio, sector, &new_bio->bi_iter);
-	bio_set_flag(new_bio, BIO_FILTERED);
-	new_bio->bi_end_io = chunk_clone_endio;
-	new_bio->bi_private = bio;
-
-	bio_advance(bio, new_bio->bi_iter.bi_size);
-	bio_inc_remaining(bio);
-
-	submit_bio_noacct(new_bio);
 }
 
 static inline struct chunk *get_chunk_from_cbio(struct chunk_bio *cbio)
@@ -273,7 +280,23 @@ static inline unsigned short calc_max_vecs(sector_t left)
 {
 	return bio_max_segs(round_up(left, PAGE_SECTORS) / PAGE_SECTORS);
 }
+#if 1
+void chunk_store(struct chunk *chunk)
+{
+	struct file *file = chunk->diff_region->file;
+	sector_t sector = chunk->diff_region->sector;
+	sector_t count = chunk->diff_region->count;
 
+	/*
+	TODO write to file
+	*/
+	(void)file;
+	(void)sector;
+	(void)count;
+
+	(void)chunk_notify_store;
+}
+#else
 void chunk_store(struct chunk *chunk)
 {
 	struct block_device *bdev = chunk->diff_region->bdev;
@@ -320,13 +343,13 @@ void chunk_store(struct chunk *chunk)
 	cbio->orig_bio = NULL;
 	chunk_submit_bio(bio);
 }
+#endif
 
 static struct bio *__chunk_load(struct chunk *chunk)
 {
+	struct bio *bio = NULL;
 	struct diff_buffer *diff_buffer;
 	unsigned int page_idx = 0;
-	struct bio *bio;
-	struct block_device *bdev;
 	sector_t sector, count;
 
 	diff_buffer = diff_buffer_take(chunk->diff_area);
@@ -335,41 +358,56 @@ static struct bio *__chunk_load(struct chunk *chunk)
 	chunk->diff_buffer = diff_buffer;
 
 	if (chunk->state == CHUNK_ST_STORED) {
-		bdev = chunk->diff_region->bdev;
+		//bool mpool_alloc;
+		//struct kiocb iocb;
+		//struct bio_vec *bvec;
+		struct file *file;
+
+
+		file = chunk->diff_region->file;
 		sector = chunk->diff_region->sector;
 		count = chunk->diff_region->count;
+
+		/*
+		TODO
+		*/
+		(void)file;
+		(void)sector;
+		(void)count;
 	} else {
+		struct block_device *bdev;
+
 		bdev = chunk->diff_area->orig_bdev;
 		sector = chunk_sector(chunk);
 		count = chunk->sector_count;
-	}
 
-	bio = bio_alloc_bioset(bdev, calc_max_vecs(count),
-			       REQ_OP_READ, GFP_NOIO, &chunk_io_bioset);
-	bio->bi_iter.bi_sector = sector;
-	bio_set_flag(bio, BIO_FILTERED);
+		bio = bio_alloc_bioset(bdev, calc_max_vecs(count),
+				       REQ_OP_READ, GFP_NOIO, &chunk_io_bioset);
+		bio->bi_iter.bi_sector = sector;
+		bio_set_flag(bio, BIO_FILTERED);
 
-	while (count) {
-		struct bio *next;
-		sector_t portion = min_t(sector_t, count, PAGE_SECTORS);
-		unsigned int bytes = portion << SECTOR_SHIFT;
+		while (count) {
+			struct bio *next;
+			sector_t portion = min_t(sector_t, count, PAGE_SECTORS);
+			unsigned int bytes = portion << SECTOR_SHIFT;
 
-		if (bio_add_page(bio, chunk->diff_buffer->pages[page_idx],
-				 bytes, 0) == bytes) {
-			page_idx++;
-			count -= portion;
-			continue;
+			if (bio_add_page(bio, chunk->diff_buffer->pages[page_idx],
+					 bytes, 0) == bytes) {
+				page_idx++;
+				count -= portion;
+				continue;
+			}
+
+			/* Create next bio */
+			next = bio_alloc_bioset(bdev, calc_max_vecs(count),
+						REQ_OP_READ, GFP_NOIO,
+						&chunk_io_bioset);
+			next->bi_iter.bi_sector = bio_end_sector(bio);
+			bio_set_flag(next, BIO_FILTERED);
+			bio_chain(bio, next);
+			submit_bio_noacct(bio);
+			bio = next;
 		}
-
-		/* Create next bio */
-		next = bio_alloc_bioset(bdev, calc_max_vecs(count),
-					REQ_OP_READ, GFP_NOIO,
-					&chunk_io_bioset);
-		next->bi_iter.bi_sector = bio_end_sector(bio);
-		bio_set_flag(next, BIO_FILTERED);
-		bio_chain(bio, next);
-		submit_bio_noacct(bio);
-		bio = next;
 	}
 	return bio;
 }

@@ -202,9 +202,7 @@ int snapshot_destroy(const uuid_t *id)
 	return 0;
 }
 
-int snapshot_append_storage(const uuid_t *id, const char *bdev_path,
-			    struct blksnap_sectors __user *ranges,
-			    unsigned int range_count)
+int snapshot_append_storage(const uuid_t *id, unsigned int fd)
 {
 	int ret = 0;
 	struct snapshot *snapshot;
@@ -213,8 +211,7 @@ int snapshot_append_storage(const uuid_t *id, const char *bdev_path,
 	if (!snapshot)
 		return -ESRCH;
 
-	ret = diff_storage_append_block(snapshot->diff_storage, bdev_path,
-					ranges, range_count);
+	ret = diff_storage_append_file(snapshot->diff_storage, fd);
 	snapshot_put(snapshot);
 	return ret;
 }

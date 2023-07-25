@@ -199,11 +199,9 @@ static int ioctl_snapshot_destroy(unsigned long arg)
 
 static int ioctl_snapshot_append_storage(unsigned long arg)
 {
-	int ret;
 	struct blksnap_snapshot_append_storage __user *uarg =
 		(struct blksnap_snapshot_append_storage __user *)arg;
 	struct blksnap_snapshot_append_storage karg;
-	char *bdev_path = NULL;
 
 	pr_debug("Append difference storage\n");
 
@@ -212,17 +210,7 @@ static int ioctl_snapshot_append_storage(unsigned long arg)
 		return -EINVAL;
 	}
 
-	bdev_path = strndup_user(u64_to_user_ptr(karg.bdev_path),
-				 karg.bdev_path_size);
-	if (IS_ERR(bdev_path)) {
-		pr_err("Unable to append difference storage: invalid block device name buffer\n");
-		return PTR_ERR(bdev_path);
-	}
-
-	ret = snapshot_append_storage((uuid_t *)karg.id.b, bdev_path,
-				      u64_to_user_ptr(karg.ranges), karg.count);
-	kfree(bdev_path);
-	return ret;
+	return snapshot_append_storage((uuid_t *)karg.id.b, karg.fd);
 }
 
 static int ioctl_snapshot_take(unsigned long arg)
