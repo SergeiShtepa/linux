@@ -281,9 +281,9 @@ static inline unsigned short calc_max_vecs(sector_t left)
 #if 1
 void chunk_store(struct chunk *chunk)
 {
-	struct file *file = chunk->diff_region->file;
-	sector_t sector = chunk->diff_region->sector;
-	sector_t count = chunk->diff_region->count;
+	struct file *file = chunk->snapshot_file;
+	sector_t sector = chunk->snapshot_sector;
+	sector_t count = chunk->sector_count;
 
 	/*
 	TODO write to file

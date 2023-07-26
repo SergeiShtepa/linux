@@ -48,15 +48,15 @@ enum chunk_st {
  *	for the	last chunk.
  * @lock:
  *	Binary semaphore. Syncs access to the chunks fields: state,
- *	diff_buffer, snapshot_bdev and snapshot_sector.
+ *	diff_buffer, snapshot_file and snapshot_sector.
  * @diff_area:
  *	Pointer to the difference area - the difference storage area for a
  *	specific device. This field is only available when the chunk is locked.
  *	Allows to protect the difference area from early release.
  * @state:
  *	Defines the state of a chunk.
- * @snapshot_bdev:
- *	The target block device.
+ * @snapshot_file:
+ *	The difference storage file.
  * @snapshot_sector:
  *	The sector offset of the region's first sector.
  * @diff_buffer:
@@ -86,7 +86,7 @@ struct chunk {
 
 	enum chunk_st state;
 
-	struct block_device *snapshot_bdev;
+	struct file *snapshot_file;
 	sector_t snapshot_sector;
 
 	struct diff_buffer *diff_buffer;
