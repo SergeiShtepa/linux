@@ -97,8 +97,9 @@ void __exit snapshot_done(void)
 }
 
 
-int snapshot_create(uuid_t *id)
+int snapshot_create(struct blksnap_snapshot_create *arg)
 {
+	int ret;
 	struct snapshot *snapshot = NULL;
 
 	snapshot = snapshot_new();
@@ -107,13 +108,21 @@ int snapshot_create(uuid_t *id)
 		return PTR_ERR(snapshot);
 	}
 
-	uuid_copy(id, &snapshot->id);
+	export_uuid(arg->id.b, &snapshot->id);
+
+	ret = diff_storage_append_file(snapshot->diff_storage,
+				       arg->diff_storage_fd,
+				       arg->diff_storage_limit_sect);
+	if (ret) {
+		snapshot_put(snapshot);
+		return ret;
+	}
 
 	down_write(&snapshots_lock);
 	list_add_tail(&snapshot->link, &snapshots);
 	up_write(&snapshots_lock);
 
-	pr_info("Snapshot %pUb was created\n", id);
+	pr_info("Snapshot %pUb was created\n", arg->id.b);
 	return 0;
 }
 
@@ -200,20 +209,6 @@ int snapshot_destroy(const uuid_t *id)
 	snapshot_put(snapshot);
 
 	return 0;
-}
-
-int snapshot_append_storage(const uuid_t *id, unsigned int fd)
-{
-	int ret = 0;
-	struct snapshot *snapshot;
-
-	snapshot = snapshot_get_by_id(id);
-	if (!snapshot)
-		return -ESRCH;
-
-	ret = diff_storage_append_file(snapshot->diff_storage, fd);
-	snapshot_put(snapshot);
-	return ret;
 }
 
 static int snapshot_take_trackers(struct snapshot *snapshot)

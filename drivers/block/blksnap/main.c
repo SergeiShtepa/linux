@@ -145,9 +145,9 @@ unsigned int get_free_diff_buffer_pool_size(void)
 	return free_diff_buffer_pool_size;
 }
 
-unsigned int get_diff_storage_minimum(void)
+sector_t get_diff_storage_minimum(void)
 {
-	return diff_storage_minimum;
+	return (sector_t)diff_storage_minimum;
 }
 
 static int ioctl_version(struct blksnap_version __user *user_version)
@@ -163,16 +163,21 @@ static int ioctl_version(struct blksnap_version __user *user_version)
 static_assert(sizeof(uuid_t) == sizeof(struct blksnap_uuid),
 	"Invalid size of struct blksnap_uuid.");
 
-static int ioctl_snapshot_create(struct blksnap_uuid __user *user_id)
+static int ioctl_snapshot_create(struct blksnap_snapshot_create __user *uarg)
 {
-	uuid_t kernel_id;
+	struct blksnap_snapshot_create karg;
 	int ret;
 
-	ret = snapshot_create(&kernel_id);
+	if (copy_from_user(&karg, uarg, sizeof(karg))) {
+		pr_err("Unable to create snapshot: invalid user buffer\n");
+		return -ENODATA;
+	}
+
+	ret = snapshot_create(&karg);
 	if (ret)
 		return ret;
 
-	if (copy_to_user(user_id->b, kernel_id.b, sizeof(uuid_t))) {
+	if (copy_to_user(uarg, &karg, sizeof(karg))) {
 		pr_err("Unable to create snapshot: invalid user buffer\n");
 		return -ENODATA;
 	}
@@ -190,21 +195,6 @@ static int ioctl_snapshot_destroy(struct blksnap_uuid __user *user_id)
 	}
 
 	return snapshot_destroy(&kernel_id);
-}
-
-static int ioctl_snapshot_append_storage(
-		struct blksnap_snapshot_append_storage __user *uarg)
-{
-	struct blksnap_snapshot_append_storage karg;
-
-	pr_debug("Append difference storage\n");
-
-	if (copy_from_user(&karg, uarg, sizeof(karg))) {
-		pr_err("Unable to append difference storage: invalid user buffer\n");
-		return -EINVAL;
-	}
-
-	return snapshot_append_storage((uuid_t *)karg.id.b, karg.fd);
 }
 
 static int ioctl_snapshot_take(struct blksnap_uuid __user *user_id)
@@ -300,8 +290,6 @@ static long blksnap_ctrl_unlocked_ioctl(struct file *filp, unsigned int cmd,
 		return ioctl_snapshot_create(argp);
 	case IOCTL_BLKSNAP_SNAPSHOT_DESTROY:
 		return ioctl_snapshot_destroy(argp);
-	case IOCTL_BLKSNAP_SNAPSHOT_APPEND_STORAGE:
-		return ioctl_snapshot_append_storage(argp);
 	case IOCTL_BLKSNAP_SNAPSHOT_TAKE:
 		return ioctl_snapshot_take(argp);
 	case IOCTL_BLKSNAP_SNAPSHOT_COLLECT:

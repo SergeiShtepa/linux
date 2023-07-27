@@ -14,18 +14,6 @@ struct blksnap_sectors;
  *	The reference counter.
  * @lock:
  *	Spinlock allows to guarantee the safety of linked lists.
- * @storage_bdevs:
- *	List of opened block devices. Blocks for storing snapshot data can be
- *	located on different block devices. So, all opened block devices are
- *	located in this list. Blocks on opened block devices are allocated for
- *	storing the chunks data.
- * @empty_blocks:
- *	List of empty blocks on storage. This list can be updated while
- *	holding a snapshot. This allows us to dynamically increase the
- *	storage size for these snapshots.
- * @filled_blocks:
- *	List of filled blocks. When the blocks from the list of empty blocks are filled,
- *	we move them to the list of filled blocks.
  * @capacity:
  *	Total amount of available storage space.
  * @filled:
@@ -53,11 +41,9 @@ struct diff_storage {
 	struct kref kref;
 	spinlock_t lock;
 
-	struct list_head storage_bdevs;
-	struct list_head empty_blocks;
-	struct list_head filled_blocks;
-
+        struct file *file;
 	sector_t capacity;
+        sector_t limit;
 	sector_t filled;
 	sector_t requested;
 
@@ -81,9 +67,8 @@ static inline void diff_storage_put(struct diff_storage *diff_storage)
 };
 
 int diff_storage_append_file(struct diff_storage *diff_storage,
-                             unsigned int fd);
+                             unsigned int fd, sector_t limit);
 int diff_storage_alloc(struct diff_storage *diff_storage, sector_t count,
-		       unsigned int logical_blksz, struct file **file,
-		       sector_t *sector);
+		       struct file **file, sector_t *sector);
 
 #endif /* __BLKSNAP_DIFF_STORAGE_H */

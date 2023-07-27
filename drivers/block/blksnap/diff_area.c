@@ -181,7 +181,6 @@ static inline bool diff_area_store_one(struct diff_area *diff_area)
 
 		ret = diff_storage_alloc(diff_area->diff_storage,
 					 chunk->sector_count,
-					 diff_area->logical_blksz,
 					 &chunk->snapshot_file,
 					 &chunk->snapshot_sector);
 		if (ret) {
