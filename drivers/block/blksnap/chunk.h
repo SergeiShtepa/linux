@@ -48,16 +48,16 @@ enum chunk_st {
  *	for the	last chunk.
  * @lock:
  *	Binary semaphore. Syncs access to the chunks fields: state,
- *	diff_buffer, snapshot_file and snapshot_sector.
+ *	diff_buffer, diff_file and diff_ofs_sect.
  * @diff_area:
  *	Pointer to the difference area - the difference storage area for a
  *	specific device. This field is only available when the chunk is locked.
  *	Allows to protect the difference area from early release.
  * @state:
  *	Defines the state of a chunk.
- * @snapshot_file:
+ * @diff_file:
  *	The difference storage file.
- * @snapshot_sector:
+ * @diff_ofs_sect:
  *	The sector offset of the region's first sector.
  * @diff_buffer:
  *	Pointer to &struct diff_buffer. Describes a buffer in the memory
@@ -86,8 +86,8 @@ struct chunk {
 
 	enum chunk_st state;
 
-	struct file *snapshot_file;
-	sector_t snapshot_sector;
+	struct file *diff_file;
+	sector_t diff_ofs_sect;
 
 	struct diff_buffer *diff_buffer;
 };
@@ -106,9 +106,10 @@ struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio);
 
 void chunk_copy_bio(struct chunk *chunk, struct bio *bio,
 		    struct bvec_iter *iter);
-void chunk_clone_bio(struct chunk *chunk, struct bio *bio);
+void chunk_diff_bio(struct chunk *chunk, struct bio *bio);
+void chunk_origin_bio(struct chunk *chunk, struct bio *bio);
 void chunk_store(struct chunk *chunk);
-int chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio);
+bool chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio);
 int chunk_load_and_postpone_io(struct chunk *chunk, struct bio **chunk_bio);
 void chunk_load_and_postpone_io_finish(struct list_head *chunks,
 				struct bio *chunk_bio, struct bio *orig_bio);

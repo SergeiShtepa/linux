@@ -144,39 +144,69 @@ struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio)
 	return bio_alloc_clone(bdev, bio, GFP_NOIO, &chunk_clone_bioset);
 }
 
-void chunk_clone_bio(struct chunk *chunk, struct bio *bio)
+/*
+ * Synchronously load from diff file.
+ */
+int chunk_diff_load(struct chunk *chunk)
 {
-	if (chunk->state == CHUNK_ST_STORED) {
-		sector_t sector;
-		struct file *file;
+	int ret = 0;
+	//bool mpool_alloc;
+	//struct kiocb iocb;
+	//struct bio_vec *bvec;
+	struct file *file;
+	sector_t sector;
 
-		file = chunk->snapshot_file;
-		sector = chunk->snapshot_sector;
 
-		/*
-		 TODO: async file write
-		*/
-	} else {
-		sector_t sector;
-		struct bio *new_bio;
-		struct block_device *bdev;
+	file = chunk->diff_file;
+	sector = chunk->diff_ofs_sect;
 
-		bdev = chunk->diff_area->orig_bdev;
-		sector = chunk_sector(chunk);
+	/*
+	TODO
+	*/
+	return ret;
+}
 
-		new_bio = chunk_alloc_clone(bdev, bio);
-		WARN_ON(!new_bio);
+/*
+ * The data from bio is read to the diff file or read from it.
+ */
+void chunk_diff_bio(struct chunk *chunk, struct bio *bio)
+{
+	sector_t sector;
+	struct file *file;
 
-		chunk_limit_iter(chunk, bio, sector, &new_bio->bi_iter);
-		bio_set_flag(new_bio, BIO_FILTERED);
-		new_bio->bi_end_io = chunk_clone_endio;
-		new_bio->bi_private = bio;
+	file = chunk->diff_file;
+	sector = chunk->diff_ofs_sect;
 
-		bio_advance(bio, new_bio->bi_iter.bi_size);
-		bio_inc_remaining(bio);
+	/*
+	 TODO: sync file write or read
+	*/
+	(void)bio;
+}
 
-		submit_bio_noacct(new_bio);
-	}
+/*
+ * Redirects bio to the original block device.
+ */
+void chunk_origin_bio(struct chunk *chunk, struct bio *bio)
+{
+	sector_t sector;
+	struct bio *new_bio;
+	struct block_device *bdev;
+
+	bdev = chunk->diff_area->orig_bdev;
+	sector = chunk_sector(chunk);
+
+	new_bio = chunk_alloc_clone(bdev, bio);
+	WARN_ON(!new_bio);
+
+	chunk_limit_iter(chunk, bio, sector, &new_bio->bi_iter);
+	bio_set_flag(new_bio, BIO_FILTERED);
+	new_bio->bi_end_io = chunk_clone_endio;
+	new_bio->bi_private = bio;
+
+	bio_advance(bio, new_bio->bi_iter.bi_size);
+	bio_inc_remaining(bio);
+
+	submit_bio_noacct(new_bio);
 }
 
 static inline struct chunk *get_chunk_from_cbio(struct chunk_bio *cbio)
@@ -236,6 +266,24 @@ static void notify_load_and_postpone_io(struct work_struct *work)
 	bio_put(&cbio->bio);
 }
 
+static void chunk_notify_store(struct chunk *chunk, int err)
+{
+	if (err) {
+		chunk_store_failed(chunk, err);
+		return;
+	}
+
+	WARN_ON_ONCE(chunk->state != CHUNK_ST_IN_MEMORY);
+	chunk->state = CHUNK_ST_STORED;
+
+	if (chunk->diff_buffer) {
+		diff_buffer_release(chunk->diff_area,
+				    chunk->diff_buffer);
+		chunk->diff_buffer = NULL;
+	}
+	chunk_up(chunk);
+}
+#if 0
 static void chunk_notify_store(struct work_struct *work)
 {
 	struct chunk_bio *cbio = container_of(work, struct chunk_bio, work);
@@ -260,7 +308,7 @@ static void chunk_notify_store(struct work_struct *work)
 
 	bio_put(&cbio->bio);
 }
-
+#endif
 static void chunk_io_endio(struct bio *bio)
 {
 	struct chunk_bio *cbio = container_of(bio, struct chunk_bio, bio);
@@ -278,27 +326,48 @@ static inline unsigned short calc_max_vecs(sector_t left)
 {
 	return bio_max_segs(round_up(left, PAGE_SECTORS) / PAGE_SECTORS);
 }
-#if 1
+
+/*
+ * Store the chunk to difference storage file
+ */
 void chunk_store(struct chunk *chunk)
 {
-	struct file *file = chunk->snapshot_file;
-	sector_t sector = chunk->snapshot_sector;
-	sector_t count = chunk->sector_count;
+	int ret = 0;
+	struct file *file = chunk->diff_file;
+	sector_t sector = chunk->diff_ofs_sect;
+	size_t length = chunk->sector_count * SECTOR_SIZE;
+	size_t offset = 0;
 
-	/*
-	TODO write to file
-	*/
-	(void)file;
-	(void)sector;
-	(void)count;
+	struct kiocb iocb = {0};
+	struct iov_iter iter;
 
-	(void)chunk_notify_store;
+	while (length) {
+		int copied;
+		struct page **pages = chunk->diff_buffer->pages;
+		size_t maxsize = chunk->diff_buffer->page_count;
+
+		copied = iov_iter_get_pages2(&iter, pages, length,
+					     maxsize, &offset);
+		if (copied <= 0) {
+			ret = -EFAULT;
+			goto out;
+		}
+		length -= copied;
+	}
+
+	iocb.ki_pos = sector * SECTOR_SIZE;
+	iocb.ki_filp = file;
+	iocb.ki_flags = IOCB_DSYNC;
+
+	ret = file->f_op->write_iter(&iocb, &iter);
+out:
+	chunk_notify_store(chunk, ret);
 }
-#else
+#if 0
 void chunk_store(struct chunk *chunk)
 {
 	struct block_device *bdev = chunk->snapshot_bdev;
-	sector_t sector = chunk->snapshot_sector;
+	sector_t sector = chunk->diff_ofs_sect;
 	sector_t count = chunk->sector_count;
 	unsigned int page_idx = 0;
 	struct bio *bio;
@@ -343,7 +412,7 @@ void chunk_store(struct chunk *chunk)
 }
 #endif
 
-static struct bio *__chunk_load(struct chunk *chunk)
+static struct bio *chunk_origin_load_async(struct chunk *chunk)
 {
 	struct bio *bio = NULL;
 	struct diff_buffer *diff_buffer;
@@ -355,64 +424,50 @@ static struct bio *__chunk_load(struct chunk *chunk)
 		return ERR_CAST(diff_buffer);
 	chunk->diff_buffer = diff_buffer;
 
-	if (chunk->state == CHUNK_ST_STORED) {
-		//bool mpool_alloc;
-		//struct kiocb iocb;
-		//struct bio_vec *bvec;
-		struct file *file;
+	struct block_device *bdev;
 
+	bdev = chunk->diff_area->orig_bdev;
+	sector = chunk_sector(chunk);
 
-		file = chunk->snapshot_file;
-		sector = chunk->snapshot_sector;
+	bio = bio_alloc_bioset(bdev, calc_max_vecs(count),
+			       REQ_OP_READ, GFP_NOIO, &chunk_io_bioset);
+	bio->bi_iter.bi_sector = sector;
+	bio_set_flag(bio, BIO_FILTERED);
 
-		/*
-		TODO
-		*/
-		(void)file;
-		(void)sector;
-		(void)count;
-	} else {
-		struct block_device *bdev;
+	while (count) {
+		struct bio *next;
+		sector_t portion = min_t(sector_t, count, PAGE_SECTORS);
+		unsigned int bytes = portion << SECTOR_SHIFT;
 
-		bdev = chunk->diff_area->orig_bdev;
-		sector = chunk_sector(chunk);
-
-		bio = bio_alloc_bioset(bdev, calc_max_vecs(count),
-				       REQ_OP_READ, GFP_NOIO, &chunk_io_bioset);
-		bio->bi_iter.bi_sector = sector;
-		bio_set_flag(bio, BIO_FILTERED);
-
-		while (count) {
-			struct bio *next;
-			sector_t portion = min_t(sector_t, count, PAGE_SECTORS);
-			unsigned int bytes = portion << SECTOR_SHIFT;
-
-			if (bio_add_page(bio, chunk->diff_buffer->pages[page_idx],
-					 bytes, 0) == bytes) {
-				page_idx++;
-				count -= portion;
-				continue;
-			}
-
-			/* Create next bio */
-			next = bio_alloc_bioset(bdev, calc_max_vecs(count),
-						REQ_OP_READ, GFP_NOIO,
-						&chunk_io_bioset);
-			next->bi_iter.bi_sector = bio_end_sector(bio);
-			bio_set_flag(next, BIO_FILTERED);
-			bio_chain(bio, next);
-			submit_bio_noacct(bio);
-			bio = next;
+		if (bio_add_page(bio, chunk->diff_buffer->pages[page_idx],
+				 bytes, 0) == bytes) {
+			page_idx++;
+			count -= portion;
+			continue;
 		}
+
+		/* Create next bio */
+		next = bio_alloc_bioset(bdev, calc_max_vecs(count),
+					REQ_OP_READ, GFP_NOIO,
+					&chunk_io_bioset);
+		next->bi_iter.bi_sector = bio_end_sector(bio);
+		bio_set_flag(next, BIO_FILTERED);
+		bio_chain(bio, next);
+		submit_bio_noacct(bio);
+		bio = next;
 	}
+
 	return bio;
 }
 
+/*
+ * Load the chunk asynchronously.
+ */
 int chunk_load_and_postpone_io(struct chunk *chunk, struct bio **chunk_bio)
 {
 	struct bio *prev = *chunk_bio, *bio;
 
-	bio = __chunk_load(chunk);
+	bio = chunk_origin_load_async(chunk);
 	if (IS_ERR(bio))
 		return PTR_ERR(bio);
 
@@ -445,14 +500,16 @@ void chunk_load_and_postpone_io_finish(struct list_head *chunks,
 	chunk_submit_bio(chunk_bio);
 }
 
-int chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio)
+bool chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio)
 {
 	struct chunk_bio *cbio;
 	struct bio *bio;
 
-	bio = __chunk_load(chunk);
-	if (IS_ERR(bio))
-		return PTR_ERR(bio);
+	bio = chunk_origin_load_async(chunk);
+	if (IS_ERR(bio)) {
+		chunk_up(chunk);
+		return false;
+	}
 
 	cbio = container_of(bio, struct chunk_bio, bio);
 	INIT_LIST_HEAD(&cbio->chunks);
@@ -465,7 +522,7 @@ int chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio)
 	bio_inc_remaining(orig_bio);
 
 	chunk_submit_bio(bio);
-	return 0;
+	return true;
 }
 
 int __init chunk_init(void)
