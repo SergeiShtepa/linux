@@ -43,12 +43,15 @@ static void snapimage_submit_bio(struct bio *bio)
 		cbt_map_set_both(tracker->cbt_map, bio->bi_iter.bi_sector,
 				 bio_sectors(bio));
 
+	current->blk_filter = &tracker->filter;
 	while (bio->bi_iter.bi_size) {
 		if (!diff_area_submit_chunk(diff_area, bio)) {
 			bio_io_error(bio);
 			return;
 		}
 	}
+	current->blk_filter = NULL;
+
 	bio_endio(bio);
 }
 

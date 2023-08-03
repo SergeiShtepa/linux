@@ -590,24 +590,23 @@ static inline blk_status_t blk_check_zone_append(struct request_queue *q,
 	return BLK_STS_OK;
 }
 
-static bool submit_bio_filter(struct bio *bio)
-{
-	if (bio_flagged(bio, BIO_FILTERED))
-		return false;
-
-	bio_set_flag(bio, BIO_FILTERED);
-	return bio->bi_bdev->bd_filter->ops->submit_bio(bio);
-}
-
 static void __submit_bio(struct bio *bio)
 {
 	struct request_queue *q = bdev_get_queue(bio->bi_bdev);
-	bool skip_bio;
+	bool skip_bio = false;
 
 	if (unlikely(bio_queue_enter(bio)))
 		return;
 
-	skip_bio = (bio->bi_bdev->bd_filter && submit_bio_filter(bio));
+	if (bio->bi_bdev->bd_filter &&
+	    bio->bi_bdev->bd_filter != current->blk_filter) {
+		struct blkfilter *prev = current->blk_filter;
+
+	    	current->blk_filter = bio->bi_bdev->bd_filter;
+		skip_bio = bio->bi_bdev->bd_filter->ops->submit_bio(bio);
+		current->blk_filter = prev;
+	}
+
 	blk_queue_exit(q);
 	if (skip_bio)
 		return;
@@ -617,7 +616,10 @@ static void __submit_bio(struct bio *bio)
 
 	if (!bio->bi_bdev->bd_has_submit_bio) {
 		blk_mq_submit_bio(bio);
-	} else if (likely(bio_queue_enter(bio) == 0)) {
+		return;
+	}
+
+	if (likely(bio_queue_enter(bio) == 0)) {
 		struct gendisk *disk = bio->bi_bdev->bd_disk;
 
 		disk->fops->submit_bio(bio);

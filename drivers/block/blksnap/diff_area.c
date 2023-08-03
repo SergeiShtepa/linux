@@ -188,7 +188,6 @@ static inline bool diff_area_store_one(struct diff_area *diff_area)
 	}
 
 	chunk_diff_write(chunk);
-
 	return true;
 }
 
@@ -197,8 +196,10 @@ static void diff_area_store_queue_work(struct work_struct *work)
 	struct diff_area *diff_area = container_of(
 		work, struct diff_area, store_queue_work);
 
+	current->blk_filter = &diff_area->tracker->filter;
 	while (diff_area_store_one(diff_area))
 		;
+	current->blk_filter = NULL;
 }
 
 struct diff_area *diff_area_new(struct tracker *tracker,
@@ -415,7 +416,6 @@ static void orig_clone_bio(struct diff_area *diff_area, struct bio *bio)
 	new_bio->bi_iter.bi_size = min_t(unsigned int,
 			bio->bi_iter.bi_size, chunk_limit << SECTOR_SHIFT);
 
-	bio_set_flag(new_bio, BIO_FILTERED);
 	new_bio->bi_end_io = orig_clone_endio;
 	new_bio->bi_private = bio;
 
