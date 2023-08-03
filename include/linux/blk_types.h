@@ -347,7 +347,6 @@ enum {
 	BIO_QOS_MERGED,		/* but went through rq_qos merge path */
 	BIO_REMAPPED,
 	BIO_ZONE_WRITE_LOCKED,	/* Owns a zoned device zone write lock */
-	BIO_FILTERED,		/* bio has already been filtered */
 	BIO_FLAG_LAST
 };
 

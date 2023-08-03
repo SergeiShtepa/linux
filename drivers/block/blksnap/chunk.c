@@ -152,7 +152,6 @@ void chunk_read_diff(struct chunk *chunk, struct bio *bio)
 
 	new_bio = chunk_alloc_clone(bdev, bio);
 	chunk_limit_iter(chunk, bio, sector, &new_bio->bi_iter);
-	bio_set_flag(new_bio, BIO_FILTERED);
 	new_bio->bi_end_io = chunk_clone_endio;
 	new_bio->bi_private = bio;
 
@@ -275,7 +274,6 @@ void chunk_store(struct chunk *chunk)
 			       REQ_OP_WRITE | REQ_SYNC | REQ_FUA, GFP_NOIO,
 			       &chunk_io_bioset);
 	bio->bi_iter.bi_sector = sector;
-	bio_set_flag(bio, BIO_FILTERED);
 
 	while (count) {
 		struct bio *next;
@@ -294,7 +292,6 @@ void chunk_store(struct chunk *chunk)
 					REQ_OP_WRITE | REQ_SYNC | REQ_FUA,
 					GFP_NOIO, &chunk_io_bioset);
 		next->bi_iter.bi_sector = bio_end_sector(bio);
-		bio_set_flag(next, BIO_FILTERED);
 		bio_chain(bio, next);
 		submit_bio_noacct(bio);
 		bio = next;
@@ -333,7 +330,6 @@ static struct bio *__chunk_load(struct chunk *chunk)
 	bio = bio_alloc_bioset(bdev, calc_max_vecs(count),
 			       REQ_OP_READ, GFP_NOIO, &chunk_io_bioset);
 	bio->bi_iter.bi_sector = sector;
-	bio_set_flag(bio, BIO_FILTERED);
 
 	while (count) {
 		struct bio *next;
@@ -352,7 +348,6 @@ static struct bio *__chunk_load(struct chunk *chunk)
 					REQ_OP_READ, GFP_NOIO,
 					&chunk_io_bioset);
 		next->bi_iter.bi_sector = bio_end_sector(bio);
-		bio_set_flag(next, BIO_FILTERED);
 		bio_chain(bio, next);
 		submit_bio_noacct(bio);
 		bio = next;
