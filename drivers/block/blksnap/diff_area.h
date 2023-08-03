@@ -14,6 +14,7 @@
 
 struct diff_storage;
 struct chunk;
+struct tracker;
 
 /**
  * struct diff_area - Describes the difference area for one original device.
@@ -62,6 +63,8 @@ struct chunk;
  *	generated when reading from the snapshot image.
  * @error_code:
  *	The error code that caused the snapshot to be corrupted.
+ * @tracker:
+ *	Back pointer to the tracker for this diff_area
  *
  * The &struct diff_area is created for each block device in the snapshot.
  * It is used to save the differences between the original block device and
@@ -111,9 +114,10 @@ struct diff_area {
 
 	unsigned long corrupt_flag;
 	int error_code;
+	struct tracker *tracker;
 };
 
-struct diff_area *diff_area_new(dev_t dev_id,
+struct diff_area *diff_area_new(struct tracker *tracker,
 				struct diff_storage *diff_storage);
 void diff_area_free(struct kref *kref);
 static inline struct diff_area *diff_area_get(struct diff_area *diff_area)

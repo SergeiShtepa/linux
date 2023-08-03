@@ -79,6 +79,7 @@ static struct blkfilter *tracker_attach(struct block_device *bdev)
 		return ERR_PTR(-ENOMEM);
 	}
 
+	tracker->orig_bdev = bdev;
 	mutex_init(&tracker->ctl_lock);
 	INIT_LIST_HEAD(&tracker->link);
 	kref_init(&tracker->kref);
@@ -266,7 +267,7 @@ int tracker_take_snapshot(struct tracker *tracker)
 {
 	int ret = 0;
 	bool cbt_reset_needed = false;
-	struct block_device *orig_bdev = tracker->diff_area->orig_bdev;
+	struct block_device *orig_bdev = tracker->orig_bdev;
 	sector_t capacity;
 	unsigned int current_flag;
 
@@ -311,7 +312,7 @@ void tracker_release_snapshot(struct tracker *tracker)
 
 	snapimage_free(tracker);
 
-	blk_mq_freeze_queue(diff_area->orig_bdev->bd_queue);
+	blk_mq_freeze_queue(tracker->orig_bdev->bd_queue);
 
 	pr_debug("Tracker for device [%u:%u] release snapshot\n",
 		 MAJOR(tracker->dev_id), MINOR(tracker->dev_id));
@@ -319,7 +320,7 @@ void tracker_release_snapshot(struct tracker *tracker)
 	atomic_set(&tracker->snapshot_is_taken, false);
 	tracker->diff_area = NULL;
 
-	blk_mq_unfreeze_queue(diff_area->orig_bdev->bd_queue);
+	blk_mq_unfreeze_queue(tracker->orig_bdev->bd_queue);
 
 	diff_area_put(diff_area);
 }

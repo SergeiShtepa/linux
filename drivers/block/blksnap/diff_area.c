@@ -10,6 +10,7 @@
 #include "diff_buffer.h"
 #include "diff_storage.h"
 #include "params.h"
+#include "tracker.h"
 
 static inline sector_t diff_area_chunk_offset(struct diff_area *diff_area,
 					      sector_t sector)
@@ -126,14 +127,9 @@ void diff_area_free(struct kref *kref)
 			chunk_free(diff_area, chunk);
 	xa_destroy(&diff_area->chunk_map);
 
-	if (diff_area->orig_bdev) {
-		blkdev_put(diff_area->orig_bdev, NULL);
-		diff_area->orig_bdev = NULL;
-	}
-
 	/* Clean up free_diff_buffers */
 	diff_buffer_cleanup(diff_area);
-
+	tracker_put(diff_area->tracker);
 	kfree(diff_area);
 }
 
@@ -204,27 +200,16 @@ static void diff_area_store_queue_work(struct work_struct *work)
 		;
 }
 
-struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
+struct diff_area *diff_area_new(struct tracker *tracker,
+				struct diff_storage *diff_storage)
 {
 	int ret = 0;
 	struct diff_area *diff_area = NULL;
-	struct block_device *bdev;
-
-	pr_debug("Open device [%u:%u]\n", MAJOR(dev_id), MINOR(dev_id));
-
-	bdev = blkdev_get_by_dev(dev_id, FMODE_READ | FMODE_WRITE, NULL, NULL);
-	if (IS_ERR(bdev)) {
-		int err = PTR_ERR(bdev);
-
-		pr_err("Failed to open device. errno=%d\n", abs(err));
-		return ERR_PTR(err);
-	}
+	struct block_device *bdev = tracker->orig_bdev;
 
 	diff_area = kzalloc(sizeof(struct diff_area), GFP_KERNEL);
-	if (!diff_area) {
-		blkdev_put(bdev, NULL);
+	if (!diff_area)
 		return ERR_PTR(-ENOMEM);
-	}
 
 	kref_init(&diff_area->kref);
 	diff_area->orig_bdev = bdev;
@@ -237,10 +222,12 @@ struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
 	}
 	pr_debug("The optimal chunk size was calculated as %llu bytes for device [%d:%d]\n",
 		 (1ull << diff_area->chunk_shift),
-		 MAJOR(diff_area->orig_bdev->bd_dev),
-		 MINOR(diff_area->orig_bdev->bd_dev));
+		 MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
 
 	xa_init(&diff_area->chunk_map);
+
+	tracker_get(tracker);
+	diff_area->tracker = tracker;
 
 	spin_lock_init(&diff_area->store_queue_lock);
 	INIT_LIST_HEAD(&diff_area->store_queue);
@@ -251,8 +238,8 @@ struct diff_area *diff_area_new(dev_t dev_id, struct diff_storage *diff_storage)
 	INIT_LIST_HEAD(&diff_area->free_diff_buffers);
 	atomic_set(&diff_area->free_diff_buffers_count, 0);
 
-	diff_area->physical_blksz = bdev->bd_queue->limits.physical_block_size;
-	diff_area->logical_blksz = bdev->bd_queue->limits.logical_block_size;
+	diff_area->physical_blksz = bdev_physical_block_size(bdev);
+	diff_area->logical_blksz = bdev_logical_block_size(bdev);
 	diff_area->corrupt_flag = 0;
 
 	if (!diff_storage->capacity) {
