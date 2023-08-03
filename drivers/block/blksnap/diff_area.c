@@ -492,12 +492,8 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 		return false;
 	chunk->diff_area = diff_area_get(diff_area);
 
-	if (unlikely(chunk->state == CHUNK_ST_FAILED)) {
-		pr_err("Chunk #%ld corrupted\n", chunk->number);
-		chunk_up(chunk);
-		return false;
-	}
-	if (chunk->state == CHUNK_ST_IN_MEMORY) {
+	switch (chunk->state) {
+	case CHUNK_ST_IN_MEMORY:
 		/*
 		 * Directly copy data from the in-memory chunk or
 		 * copy to the in-memory chunk for write operation.
@@ -505,24 +501,38 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 		chunk_copy_bio(chunk, bio, &bio->bi_iter);
 		chunk_up(chunk);
 		return true;
-	}
-
-	/*
-	 * Read/write data from the chunk on difference storage.
-	 */
-	if (chunk->state == CHUNK_ST_STORED) {
+	case CHUNK_ST_STORED:
+		/*
+		 * Read data from the chunk on difference storage.
+		 */
 		int ret = chunk_diff_bio(chunk, bio);
 		chunk_up(chunk);
 		return (ret == 0);
-	}
-	/*
-	 * Read from original block device
-	 */
-	if (!op_is_write(bio_op(bio))) {
-		chunk_origin_bio(chunk, bio);
-		chunk_up(chunk);
+	case CHUNK_ST_NEW:
+		if (!op_is_write(bio_op(bio))) {
+			/*
+			 * Read from original block device
+			 */
+			chunk_origin_bio(chunk, bio);
+			chunk_up(chunk);
+			return true;
+		}
+
+		/*
+		 * Load the chunk from the original block device asynchronously
+		 * and copy the newly written data to the in-memory chunk.
+		 */
+		if (chunk_load_and_schedule_io(chunk, bio)) {
+			chunk_up(chunk);
+			return false;
+		}
 		return true;
+	default: /* CHUNK_ST_FAILED */
+		pr_err("Chunk #%ld corrupted\n", chunk->number);
+		chunk_up(chunk);
+		return false;
 	}
+
 	/*
 	 * Starts asynchronous loading of a chunk from the original block device
 	 * and schedule copying data to (or from) the in-memory chunk.
