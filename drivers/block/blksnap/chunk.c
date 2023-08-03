@@ -18,7 +18,7 @@ struct chunk_bio {
 };
 
 static struct bio_set chunk_io_bioset;
-static struct bio_set chunk_clone_bioset;
+static struct bio_set chunk_read_diffset;
 
 static inline sector_t chunk_sector(struct chunk *chunk)
 {
@@ -141,26 +141,16 @@ static inline unsigned int chunk_limit(struct chunk *chunk, struct bio *bio)
 
 struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio)
 {
-	return bio_alloc_clone(bdev, bio, GFP_NOIO, &chunk_clone_bioset);
+	return bio_alloc_clone(bdev, bio, GFP_NOIO, &chunk_read_diffset);
 }
 
-void chunk_clone_bio(struct chunk *chunk, struct bio *bio)
+void chunk_read_diff(struct chunk *chunk, struct bio *bio)
 {
+	struct block_device *bdev = chunk->snapshot_bdev;
+	sector_t sector = chunk->snapshot_sector;
 	struct bio *new_bio;
-	struct block_device *bdev;
-	sector_t sector;
-
-	if (chunk->state == CHUNK_ST_STORED) {
-		bdev = chunk->snapshot_bdev;
-		sector = chunk->snapshot_sector;
-	} else {
-		bdev = chunk->diff_area->orig_bdev;
-		sector = chunk_sector(chunk);
-	}
 
 	new_bio = chunk_alloc_clone(bdev, bio);
-	WARN_ON(!new_bio);
-
 	chunk_limit_iter(chunk, bio, sector, &new_bio->bi_iter);
 	bio_set_flag(new_bio, BIO_FILTERED);
 	new_bio->bi_end_io = chunk_clone_endio;
@@ -438,7 +428,7 @@ int __init chunk_init(void)
 			  offsetof(struct chunk_bio, bio),
 			  BIOSET_NEED_BVECS | BIOSET_NEED_RESCUER);
 	if (!ret)
-		ret = bioset_init(&chunk_clone_bioset, 64, 0,
+		ret = bioset_init(&chunk_read_diffset, 64, 0,
 				  BIOSET_NEED_BVECS | BIOSET_NEED_RESCUER);
 	return ret;
 }
@@ -446,5 +436,5 @@ int __init chunk_init(void)
 void chunk_done(void)
 {
 	bioset_exit(&chunk_io_bioset);
-	bioset_exit(&chunk_clone_bioset);
+	bioset_exit(&chunk_read_diffset);
 }

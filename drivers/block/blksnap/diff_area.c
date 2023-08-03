@@ -411,7 +411,7 @@ static void orig_clone_endio(struct bio *bio)
 		bio_endio(orig_bio);
 }
 
-static void orig_clone_bio(struct diff_area *diff_area, struct bio *bio)
+static void chunk_read_orig(struct diff_area *diff_area, struct bio *bio)
 {
 	struct bio *new_bio;
 	struct block_device *bdev = diff_area->orig_bdev;
@@ -482,7 +482,7 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 			 * To read, we simply redirect the bio to the original
 			 * block device.
 			 */
-			orig_clone_bio(diff_area, bio);
+			chunk_read_orig(diff_area, bio);
 			return true;
 		}
 	}
@@ -504,7 +504,7 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 		/*
 		 * Read data from the chunk on difference storage.
 		 */
-		chunk_clone_bio(chunk, bio);
+		chunk_read_diff(chunk, bio);
 		chunk_up(chunk);
 		return true;
 	case CHUNK_ST_NEW:
@@ -512,7 +512,7 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 			/*
 			 * Just Read from the original block device.
 			 */
-			chunk_clone_bio(chunk, bio);
+			chunk_read_orig(diff_area, bio);
 			chunk_up(chunk);
 			return true;
 		}
