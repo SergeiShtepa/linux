@@ -225,7 +225,7 @@ static int snapshot_take_trackers(struct snapshot *snapshot)
 
 	list_for_each_entry(tracker, &snapshot->trackers, link) {
 		struct diff_area *diff_area =
-			diff_area_new(tracker->dev_id, snapshot->diff_storage);
+			diff_area_new(tracker, snapshot->diff_storage);
 
 		if (IS_ERR(diff_area)) {
 			ret = PTR_ERR(diff_area);
