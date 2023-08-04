@@ -519,25 +519,16 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 		}
 
 		/*
-		 * Load the chunk from the original block device asynchronously
-		 * and copy the newly written data to the in-memory chunk.
+		 * Starts asynchronous loading of a chunk from the original
+		 * block device and schedule copying data to (or from) the
+		 * in-memory chunk.
 		 */
-		if (chunk_load_and_schedule_io(chunk, bio)) {
-			chunk_up(chunk);
-			return false;
-		}
-		return true;
+		return chunk_load_and_schedule_io(chunk, bio);
 	default: /* CHUNK_ST_FAILED */
 		pr_err("Chunk #%ld corrupted\n", chunk->number);
 		chunk_up(chunk);
 		return false;
 	}
-
-	/*
-	 * Starts asynchronous loading of a chunk from the original block device
-	 * and schedule copying data to (or from) the in-memory chunk.
-	 */
-	return chunk_load_and_schedule_io(chunk, bio);
 }
 
 static inline void diff_area_event_corrupted(struct diff_area *diff_area)
