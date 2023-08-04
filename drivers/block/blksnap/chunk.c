@@ -145,42 +145,38 @@ struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio)
 }
 
 /*
- * Synchronously load from diff file.
- */
-int chunk_diff_load(struct chunk *chunk)
-{
-	int ret = 0;
-	//bool mpool_alloc;
-	//struct kiocb iocb;
-	//struct bio_vec *bvec;
-	struct file *file;
-	sector_t sector;
-
-
-	file = chunk->diff_file;
-	sector = chunk->diff_ofs_sect;
-
-	/*
-	TODO
-	*/
-	return ret;
-}
-
-/*
  * The data from bio is read to the diff file or read from it.
  */
-void chunk_diff_bio(struct chunk *chunk, struct bio *bio)
+int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 {
-	sector_t sector;
-	struct file *file;
+	loff_t pos = chunk->diff_ofs_sect >> SECTOR_SHIFT;
+	struct bvec_iter iter;
+	struct bio_vec bvec;
+	struct iov_iter iov_iter;
+	ssize_t len;
 
-	file = chunk->diff_file;
-	sector = chunk->diff_ofs_sect;
+	if (op_is_write(bio_op(bio))) {
+		file_start_write(chunk->diff_file);
+		bio_for_each_segment(bvec, bio, iter) {
+			iov_iter_bvec(&iov_iter, ITER_SOURCE, &bvec, 1, bvec.bv_len);
+			len = vfs_iter_write(chunk->diff_file, &iov_iter, &pos, RWF_SYNC);
+			if (len != bvec.bv_len) {
+				file_end_write(chunk->diff_file);
+				return -EIO;
+			}
+		}
+		file_end_write(chunk->diff_file);
 
-	/*
-	 TODO: sync file write or read
-	*/
-	(void)bio;
+	} else {
+		bio_for_each_segment(bvec, bio, iter) {
+			iov_iter_bvec(&iov_iter, ITER_DEST, &bvec, 1, bvec.bv_len);
+			len = vfs_iter_read(chunk->diff_file, &iov_iter, &pos, RWF_SYNC);
+			if (len != bvec.bv_len)
+				return -EIO;
+		}
+	}
+
+	return 0;
 }
 
 /*
@@ -328,41 +324,72 @@ static inline unsigned short calc_max_vecs(sector_t left)
 }
 
 /*
- * Store the chunk to difference storage file
+ * Synchronously loading of chunk from diff file or store in it.
  */
-void chunk_store(struct chunk *chunk)
+void chunk_diff_write(struct chunk *chunk)
 {
-	int ret = 0;
-	struct file *file = chunk->diff_file;
-	sector_t sector = chunk->diff_ofs_sect;
+	loff_t pos = chunk->diff_ofs_sect >> SECTOR_SHIFT;
+	size_t maxsize = chunk->diff_buffer->page_count;
 	size_t length = chunk->sector_count * SECTOR_SIZE;
+	struct page **pages = chunk->diff_buffer->pages;
+	struct iov_iter iov_iter;
+	ssize_t len;
+	ssize_t copied;
 	size_t offset = 0;
+	int err = 0;
 
-	struct kiocb iocb = {0};
-	struct iov_iter iter;
-
+	file_start_write(chunk->diff_file);
 	while (length) {
-		int copied;
-		struct page **pages = chunk->diff_buffer->pages;
-		size_t maxsize = chunk->diff_buffer->page_count;
-
-		copied = iov_iter_get_pages2(&iter, pages, length,
+		copied = iov_iter_get_pages2(&iov_iter, pages, length,
 					     maxsize, &offset);
 		if (copied <= 0) {
-			ret = -EFAULT;
+			file_end_write(chunk->diff_file);
+			err = -EFAULT;
 			goto out;
 		}
+		offset += copied;
 		length -= copied;
+		maxsize -= (copied + PAGE_SIZE - 1) / PAGE_SIZE;
+
+		len = vfs_iter_write(chunk->diff_file, &iov_iter, &pos, RWF_SYNC);
+		if (len != copied) {
+			file_end_write(chunk->diff_file);
+			err = -EIO;
+			goto out;
+		}
 	}
-
-	iocb.ki_pos = sector * SECTOR_SIZE;
-	iocb.ki_filp = file;
-	iocb.ki_flags = IOCB_DSYNC;
-
-	ret = file->f_op->write_iter(&iocb, &iter);
+	file_end_write(chunk->diff_file);
 out:
-	chunk_notify_store(chunk, ret);
+	chunk_notify_store(chunk, err);
 }
+/*
+int chunk_diff_read(struct chunk *chunk)
+{
+	loff_t pos = chunk->diff_ofs_sect >> SECTOR_SHIFT;
+	size_t maxsize = chunk->diff_buffer->page_count;
+	size_t length = chunk->sector_count * SECTOR_SIZE;
+	struct page **pages = chunk->diff_buffer->pages;
+	struct iov_iter iov_iter;
+	ssize_t len;
+	ssize_t copied;
+	size_t offset = 0;
+
+	while (length) {
+		copied = iov_iter_get_pages2(&iov_iter, pages, length,
+					     maxsize, &offset);
+		if (copied <= 0)
+			return -EFAULT;
+		offset += copied;
+		length -= copied;
+		maxsize -= (copied + PAGE_SIZE - 1) / PAGE_SIZE;
+
+		len = vfs_iter_read(chunk->diff_file, &iov_iter, &pos, RWF_SYNC);
+		if (len != copied)
+			return -EIO;
+	}
+	return true;
+}
+*/
 #if 0
 void chunk_store(struct chunk *chunk)
 {

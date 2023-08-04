@@ -190,7 +190,9 @@ static inline bool diff_area_store_one(struct diff_area *diff_area)
 			return true;
 		}
 	}
-	chunk_store(chunk);
+
+	chunk_diff_write(chunk);
+
 	return true;
 }
 
@@ -509,9 +511,9 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 	 * Read/write data from the chunk on difference storage.
 	 */
 	if (chunk->state == CHUNK_ST_STORED) {
-		chunk_diff_bio(chunk, bio);
+		int ret = chunk_diff_bio(chunk, bio);
 		chunk_up(chunk);
-		return true;
+		return (ret == 0);
 	}
 	/*
 	 * Read from original block device

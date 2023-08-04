@@ -16,7 +16,7 @@
 
 static void diff_storage_event_low(struct diff_storage *diff_storage)
 {
-
+	int ret;
 	sector_t requested_nr_sect;
 
 	spin_lock(&diff_storage->lock);
@@ -29,9 +29,12 @@ static void diff_storage_event_low(struct diff_storage *diff_storage)
 	pr_debug("Diff storage low free space. Portion: %llu sectors, requested: %llu\n",
 		requested_nr_sect, diff_storage->requested);
 
-	/*
-	TODO: resize file
-	*/
+	ret = vfs_fallocate(diff_storage->file, 0,
+		0, diff_storage->requested >> SECTOR_SHIFT);
+	if (ret) {
+		pr_err("Failed to fallocate difference storage file\n");
+		return;
+	}
 
 	spin_lock(&diff_storage->lock);
 	diff_storage->capacity += requested_nr_sect;
@@ -69,34 +72,6 @@ void diff_storage_free(struct kref *kref)
 	event_queue_done(&diff_storage->event_queue);
 	kfree(diff_storage);
 }
-
-/*
-	ssize_t (*read_iter) (struct kiocb *, struct iov_iter *);
-	ssize_t (*write_iter) (struct kiocb *, struct iov_iter *);
-
-diff_storage_read(struct file *file, struct kiocb *iocb, struct iov_iter *iter)
-{
-	iocb->ki_filp = file;
-
-	file->f_op->read_iter();
-	file->f_op->write_iter();
-	//generic_file_read_iter(
-	//generic_file_write_iter(
-
-}
-
-{
-	int mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
-	loff_t offset = 0, len;
-
-	ret = vfs_fallocate(file, mode, offset, len);
-	vfs_fsync(file, 1);
-
-
-	file = fget(fd);
-	fput(file);
-}
-*/
 
 int diff_storage_append_file(struct diff_storage *diff_storage,
 			     unsigned int fd, sector_t limit)

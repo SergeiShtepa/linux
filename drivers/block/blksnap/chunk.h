@@ -106,9 +106,10 @@ struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio);
 
 void chunk_copy_bio(struct chunk *chunk, struct bio *bio,
 		    struct bvec_iter *iter);
-void chunk_diff_bio(struct chunk *chunk, struct bio *bio);
+int chunk_diff_bio(struct chunk *chunk, struct bio *bio);
 void chunk_origin_bio(struct chunk *chunk, struct bio *bio);
-void chunk_store(struct chunk *chunk);
+void chunk_diff_write(struct chunk *chunk);
+//int chunk_diff_read(struct chunk *chunk);
 bool chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio);
 int chunk_load_and_postpone_io(struct chunk *chunk, struct bio **chunk_bio);
 void chunk_load_and_postpone_io_finish(struct list_head *chunks,
