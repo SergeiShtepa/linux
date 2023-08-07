@@ -59,7 +59,6 @@ struct diff_storage *diff_storage_new(void)
 	diff_storage->limit = 0;
 
 	event_queue_init(&diff_storage->event_queue);
-	diff_storage_event_low(diff_storage);
 
 	return diff_storage;
 }
@@ -99,9 +98,8 @@ int diff_storage_append_file(struct diff_storage *diff_storage,
 	diff_storage->limit = limit;
 	spin_unlock(&diff_storage->lock);
 
-	if (atomic_read(&diff_storage->low_space_flag) &&
-	    (diff_storage->capacity >= diff_storage->requested))
-		atomic_set(&diff_storage->low_space_flag, 0);
+	if (diff_storage->capacity < diff_storage->requested)
+		diff_storage_event_low(diff_storage);
 out:
 	fput(file);
 	return ret;
