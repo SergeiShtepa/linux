@@ -110,7 +110,7 @@ int snapshot_create(struct blksnap_snapshot_create *arg)
 
 	export_uuid(arg->id.b, &snapshot->id);
 
-	ret = diff_storage_append_file(snapshot->diff_storage,
+	ret = diff_storage_set_file(snapshot->diff_storage,
 				       arg->diff_storage_fd,
 				       arg->diff_storage_limit_sect);
 	if (ret) {

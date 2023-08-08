@@ -41,15 +41,16 @@ struct diff_storage {
 	struct kref kref;
 	spinlock_t lock;
 
-        struct file *file;
+	struct file *file;
 	sector_t capacity;
-        sector_t limit;
+	sector_t limit;
 	sector_t filled;
 	sector_t requested;
 
 	atomic_t low_space_flag;
 	atomic_t overflow_flag;
 
+	struct work_struct reallocate_work;
 	struct event_queue event_queue;
 };
 
@@ -66,8 +67,8 @@ static inline void diff_storage_put(struct diff_storage *diff_storage)
 		kref_put(&diff_storage->kref, diff_storage_free);
 };
 
-int diff_storage_append_file(struct diff_storage *diff_storage,
-                             unsigned int fd, sector_t limit);
+int diff_storage_set_file(struct diff_storage *diff_storage,
+			     unsigned int fd, sector_t limit);
 int diff_storage_alloc(struct diff_storage *diff_storage, sector_t count,
 		       struct file **file, sector_t *sector);
 

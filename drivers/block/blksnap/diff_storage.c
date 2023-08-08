@@ -14,9 +14,47 @@
 #include "diff_storage.h"
 #include "params.h"
 
-static void diff_storage_event_low(struct diff_storage *diff_storage)
+static void diff_storage_reallocate_work(struct work_struct *work)
 {
 	int ret;
+	sector_t req_sect;
+	struct diff_storage *diff_storage = container_of(
+		work, struct diff_storage, reallocate_work);
+	bool stop = false;
+
+	do {
+		spin_lock(&diff_storage->lock);
+		req_sect = min(diff_storage->requested, diff_storage->limit);
+		stop = (diff_storage->capacity >= req_sect);
+		spin_unlock(&diff_storage->lock);
+
+		if (stop) {
+			pr_info("The limit size of the difference storage has been reached\n");
+			break;
+		}
+
+		ret = vfs_fallocate(diff_storage->file, 0, 0,
+				    (loff_t)(req_sect << SECTOR_SHIFT));
+		if (ret) {
+			pr_err("Failed to fallocate difference storage file\n");
+			return;
+		}
+
+		spin_lock(&diff_storage->lock);
+		diff_storage->capacity = req_sect;
+		if (diff_storage->capacity >= diff_storage->requested) {
+			atomic_set(&diff_storage->low_space_flag, 0);
+			stop = true;
+		}
+		spin_unlock(&diff_storage->lock);
+
+		pr_debug("Diff storage reallocate. Capacity: %llu sectors\n",
+			 req_sect);
+	} while (!stop);
+}
+
+static void diff_storage_event_low(struct diff_storage *diff_storage)
+{
 	sector_t requested_nr_sect;
 
 	spin_lock(&diff_storage->lock);
@@ -29,21 +67,21 @@ static void diff_storage_event_low(struct diff_storage *diff_storage)
 	pr_debug("Diff storage low free space. Portion: %llu sectors, requested: %llu\n",
 		requested_nr_sect, diff_storage->requested);
 
-	ret = vfs_fallocate(diff_storage->file, 0,
-		0, diff_storage->requested >> SECTOR_SHIFT);
-	if (ret) {
-		pr_err("Failed to fallocate difference storage file\n");
-		return;
-	}
+	queue_work(system_wq, &diff_storage->reallocate_work);
+}
 
-	spin_lock(&diff_storage->lock);
-	diff_storage->capacity += requested_nr_sect;
+static inline bool is_halffull(const sector_t sectors_left)
+{
+	return sectors_left <=
+		((get_diff_storage_minimum() >> 1) & ~(PAGE_SECTORS - 1));
+}
 
-	if (atomic_read(&diff_storage->low_space_flag) &&
-	    (diff_storage->capacity >= diff_storage->requested))
-		atomic_set(&diff_storage->low_space_flag, 0);
-
-	spin_unlock(&diff_storage->lock);
+static inline void check_halffull(struct diff_storage *diff_storage,
+				  const sector_t sectors_left)
+{
+	if (is_halffull(sectors_left) &&
+	    (atomic_inc_return(&diff_storage->low_space_flag) == 1))
+		diff_storage_event_low(diff_storage);
 }
 
 struct diff_storage *diff_storage_new(void)
@@ -58,9 +96,18 @@ struct diff_storage *diff_storage_new(void)
 	spin_lock_init(&diff_storage->lock);
 	diff_storage->limit = 0;
 
+	INIT_WORK(&diff_storage->reallocate_work, diff_storage_reallocate_work);
 	event_queue_init(&diff_storage->event_queue);
 
 	return diff_storage;
+}
+
+static inline int diff_storage_unlink_file(struct file *file)
+{
+	struct dentry *dentry = file->f_path.dentry;
+
+	return vfs_unlink(&nop_mnt_idmap, d_inode(dentry->d_parent),
+			  dentry, NULL);
 }
 
 void diff_storage_free(struct kref *kref)
@@ -68,15 +115,27 @@ void diff_storage_free(struct kref *kref)
 	struct diff_storage *diff_storage =
 		container_of(kref, struct diff_storage, kref);
 
+	flush_work(&diff_storage->reallocate_work);
+
+	if (diff_storage->file) {
+		int ret;
+
+		ret = diff_storage_unlink_file(diff_storage->file);
+		if (ret)
+			pr_err("Failed to unlink difference storage file\n");
+
+		fput(diff_storage->file);
+	}
 	event_queue_done(&diff_storage->event_queue);
 	kfree(diff_storage);
 }
 
-int diff_storage_append_file(struct diff_storage *diff_storage,
+int diff_storage_set_file(struct diff_storage *diff_storage,
 			     unsigned int fd, sector_t limit)
 {
 	int ret = 0;
 	struct file *file;
+	sector_t sectors_left;
 
 	pr_debug("Append file\n");
 	file = fget(fd);
@@ -85,36 +144,24 @@ int diff_storage_append_file(struct diff_storage *diff_storage,
 		return -EINVAL;
 	}
 
-	loff_t len = i_size_read(file_inode(file));
-	if (len < (1ull << get_chunk_minimum_shift())) {
-		pr_err("The file is too small.\n");
-		ret = -EFAULT;
-		goto out;
-	}
-
 	spin_lock(&diff_storage->lock);
-	diff_storage->file = file;
-	diff_storage->capacity += len >> SECTOR_SHIFT;
+	diff_storage->capacity = diff_storage->requested =
+		i_size_read(file_inode(file)) >> SECTOR_SHIFT;
+	diff_storage->file = get_file(file);
 	diff_storage->limit = limit;
+
+	sectors_left = diff_storage->requested - diff_storage->filled;
 	spin_unlock(&diff_storage->lock);
 
-	if (diff_storage->capacity < diff_storage->requested)
-		diff_storage_event_low(diff_storage);
-out:
+	check_halffull(diff_storage, sectors_left);
+
 	fput(file);
 	return ret;
-}
-
-static inline bool is_halffull(const sector_t sectors_left)
-{
-	return sectors_left <=
-		((get_diff_storage_minimum() >> 1) & ~(PAGE_SECTORS - 1));
 }
 
 int diff_storage_alloc(struct diff_storage *diff_storage, sector_t count,
 		       struct file **file, sector_t *sector)
 {
-	int ret = 0;
 	sector_t sectors_left;
 
 	if (atomic_read(&diff_storage->overflow_flag))
@@ -130,9 +177,7 @@ int diff_storage_alloc(struct diff_storage *diff_storage, sector_t count,
 	sectors_left = diff_storage->requested - diff_storage->filled;
 	spin_unlock(&diff_storage->lock);
 
-	if (!ret && is_halffull(sectors_left) &&
-	    (atomic_inc_return(&diff_storage->low_space_flag) == 1))
-		diff_storage_event_low(diff_storage);
+	check_halffull(diff_storage, sectors_left);
 
 	return 0;
 }
