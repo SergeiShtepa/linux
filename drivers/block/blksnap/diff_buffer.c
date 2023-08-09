@@ -13,24 +13,20 @@ static void diff_buffer_free(struct diff_buffer *diff_buffer)
 	if (unlikely(!diff_buffer))
 		return;
 
-	for (inx = 0; inx < diff_buffer->page_count; inx++) {
-		struct page *page = diff_buffer->pages[inx];
-
-		if (page)
-			__free_page(page);
-	}
+	for (inx = 0; inx < diff_buffer->nr_segs; inx++)
+		free_page((unsigned long)diff_buffer->iov[inx].iov_base);
 
 	kfree(diff_buffer);
 }
 
-static struct diff_buffer *
-diff_buffer_new(size_t page_count, size_t buffer_size, gfp_t gfp_mask)
+static struct diff_buffer *diff_buffer_new(size_t nr_segs, size_t size,
+					   gfp_t gfp_mask)
 {
 	struct diff_buffer *diff_buffer;
 	size_t inx = 0;
 	struct page *page;
 
-	if (unlikely(page_count <= 0))
+	if (unlikely(nr_segs <= 0))
 		return NULL;
 
 	/*
@@ -38,21 +34,22 @@ diff_buffer_new(size_t page_count, size_t buffer_size, gfp_t gfp_mask)
 	 * than a pointer to some memory area. Therefore + 1.
 	 */
 	diff_buffer = kzalloc(sizeof(struct diff_buffer) +
-				      (page_count + 1) * sizeof(struct page *),
+				      (nr_segs + 1) * sizeof(struct iovec),
 			      gfp_mask);
 	if (!diff_buffer)
 		return NULL;
 
 	INIT_LIST_HEAD(&diff_buffer->link);
-	diff_buffer->size = buffer_size;
-	diff_buffer->page_count = page_count;
+	diff_buffer->size = size;
+	diff_buffer->nr_segs = nr_segs;
 
-	for (inx = 0; inx < page_count; inx++) {
+	for (inx = 0; inx < nr_segs; inx++) {
 		page = alloc_page(gfp_mask);
 		if (!page)
 			goto fail;
 
-		diff_buffer->pages[inx] = page;
+		diff_buffer->iov[inx].iov_base = page_address(page);
+		diff_buffer->iov[inx].iov_len = PAGE_SIZE;
 	}
 	return diff_buffer;
 fail:
@@ -65,7 +62,6 @@ struct diff_buffer *diff_buffer_take(struct diff_area *diff_area)
 	struct diff_buffer *diff_buffer = NULL;
 	sector_t chunk_sectors;
 	size_t page_count;
-	size_t buffer_size;
 
 	spin_lock(&diff_area->free_diff_buffers_lock);
 	diff_buffer = list_first_entry_or_null(&diff_area->free_diff_buffers,
@@ -83,10 +79,8 @@ struct diff_buffer *diff_buffer_take(struct diff_area *diff_area)
 	/* Allocate new buffer */
 	chunk_sectors = diff_area_chunk_sectors(diff_area);
 	page_count = round_up(chunk_sectors, PAGE_SECTORS) / PAGE_SECTORS;
-	buffer_size = chunk_sectors << SECTOR_SHIFT;
-
-	diff_buffer =
-		diff_buffer_new(page_count, buffer_size, GFP_NOIO);
+	diff_buffer = diff_buffer_new(page_count, chunk_sectors << SECTOR_SHIFT,
+				      GFP_NOIO);
 	if (unlikely(!diff_buffer))
 		return ERR_PTR(-ENOMEM);
 	return diff_buffer;

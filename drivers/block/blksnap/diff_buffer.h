@@ -16,18 +16,18 @@ struct diff_area;
  *	The list header allows to create a pool of the diff_buffer structures.
  * @size:
  *	Count of bytes in the buffer.
- * @page_count:
+ * @nr_segs:
  *	The number of pages reserved for the buffer.
- * @pages:
- *	An array of pointers to pages.
+ * @iov:
+ *	An array of pages.
  *
  * Describes the memory buffer for a chunk in the memory.
  */
 struct diff_buffer {
 	struct list_head link;
-	size_t size;
-	size_t page_count;
-	struct page *pages[0];
+        size_t size;
+        unsigned long nr_segs;
+        struct iovec iov[];
 };
 
 struct diff_buffer *diff_buffer_take(struct diff_area *diff_area);
