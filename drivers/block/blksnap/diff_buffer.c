@@ -14,7 +14,7 @@ static void diff_buffer_free(struct diff_buffer *diff_buffer)
 		return;
 
 	for (inx = 0; inx < diff_buffer->nr_segs; inx++)
-		free_page((unsigned long)diff_buffer->iov[inx].iov_base);
+		free_page((unsigned long)diff_buffer->vec[inx].iov_base);
 
 	kfree(diff_buffer);
 }
@@ -48,8 +48,8 @@ static struct diff_buffer *diff_buffer_new(size_t nr_segs, size_t size,
 		if (!page)
 			goto fail;
 
-		diff_buffer->iov[inx].iov_base = page_address(page);
-		diff_buffer->iov[inx].iov_len = PAGE_SIZE;
+		diff_buffer->vec[inx].iov_base = page_address(page);
+		diff_buffer->vec[inx].iov_len = PAGE_SIZE;
 	}
 	return diff_buffer;
 fail:

@@ -81,7 +81,7 @@ void chunk_copy_bio(struct chunk *chunk, struct bio *bio,
 		void *iov_base;
 		unsigned int len;
 
-		iov_base = chunk->diff_buffer->iov[iov_idx].iov_base;
+		iov_base = chunk->diff_buffer->vec[iov_idx].iov_base;
 		len = min3(bvec.bv_len,
 			   chunk_left,
 			   (unsigned int)PAGE_SIZE - page_ofs);
@@ -332,13 +332,13 @@ void chunk_diff_write(struct chunk *chunk)
 	ssize_t len;
 	int err = 0;
 
-	iov_iter_init(&iov_iter, WRITE, chunk->diff_buffer->iov,
+	iov_iter_kvec(&iov_iter, ITER_SOURCE, chunk->diff_buffer->vec,
 		      chunk->diff_buffer->nr_segs, length);
 	file_start_write(chunk->diff_file);
 	while (length) {
 		pr_debug("DEBUG! %s pos=%llu, length=%zu", __func__, pos, length);
 
-		len = vfs_iter_write(chunk->diff_file, &iov_iter, &pos, RWF_SYNC);
+		len = vfs_iter_write(chunk->diff_file, &iov_iter, &pos, 0);
 		if (len < 0) {
 			err = (int)len;
 			pr_debug("vfs_iter_write complete with error code %zd", len);
@@ -423,7 +423,7 @@ static struct bio *chunk_origin_load_async(struct chunk *chunk)
 		struct bio *next;
 		sector_t portion = min_t(sector_t, count, PAGE_SECTORS);
 		unsigned int bytes = portion << SECTOR_SHIFT;
-		void *iov_base = chunk->diff_buffer->iov[iov_idx].iov_base;
+		void *iov_base = chunk->diff_buffer->vec[iov_idx].iov_base;
 
 		if (bio_add_page(bio, virt_to_page(iov_base),
 				 bytes, 0) == bytes) {

@@ -18,7 +18,7 @@ struct diff_area;
  *	Count of bytes in the buffer.
  * @nr_segs:
  *	The number of pages reserved for the buffer.
- * @iov:
+ * @vec:
  *	An array of pages.
  *
  * Describes the memory buffer for a chunk in the memory.
@@ -27,7 +27,7 @@ struct diff_buffer {
 	struct list_head link;
         size_t size;
         unsigned long nr_segs;
-        struct iovec iov[];
+        struct kvec vec[];
 };
 
 struct diff_buffer *diff_buffer_take(struct diff_area *diff_area);
