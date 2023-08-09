@@ -148,6 +148,7 @@ struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio)
  */
 int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 {
+	int ret = 0;
 	loff_t pos = chunk->diff_ofs_sect << SECTOR_SHIFT;
 	struct bvec_iter iter;
 	struct bio_vec bvec;
@@ -158,10 +159,10 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 		file_start_write(chunk->diff_file);
 		bio_for_each_segment(bvec, bio, iter) {
 			iov_iter_bvec(&iov_iter, ITER_SOURCE, &bvec, 1, bvec.bv_len);
-			len = vfs_iter_write(chunk->diff_file, &iov_iter, &pos, RWF_SYNC);
+			len = vfs_iter_write(chunk->diff_file, &iov_iter, &pos, 0);
 			if (len != bvec.bv_len) {
-				file_end_write(chunk->diff_file);
-				return -EIO;
+				ret = -EIO;
+				break;
 			}
 		}
 		file_end_write(chunk->diff_file);
@@ -169,13 +170,17 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 	} else {
 		bio_for_each_segment(bvec, bio, iter) {
 			iov_iter_bvec(&iov_iter, ITER_DEST, &bvec, 1, bvec.bv_len);
-			len = vfs_iter_read(chunk->diff_file, &iov_iter, &pos, RWF_SYNC);
-			if (len != bvec.bv_len)
-				return -EIO;
+			len = vfs_iter_read(chunk->diff_file, &iov_iter, &pos, 0);
+			if (len != bvec.bv_len) {
+				ret = -EIO;
+				break;
+			}
 		}
 	}
+	if (!ret)
+		bio_advance(bio, len);
 
-	return 0;
+	return ret;
 }
 
 /*
@@ -336,8 +341,6 @@ void chunk_diff_write(struct chunk *chunk)
 		      chunk->diff_buffer->nr_segs, length);
 	file_start_write(chunk->diff_file);
 	while (length) {
-		pr_debug("DEBUG! %s pos=%llu, length=%zu", __func__, pos, length);
-
 		len = vfs_iter_write(chunk->diff_file, &iov_iter, &pos, 0);
 		if (len < 0) {
 			err = (int)len;
@@ -345,8 +348,6 @@ void chunk_diff_write(struct chunk *chunk)
 			break;
 		}
 		length -= len;
-
-		pr_debug("vfs_iter_write process %zd bytes", len);
 	}
 	file_end_write(chunk->diff_file);
 	chunk_notify_store(chunk, err);
