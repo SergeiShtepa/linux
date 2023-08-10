@@ -146,41 +146,43 @@ struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio)
 /*
  * The data from bio is read to the diff file or read from it.
  */
-int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
+int chunk_diff_bio(struct chunk *chunk, struct bio *bio,
+		   struct bvec_iter *iter)
 {
-	int ret = 0;
-	loff_t pos = chunk->diff_ofs_sect << SECTOR_SHIFT;
-	struct bvec_iter iter;
-	struct bio_vec bvec;
-	struct iov_iter iov_iter;
+	loff_t pos;
+	struct iov_iter iov_iter = {0};
+	unsigned long nr_segs = bio->bi_vcnt - iter->bi_idx;
+	size_t count;
 	ssize_t len;
+	unsigned int chunk_ofs, chunk_left;
 
+	chunk_ofs = (iter->bi_sector - chunk_sector(chunk)) << SECTOR_SHIFT;
+	chunk_left = (chunk->sector_count << SECTOR_SHIFT) - chunk_ofs;
+	count = min(chunk_left, iter->bi_size);
+	pos = (chunk->diff_ofs_sect << SECTOR_SHIFT) + chunk_ofs;
+
+	/*
+	pr_debug("DEBUG! %s - diff_ofs_sect=%llu pos=%llu count=%zu",
+		op_is_write(bio_op(bio)) ? "write" : "read",
+		chunk->diff_ofs_sect, pos, count);
+	*/
 	if (op_is_write(bio_op(bio))) {
 		file_start_write(chunk->diff_file);
-		bio_for_each_segment(bvec, bio, iter) {
-			iov_iter_bvec(&iov_iter, ITER_SOURCE, &bvec, 1, bvec.bv_len);
-			len = vfs_iter_write(chunk->diff_file, &iov_iter, &pos, 0);
-			if (len != bvec.bv_len) {
-				ret = -EIO;
-				break;
-			}
-		}
+		iov_iter_bvec(&iov_iter, ITER_SOURCE, bio->bi_io_vec, nr_segs, count);
+		len = vfs_iter_write(chunk->diff_file, &iov_iter, &pos, 0);
 		file_end_write(chunk->diff_file);
-
 	} else {
-		bio_for_each_segment(bvec, bio, iter) {
-			iov_iter_bvec(&iov_iter, ITER_DEST, &bvec, 1, bvec.bv_len);
-			len = vfs_iter_read(chunk->diff_file, &iov_iter, &pos, 0);
-			if (len != bvec.bv_len) {
-				ret = -EIO;
-				break;
-			}
-		}
+		iov_iter_bvec(&iov_iter, ITER_DEST, bio->bi_io_vec, nr_segs, count);
+		len = vfs_iter_read(chunk->diff_file, &iov_iter, &pos, 0);
 	}
-	if (!ret)
-		bio_advance(bio, len);
 
-	return ret;
+	if (len < 0)
+		return len;
+	if (len != count)
+		return -EIO;
+
+	bio_advance_iter_single(bio, iter, len);
+	return 0;
 }
 
 /*

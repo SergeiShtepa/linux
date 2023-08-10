@@ -176,7 +176,7 @@ static inline bool diff_area_store_one(struct diff_area *diff_area)
 		int ret;
 
 		ret = diff_storage_alloc(diff_area->diff_storage,
-					 chunk->sector_count,
+					 diff_area_chunk_sectors(diff_area),
 					 &chunk->diff_file,
 					 &chunk->diff_ofs_sect);
 		if (ret) {
@@ -490,9 +490,9 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 		return true;
 	case CHUNK_ST_STORED:
 		/*
-		 * Read data from the chunk on difference storage.
+		 * Data is read from the difference storage or written to it.
 		 */
-		int ret = chunk_diff_bio(chunk, bio);
+		int ret = chunk_diff_bio(chunk, bio, &bio->bi_iter);
 		chunk_up(chunk);
 		return (ret == 0);
 	case CHUNK_ST_NEW:
