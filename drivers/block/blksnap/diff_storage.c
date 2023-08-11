@@ -24,14 +24,8 @@ static void diff_storage_reallocate_work(struct work_struct *work)
 
 	do {
 		spin_lock(&diff_storage->lock);
-		req_sect = min(diff_storage->requested, diff_storage->limit);
-		stop = (diff_storage->capacity >= req_sect);
+		req_sect = diff_storage->requested;
 		spin_unlock(&diff_storage->lock);
-
-		if (stop) {
-			pr_info("The limit size of the difference storage has been reached\n");
-			break;
-		}
 
 		ret = vfs_fallocate(diff_storage->file, 0, 0,
 				    (loff_t)(req_sect << SECTOR_SHIFT));
@@ -55,17 +49,26 @@ static void diff_storage_reallocate_work(struct work_struct *work)
 
 static void diff_storage_event_low(struct diff_storage *diff_storage)
 {
-	sector_t requested_nr_sect;
+	sector_t req_sect;
 
 	spin_lock(&diff_storage->lock);
-	requested_nr_sect = min(get_diff_storage_minimum(),
-		diff_storage->limit - diff_storage->capacity);
+	if (diff_storage->capacity < diff_storage->limit) {
+		req_sect = min(get_diff_storage_minimum(),
+			diff_storage->limit - diff_storage->capacity);
 
-	diff_storage->requested += requested_nr_sect;
+		diff_storage->requested += req_sect;
+	} else
+		req_sect = 0;
 	spin_unlock(&diff_storage->lock);
 
+	if (req_sect == 0) {
+		pr_info("The limit size of the difference storage has been reached\n");
+		atomic_inc(&diff_storage->overflow_flag);
+		return;
+	}
+
 	pr_debug("Diff storage low free space. Portion: %llu sectors, requested: %llu\n",
-		requested_nr_sect, diff_storage->requested);
+		 req_sect, diff_storage->requested);
 
 	queue_work(system_wq, &diff_storage->reallocate_work);
 }
