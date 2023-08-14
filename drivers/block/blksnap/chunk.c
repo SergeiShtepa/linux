@@ -148,40 +148,46 @@ struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio)
  */
 int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 {
+	int ret = 0;
 	loff_t pos;
-	struct iov_iter iov_iter = {0};
-	unsigned long nr_segs = bio->bi_vcnt - bio->bi_iter->bi_idx;
+	bool is_write = op_is_write(bio_op(bio));
 	size_t count;
 	ssize_t len;
+	unsigned int nbytes = 0;
 	unsigned int chunk_ofs, chunk_left;
+	struct bio_vec bvec;
+	struct bvec_iter iter;
+	struct iov_iter iov_iter;
 
-	chunk_ofs = (bio->bi_iter->bi_sector - chunk_sector(chunk)) << SECTOR_SHIFT;
-	chunk_left = (chunk->sector_count << SECTOR_SHIFT) - chunk_ofs;
-	count = min(chunk_left, bio->bi_iter->bi_size);
-	pos = (chunk->diff_ofs_sect << SECTOR_SHIFT) + chunk_ofs;
 
-	/*
-	pr_debug("DEBUG! %s - diff_ofs_sect=%llu pos=%llu count=%zu",
-		op_is_write(bio_op(bio)) ? "write" : "read",
-		chunk->diff_ofs_sect, pos, count);
-	*/
-	if (op_is_write(bio_op(bio))) {
+	if (is_write)
 		file_start_write(chunk->diff_file);
-		iov_iter_bvec(&iov_iter, ITER_SOURCE, bio->bi_io_vec, nr_segs, count);
-		len = vfs_iter_write(chunk->diff_file, &iov_iter, &pos, 0);
-		file_end_write(chunk->diff_file);
-	} else {
-		iov_iter_bvec(&iov_iter, ITER_DEST, bio->bi_io_vec, nr_segs, count);
-		len = vfs_iter_read(chunk->diff_file, &iov_iter, &pos, 0);
+
+	bio_for_each_segment(bvec, bio, iter) {
+		chunk_ofs = (iter.bi_sector - chunk_sector(chunk)) << SECTOR_SHIFT;
+		chunk_left = (chunk->sector_count << SECTOR_SHIFT) - chunk_ofs;
+		pos = (chunk->diff_ofs_sect << SECTOR_SHIFT) + chunk_ofs;
+
+		iov_iter_bvec(&iov_iter, is_write ? ITER_SOURCE : ITER_DEST, &bvec, 1, bvec.bv_len);
+		len = is_write ? vfs_iter_write(chunk->diff_file, &iov_iter, &pos, 0)
+			       : vfs_iter_read(chunk->diff_file, &iov_iter, &pos, 0);
+
+		if (len == bvec.bv_len) {
+			nbytes += len;
+			continue;
+		}
+
+		if (len < 0)
+			ret = len;
+		else if (len != count)
+			ret = -EIO;
+		break;
 	}
 
-	if (len < 0)
-		return len;
-	if (len != count)
-		return -EIO;
-
-	bio_advance_iter_single(bio, bio->bi_iter, len);
-	return 0;
+	if (is_write)
+		file_end_write(chunk->diff_file);
+	bio_advance(bio, nbytes);
+	return ret;
 }
 
 /*
