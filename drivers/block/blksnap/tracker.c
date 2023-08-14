@@ -44,8 +44,10 @@ static bool tracker_submit_bio(struct bio *bio)
 	if (bio_flagged(bio, BIO_REMAPPED))
 		copy_iter.bi_sector -= bio->bi_bdev->bd_start_sect;
 
-	if (cbt_map_set(tracker->cbt_map, copy_iter.bi_sector, count) ||
-	    !atomic_read(&tracker->snapshot_is_taken))
+	if (cbt_map_set(tracker->cbt_map, copy_iter.bi_sector, count))
+		return false;
+
+	if (!atomic_read(&tracker->snapshot_is_taken))
 		return false;
 	/*
 	 * The diff_area is not blocked from releasing now, because

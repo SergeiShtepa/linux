@@ -25,9 +25,9 @@ struct diff_area;
  */
 struct diff_buffer {
 	struct list_head link;
-        size_t size;
-        unsigned long nr_segs;
-        struct kvec vec[];
+	size_t size;
+	unsigned long nr_segs;
+	struct kvec vec[];
 };
 
 struct diff_buffer *diff_buffer_take(struct diff_area *diff_area);

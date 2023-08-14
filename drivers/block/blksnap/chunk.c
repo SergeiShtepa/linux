@@ -425,10 +425,10 @@ static struct bio *chunk_origin_load_async(struct chunk *chunk)
 		struct bio *next;
 		sector_t portion = min_t(sector_t, count, PAGE_SECTORS);
 		unsigned int bytes = portion << SECTOR_SHIFT;
-		void *iov_base = chunk->diff_buffer->vec[iov_idx].iov_base;
+		struct page *pg;
 
-		if (bio_add_page(bio, virt_to_page(iov_base),
-				 bytes, 0) == bytes) {
+		pg = virt_to_page(chunk->diff_buffer->vec[iov_idx].iov_base);
+		if (bio_add_page(bio, pg, bytes, 0) == bytes) {
 			iov_idx++;
 			count -= portion;
 			continue;
