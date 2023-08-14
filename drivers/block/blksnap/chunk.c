@@ -146,19 +146,18 @@ struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio)
 /*
  * The data from bio is read to the diff file or read from it.
  */
-int chunk_diff_bio(struct chunk *chunk, struct bio *bio,
-		   struct bvec_iter *iter)
+int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 {
 	loff_t pos;
 	struct iov_iter iov_iter = {0};
-	unsigned long nr_segs = bio->bi_vcnt - iter->bi_idx;
+	unsigned long nr_segs = bio->bi_vcnt - bio->bi_iter->bi_idx;
 	size_t count;
 	ssize_t len;
 	unsigned int chunk_ofs, chunk_left;
 
-	chunk_ofs = (iter->bi_sector - chunk_sector(chunk)) << SECTOR_SHIFT;
+	chunk_ofs = (bio->bi_iter->bi_sector - chunk_sector(chunk)) << SECTOR_SHIFT;
 	chunk_left = (chunk->sector_count << SECTOR_SHIFT) - chunk_ofs;
-	count = min(chunk_left, iter->bi_size);
+	count = min(chunk_left, bio->bi_iter->bi_size);
 	pos = (chunk->diff_ofs_sect << SECTOR_SHIFT) + chunk_ofs;
 
 	/*
@@ -181,7 +180,7 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio,
 	if (len != count)
 		return -EIO;
 
-	bio_advance_iter_single(bio, iter, len);
+	bio_advance_iter_single(bio, bio->bi_iter, len);
 	return 0;
 }
 
