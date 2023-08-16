@@ -200,6 +200,10 @@ static void diff_area_store_queue_work(struct work_struct *work)
 	while (diff_area_store_one(diff_area))
 		;
 	current->blk_filter = NULL;
+
+	spin_lock(&diff_area->store_queue_lock);
+	diff_area->store_queue_processing = false;
+	spin_unlock(&diff_area->store_queue_lock);
 }
 
 struct diff_area *diff_area_new(struct tracker *tracker,
@@ -243,6 +247,7 @@ struct diff_area *diff_area_new(struct tracker *tracker,
 	diff_area->physical_blksz = bdev_physical_block_size(bdev);
 	diff_area->logical_blksz = bdev_logical_block_size(bdev);
 	diff_area->corrupt_flag = 0;
+	diff_area->store_queue_processing = false;
 
 	if (!diff_storage->capacity) {
 		pr_err("Difference storage is empty\n");

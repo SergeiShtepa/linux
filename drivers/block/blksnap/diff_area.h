@@ -95,6 +95,7 @@ struct diff_area {
 	struct kref kref;
 	struct block_device *orig_bdev;
 	struct diff_storage *diff_storage;
+        struct tracker *tracker;
 
 	unsigned long chunk_shift;
 	unsigned long chunk_count;
@@ -114,7 +115,7 @@ struct diff_area {
 
 	unsigned long corrupt_flag;
 	int error_code;
-	struct tracker *tracker;
+        bool store_queue_processing;
 };
 
 struct diff_area *diff_area_new(struct tracker *tracker,

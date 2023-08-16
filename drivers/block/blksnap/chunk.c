@@ -48,7 +48,7 @@ void chunk_store_failed(struct chunk *chunk, int error)
 static void chunk_schedule_storing(struct chunk *chunk)
 {
 	struct diff_area *diff_area = diff_area_get(chunk->diff_area);
-	int queue_count;
+	bool need_work = false;
 
 	WARN_ON_ONCE(chunk->state != CHUNK_ST_NEW &&
 		     chunk->state != CHUNK_ST_STORED);
@@ -56,14 +56,20 @@ static void chunk_schedule_storing(struct chunk *chunk)
 
 	spin_lock(&diff_area->store_queue_lock);
 	list_add_tail(&chunk->link, &diff_area->store_queue);
-	queue_count = atomic_inc_return(&diff_area->store_queue_count);
+
+	need_work = (atomic_inc_return(&diff_area->store_queue_count) >
+		     get_chunk_maximum_in_queue()) &&
+		     !diff_area->store_queue_processing;
+	if (need_work)
+		diff_area->store_queue_processing = true;
 	spin_unlock(&diff_area->store_queue_lock);
 
 	chunk_up(chunk);
 
-	/* Initiate the queue clearing process */
-	if (queue_count > get_chunk_maximum_in_queue())
+	if (need_work) {
+		/* Initiate the queue clearing process */
 		queue_work(system_wq, &diff_area->store_queue_work);
+	}
 	diff_area_put(diff_area);
 }
 
