@@ -152,6 +152,8 @@ static inline bool diff_area_store_one(struct diff_area *diff_area)
 		 * next chunk.
 		 */
 	}
+	if (!chunk)
+		diff_area->store_queue_processing = false;
 	spin_unlock(&diff_area->store_queue_lock);
 	if (!chunk)
 		return false;
@@ -196,14 +198,12 @@ static void diff_area_store_queue_work(struct work_struct *work)
 	struct diff_area *diff_area = container_of(
 		work, struct diff_area, store_queue_work);
 
+	pr_debug("DEBUG! %s - start", __func__);
+
 	current->blk_filter = &diff_area->tracker->filter;
 	while (diff_area_store_one(diff_area))
 		;
 	current->blk_filter = NULL;
-
-	spin_lock(&diff_area->store_queue_lock);
-	diff_area->store_queue_processing = false;
-	spin_unlock(&diff_area->store_queue_lock);
 }
 
 struct diff_area *diff_area_new(struct tracker *tracker,
