@@ -104,7 +104,7 @@ struct diff_storage *diff_storage_new(void)
 
 	return diff_storage;
 }
-
+#if 0
 static inline int diff_storage_unlink_file(struct file *file)
 {
 	struct dentry *dentry = file->f_path.dentry;
@@ -112,7 +112,7 @@ static inline int diff_storage_unlink_file(struct file *file)
 	return vfs_unlink(&nop_mnt_idmap, d_inode(dentry->d_parent),
 			  dentry, NULL);
 }
-
+#endif
 void diff_storage_free(struct kref *kref)
 {
 	struct diff_storage *diff_storage =
@@ -121,12 +121,14 @@ void diff_storage_free(struct kref *kref)
 	flush_work(&diff_storage->reallocate_work);
 
 	if (diff_storage->file) {
+#if 0
+		//can fail with: null-ptr-deref in __fput+0xef
 		int ret;
 
 		ret = diff_storage_unlink_file(diff_storage->file);
 		if (ret)
 			pr_err("Failed to unlink difference storage file\n");
-
+#endif
 		fput(diff_storage->file);
 	}
 	event_queue_done(&diff_storage->event_queue);
