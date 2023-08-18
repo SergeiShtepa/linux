@@ -69,12 +69,13 @@ struct event *event_wait(struct event_queue *event_queue,
 			list_del(&event->link);
 		}
 		spin_unlock(&event_queue->lock);
-
+#if 0
 		if (IS_ERR(event))
 			pr_debug("Queue list is empty, timeout_ms=%lu\n", timeout_ms);
 		else
 			pr_debug("Event received: time=%lld code=%d\n",
 				 event->time, event->code);
+#endif
 		return event;
 	}
 	if (ret == -ERESTARTSYS) {

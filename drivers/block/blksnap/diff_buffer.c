@@ -13,43 +13,37 @@ static void diff_buffer_free(struct diff_buffer *diff_buffer)
 	if (unlikely(!diff_buffer))
 		return;
 
-	for (inx = 0; inx < diff_buffer->nr_segs; inx++)
-		free_page((unsigned long)diff_buffer->vec[inx].iov_base);
+	for (inx = 0; inx < diff_buffer->nr_pages; inx++)
+		__free_page(diff_buffer->bvec[inx].bv_page);
 
 	kfree(diff_buffer);
 }
 
-static struct diff_buffer *diff_buffer_new(size_t nr_segs, size_t size,
+static struct diff_buffer *diff_buffer_new(size_t nr_pages, size_t size,
 					   gfp_t gfp_mask)
 {
 	struct diff_buffer *diff_buffer;
 	size_t inx = 0;
-	struct page *page;
 
-	if (unlikely(nr_segs <= 0))
+	if (unlikely(nr_pages <= 0))
 		return NULL;
 
-	/*
-	 * In case of overflow, it is better to get a null pointer
-	 * than a pointer to some memory area. Therefore + 1.
-	 */
 	diff_buffer = kzalloc(sizeof(struct diff_buffer) +
-				      (nr_segs + 1) * sizeof(struct iovec),
+			      nr_pages * sizeof(struct bio_vec),
 			      gfp_mask);
 	if (!diff_buffer)
 		return NULL;
 
 	INIT_LIST_HEAD(&diff_buffer->link);
 	diff_buffer->size = size;
-	diff_buffer->nr_segs = nr_segs;
+	diff_buffer->nr_pages = nr_pages;
 
-	for (inx = 0; inx < nr_segs; inx++) {
-		page = alloc_page(gfp_mask);
+	for (inx = 0; inx < nr_pages; inx++) {
+		struct page *page = alloc_page(gfp_mask);
+
 		if (!page)
 			goto fail;
-
-		diff_buffer->vec[inx].iov_base = page_address(page);
-		diff_buffer->vec[inx].iov_len = PAGE_SIZE;
+		bvec_set_page(&diff_buffer->bvec[inx], page, PAGE_SIZE, 0);
 	}
 	return diff_buffer;
 fail:

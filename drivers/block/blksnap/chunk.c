@@ -26,6 +26,11 @@ static inline sector_t chunk_sector(struct chunk *chunk)
 	       << (chunk->diff_area->chunk_shift - SECTOR_SHIFT);
 }
 
+static inline sector_t chunk_sector_end(struct chunk *chunk)
+{
+	return chunk_sector(chunk) + chunk->sector_count;
+}
+
 void chunk_store_failed(struct chunk *chunk, int error)
 {
 	struct diff_area *diff_area = diff_area_get(chunk->diff_area);
@@ -83,23 +88,22 @@ void chunk_copy_bio(struct chunk *chunk, struct bio *bio,
 	while (chunk_left && iter->bi_size) {
 		struct bio_vec bvec = bio_iter_iovec(bio, *iter);
 		unsigned int page_ofs = offset_in_page(chunk_ofs);
-		unsigned int iov_idx = chunk_ofs >> PAGE_SHIFT;
-		void *iov_base;
+		unsigned int inx = chunk_ofs >> PAGE_SHIFT;
+		struct page *page = chunk->diff_buffer->bvec[inx].bv_page;
 		unsigned int len;
 
-		iov_base = chunk->diff_buffer->vec[iov_idx].iov_base;
 		len = min3(bvec.bv_len,
 			   chunk_left,
 			   (unsigned int)PAGE_SIZE - page_ofs);
 
 		if (op_is_write(bio_op(bio))) {
 			/* from bio to buffer */
-			memcpy_from_page(iov_base + page_ofs,
-					 bvec.bv_page, bvec.bv_offset, len);
+			memcpy_page(page, page_ofs,
+				    bvec.bv_page, bvec.bv_offset, len);
 		} else {
 			/* from buffer to bio */
-			memcpy_to_page(bvec.bv_page, bvec.bv_offset,
-				       iov_base + page_ofs, len);
+			memcpy_page(bvec.bv_page, bvec.bv_offset,
+				    page, page_ofs, len);
 		}
 
 		chunk_ofs += len;
@@ -157,7 +161,6 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 	int ret = 0;
 	loff_t pos;
 	bool is_write = op_is_write(bio_op(bio));
-	size_t count;
 	ssize_t len;
 	unsigned int nbytes = 0;
 	unsigned int chunk_ofs, chunk_left;
@@ -165,11 +168,13 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 	struct bvec_iter iter;
 	struct iov_iter iov_iter;
 
-
 	if (is_write)
 		file_start_write(chunk->diff_file);
 
 	bio_for_each_segment(bvec, bio, iter) {
+		if (iter.bi_sector >= chunk_sector_end(chunk))
+			break;
+
 		chunk_ofs = (iter.bi_sector - chunk_sector(chunk)) << SECTOR_SHIFT;
 		chunk_left = (chunk->sector_count << SECTOR_SHIFT) - chunk_ofs;
 		pos = (chunk->diff_ofs_sect << SECTOR_SHIFT) + chunk_ofs;
@@ -177,17 +182,14 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 		iov_iter_bvec(&iov_iter, is_write ? ITER_SOURCE : ITER_DEST, &bvec, 1, bvec.bv_len);
 		len = is_write ? vfs_iter_write(chunk->diff_file, &iov_iter, &pos, 0)
 			       : vfs_iter_read(chunk->diff_file, &iov_iter, &pos, 0);
-
-		if (len == bvec.bv_len) {
-			nbytes += len;
-			continue;
+		if (len != bvec.bv_len) {
+			if (len < 0)
+				ret = len;
+			else
+				ret = -EIO;
+			break;
 		}
-
-		if (len < 0)
-			ret = len;
-		else if (len != count)
-			ret = -EIO;
-		break;
+		nbytes += len;
 	}
 
 	if (is_write)
@@ -340,7 +342,7 @@ static inline unsigned short calc_max_vecs(sector_t left)
 }
 
 /*
- * Synchronously loading of chunk from diff file or store in it.
+ * Synchronously store chunk to diff file.
  */
 void chunk_diff_write(struct chunk *chunk)
 {
@@ -350,8 +352,8 @@ void chunk_diff_write(struct chunk *chunk)
 	ssize_t len;
 	int err = 0;
 
-	iov_iter_kvec(&iov_iter, ITER_SOURCE, chunk->diff_buffer->vec,
-		      chunk->diff_buffer->nr_segs, length);
+	iov_iter_bvec(&iov_iter, ITER_SOURCE, chunk->diff_buffer->bvec,
+		      chunk->diff_buffer->nr_pages, length);
 	file_start_write(chunk->diff_file);
 	while (length) {
 		len = vfs_iter_write(chunk->diff_file, &iov_iter, &pos, 0);
@@ -366,59 +368,12 @@ void chunk_diff_write(struct chunk *chunk)
 	chunk_notify_store(chunk, err);
 }
 
-#if 0
-void chunk_store(struct chunk *chunk)
-{
-	struct block_device *bdev = chunk->snapshot_bdev;
-	sector_t sector = chunk->diff_ofs_sect;
-	sector_t count = chunk->sector_count;
-	unsigned int page_idx = 0;
-	struct bio *bio;
-	struct chunk_bio *cbio;
-
-	bio = bio_alloc_bioset(bdev, calc_max_vecs(count),
-			       REQ_OP_WRITE | REQ_SYNC | REQ_FUA, GFP_NOIO,
-			       &chunk_io_bioset);
-	bio->bi_iter.bi_sector = sector;
-
-	while (count) {
-		struct bio *next;
-		sector_t portion = min_t(sector_t, count, PAGE_SECTORS);
-		unsigned int bytes = portion << SECTOR_SHIFT;
-
-		if (bio_add_page(bio, chunk->diff_buffer->pages[page_idx],
-				 bytes, 0) == bytes) {
-			page_idx++;
-			count -= portion;
-			continue;
-		}
-
-		/* Create next bio */
-		next = bio_alloc_bioset(bdev, calc_max_vecs(count),
-					REQ_OP_WRITE | REQ_SYNC | REQ_FUA,
-					GFP_NOIO, &chunk_io_bioset);
-		next->bi_iter.bi_sector = bio_end_sector(bio);
-		bio_chain(bio, next);
-		submit_bio_noacct(bio);
-		bio = next;
-	}
-
-	cbio = container_of(bio, struct chunk_bio, bio);
-
-	INIT_WORK(&cbio->work, chunk_notify_store);
-	INIT_LIST_HEAD(&cbio->chunks);
-	list_add_tail(&chunk->link, &cbio->chunks);
-	cbio->orig_bio = NULL;
-	chunk_submit_bio(bio);
-}
-#endif
-
 static struct bio *chunk_origin_load_async(struct chunk *chunk)
 {
 	struct block_device *bdev;
 	struct bio *bio = NULL;
 	struct diff_buffer *diff_buffer;
-	unsigned int iov_idx = 0;
+	unsigned int inx = 0;
 	sector_t sector, count = chunk->sector_count;
 
 	diff_buffer = diff_buffer_take(chunk->diff_area);
@@ -437,11 +392,10 @@ static struct bio *chunk_origin_load_async(struct chunk *chunk)
 		struct bio *next;
 		sector_t portion = min_t(sector_t, count, PAGE_SECTORS);
 		unsigned int bytes = portion << SECTOR_SHIFT;
-		struct page *pg;
+		struct page *pg = chunk->diff_buffer->bvec[inx].bv_page;
 
-		pg = virt_to_page(chunk->diff_buffer->vec[iov_idx].iov_base);
 		if (bio_add_page(bio, pg, bytes, 0) == bytes) {
-			iov_idx++;
+			inx++;
 			count -= portion;
 			continue;
 		}

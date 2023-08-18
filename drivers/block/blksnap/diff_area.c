@@ -127,7 +127,6 @@ void diff_area_free(struct kref *kref)
 			chunk_free(diff_area, chunk);
 	xa_destroy(&diff_area->chunk_map);
 
-	/* Clean up free_diff_buffers */
 	diff_buffer_cleanup(diff_area);
 	tracker_put(diff_area->tracker);
 	kfree(diff_area);
@@ -197,8 +196,6 @@ static void diff_area_store_queue_work(struct work_struct *work)
 {
 	struct diff_area *diff_area = container_of(
 		work, struct diff_area, store_queue_work);
-
-	pr_debug("DEBUG! %s - start", __func__);
 
 	current->blk_filter = &diff_area->tracker->filter;
 	while (diff_area_store_one(diff_area))
@@ -332,6 +329,8 @@ bool diff_area_cow(struct bio *bio, struct diff_area *diff_area,
 		chunk->diff_area = diff_area_get(diff_area);
 
 		len = chunk_limit(chunk, iter);
+		bio_advance_iter_single(bio, iter, len);
+
 		if (chunk->state == CHUNK_ST_NEW) {
 			if (nowait) {
 				/*
@@ -364,7 +363,6 @@ bool diff_area_cow(struct bio *bio, struct diff_area *diff_area,
 			 */
 			chunk_up(chunk);
 		}
-		bio_advance_iter_single(bio, iter, len);
 	}
 
 	if (chunk_bio) {
@@ -444,39 +442,39 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 	 * in this part was also not performed.
 	 */
 	if (!chunk) {
-		if (op_is_write(bio_op(bio))) {
-			/*
-			 * To process a write bio, we need to allocate a new
-			 * chunk.
-			 */
-			chunk = chunk_alloc(diff_area, nr);
-			WARN_ON_ONCE(!chunk);
-			if (unlikely(!chunk))
-				return false;
-
-			ret = xa_insert(&diff_area->chunk_map, nr, chunk,
-					GFP_NOIO);
-			if (likely(!ret)) {
-				/* new chunk has been added */
-			} else if (ret == -EBUSY) {
-				/* another chunk has just been created */
-				chunk_free(diff_area, chunk);
-				chunk = xa_load(&diff_area->chunk_map, nr);
-				WARN_ON_ONCE(!chunk);
-				if (unlikely(!chunk))
-					return false;
-			} else if (ret) {
-				pr_err("Failed insert chunk to chunk map\n");
-				chunk_free(diff_area, chunk);
-				return false;
-			}
-		} else {
+		if (!op_is_write(bio_op(bio))) {
 			/*
 			 * To read, we simply redirect the bio to the original
 			 * block device.
 			 */
 			orig_clone_bio(diff_area, bio);
 			return true;
+		}
+
+		/*
+		 * To process a write bio, we need to allocate a new
+		 * chunk.
+		 */
+		chunk = chunk_alloc(diff_area, nr);
+		WARN_ON_ONCE(!chunk);
+		if (unlikely(!chunk))
+			return false;
+
+		ret = xa_insert(&diff_area->chunk_map, nr, chunk,
+				GFP_NOIO);
+		if (likely(!ret)) {
+			/* new chunk has been added */
+		} else if (ret == -EBUSY) {
+			/* another chunk has just been created */
+			chunk_free(diff_area, chunk);
+			chunk = xa_load(&diff_area->chunk_map, nr);
+			WARN_ON_ONCE(!chunk);
+			if (unlikely(!chunk))
+				return false;
+		} else if (ret) {
+			pr_err("Failed insert chunk to chunk map\n");
+			chunk_free(diff_area, chunk);
+			return false;
 		}
 	}
 
