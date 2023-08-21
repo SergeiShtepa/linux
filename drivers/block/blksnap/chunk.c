@@ -158,44 +158,45 @@ struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio)
  */
 int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 {
-	int ret = 0;
-	loff_t pos;
 	bool is_write = op_is_write(bio_op(bio));
-	ssize_t len;
-	unsigned int nbytes = 0;
-	unsigned int chunk_ofs, chunk_left;
-	struct bio_vec bvec;
+	loff_t chunk_ofs, chunk_left, pos;
+	struct bio_vec iter_bvec, *bio_bvec;
 	struct bvec_iter iter;
 	struct iov_iter iov_iter;
+	unsigned long nr_segs = 0;
+	size_t nbytes = 0;
+	ssize_t len;
 
-	if (is_write)
-		file_start_write(chunk->diff_file);
+	chunk_ofs = (bio->bi_iter.bi_sector - chunk_sector(chunk)) << SECTOR_SHIFT;
+	chunk_left = (chunk->sector_count << SECTOR_SHIFT) - chunk_ofs;
+	pos = (chunk->diff_ofs_sect << SECTOR_SHIFT) + chunk_ofs;
 
-	bio_for_each_segment(bvec, bio, iter) {
-		if (iter.bi_sector >= chunk_sector_end(chunk))
+	bio_for_each_segment(iter_bvec, bio, iter) {
+		if (chunk_left == 0)
 			break;
 
-		chunk_ofs = (iter.bi_sector - chunk_sector(chunk)) << SECTOR_SHIFT;
-		chunk_left = (chunk->sector_count << SECTOR_SHIFT) - chunk_ofs;
-		pos = (chunk->diff_ofs_sect << SECTOR_SHIFT) + chunk_ofs;
-
-		iov_iter_bvec(&iov_iter, is_write ? ITER_SOURCE : ITER_DEST, &bvec, 1, bvec.bv_len);
-		len = is_write ? vfs_iter_write(chunk->diff_file, &iov_iter, &pos, 0)
-			       : vfs_iter_read(chunk->diff_file, &iov_iter, &pos, 0);
-		if (len != bvec.bv_len) {
-			if (len < 0)
-				ret = len;
-			else
-				ret = -EIO;
-			break;
-		}
-		nbytes += len;
+		chunk_left -= iter_bvec.bv_len;
+		nbytes += iter_bvec.bv_len;
+		nr_segs++;
 	}
 
-	if (is_write)
+	bio_bvec = __bvec_iter_bvec(bio->bi_io_vec, bio->bi_iter);
+	iov_iter_bvec(&iov_iter, is_write ? ITER_SOURCE : ITER_DEST,
+		      bio_bvec, nr_segs, nbytes);
+	iov_iter.iov_offset = bio->bi_iter.bi_bvec_done;
+	if (is_write) {
+		file_start_write(chunk->diff_file);
+		len = vfs_iter_write(chunk->diff_file, &iov_iter, &pos, 0);
 		file_end_write(chunk->diff_file);
-	bio_advance(bio, nbytes);
-	return ret;
+	} else
+		len = vfs_iter_read(chunk->diff_file, &iov_iter, &pos, 0);
+	if (len < 0)
+		return len;
+	if (len == 0)
+		return -EIO;
+	WARN_ON(len != nbytes);
+	bio_advance(bio, len);
+	return 0;
 }
 
 /*
