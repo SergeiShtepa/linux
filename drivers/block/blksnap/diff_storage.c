@@ -61,6 +61,11 @@ static void diff_storage_event_low(struct diff_storage *diff_storage)
 		req_sect = 0;
 	spin_unlock(&diff_storage->lock);
 
+	pr_debug("The size of the difference storage was %llu MiB\n",
+		 diff_storage->capacity >> (20 - SECTOR_SHIFT));
+	pr_debug("The limit is %llu MiB\n",
+		 diff_storage->limit >> (20 - SECTOR_SHIFT));
+
 	if (req_sect == 0) {
 		pr_info("The limit size of the difference storage has been reached\n");
 		atomic_inc(&diff_storage->overflow_flag);
