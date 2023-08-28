@@ -156,6 +156,112 @@ struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio)
 /*
  * The data from bio is read to the diff file or read from it.
  */
+#if 1
+/*
+ssize_t vfs_iocb_iter_read(struct file *file, struct kiocb *iocb,
+			   struct iov_iter *iter);
+ssize_t vfs_iocb_iter_write(struct file *file, struct kiocb *iocb,
+			    struct iov_iter *iter);
+
+*/
+
+struct chunk_io_ctx {
+	struct kiocb iocb;
+	struct iov_iter iov_iter;
+	struct chunk *chunk;
+	struct bio *bio;
+};
+
+/*
+ * Handle completion of a write to the cache.
+ */
+static void chunk_diff_bio_complete(struct kiocb *iocb, long ret)
+{
+	struct chunk_io_ctx *io_ctx = container_of(iocb, struct chunk_io_ctx, iocb);
+	struct chunk *chunk = io_ctx->chunk;
+	struct bio *bio = io_ctx->bio;
+	struct inode *inode = file_inode(io_ctx->iocb.ki_filp);
+
+	__sb_writers_acquired(inode->i_sb, SB_FREEZE_WRITE);
+	__sb_end_write(inode->i_sb, SB_FREEZE_WRITE);
+
+	kfree(io_ctx);
+	if (ret < 0) {
+		bio_put(bio);
+		chunk_store_failed(chunk, ret);
+		return;
+	}
+
+	//bio_advance(bio, len);
+	bio_endio(bio);
+	chunk_up(chunk);
+}
+
+int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
+{
+	bool is_write = op_is_write(bio_op(bio));
+	loff_t chunk_ofs, chunk_left;
+	struct bio_vec iter_bvec, *bio_bvec;
+	struct bvec_iter iter;
+
+	unsigned long nr_segs = 0;
+	size_t nbytes = 0;
+	ssize_t len;
+	struct chunk_io_ctx *io_ctx;
+	unsigned int old_nofs;
+
+	io_ctx = kzalloc(sizeof(struct chunk_io_ctx), GFP_NOIO);
+	if (!io_ctx)
+		return -ENOMEM;
+
+	chunk_ofs = (bio->bi_iter.bi_sector - chunk_sector(chunk)) << SECTOR_SHIFT;
+	chunk_left = (chunk->sector_count << SECTOR_SHIFT) - chunk_ofs;
+	bio_for_each_segment(iter_bvec, bio, iter) {
+		if (chunk_left == 0)
+			break;
+
+		chunk_left -= iter_bvec.bv_len;
+		nbytes += iter_bvec.bv_len;
+		nr_segs++;
+	}
+	bio_bvec = __bvec_iter_bvec(bio->bi_io_vec, bio->bi_iter);
+	iov_iter_bvec(&io_ctx->iov_iter, is_write ? ITER_SOURCE : ITER_DEST,
+		      bio_bvec, nr_segs, nbytes);
+	io_ctx->iov_iter.iov_offset = bio->bi_iter.bi_bvec_done;
+
+	io_ctx->iocb.ki_filp = chunk->diff_file;
+	io_ctx->iocb.ki_pos = (chunk->diff_ofs_sect << SECTOR_SHIFT) + chunk_ofs;
+	io_ctx->iocb.ki_flags = IOCB_DIRECT;
+	io_ctx->iocb.ki_ioprio = get_current_ioprio();
+	io_ctx->iocb.ki_complete = chunk_diff_bio_complete;
+
+	io_ctx->chunk = chunk;
+	io_ctx->bio = bio;
+	bio_inc_remaining(bio);
+	bio_advance(bio, nbytes);
+
+	old_nofs = memalloc_nofs_save();
+	if (is_write) {
+		struct inode *inode = file_inode(chunk->diff_file);
+
+		io_ctx->iocb.ki_flags |= IOCB_WRITE;
+		__sb_start_write(inode->i_sb, SB_FREEZE_WRITE);
+		__sb_writers_release(inode->i_sb, SB_FREEZE_WRITE);
+		len = vfs_iocb_iter_write(chunk->diff_file, &io_ctx->iocb, &io_ctx->iov_iter);
+	} else {
+		len = vfs_iocb_iter_read(chunk->diff_file, &io_ctx->iocb, &io_ctx->iov_iter);
+	}
+	memalloc_nofs_restore(old_nofs);
+
+	if (len >= 0) {
+		chunk_diff_bio_complete(&io_ctx->iocb, len);
+		return 0;
+	}
+	if (len == -EIOCBQUEUED)
+		return 0;
+	return len;
+}
+#else
 int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 {
 	bool is_write = op_is_write(bio_op(bio));
@@ -190,6 +296,7 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 		file_end_write(chunk->diff_file);
 	} else
 		len = vfs_iter_read(chunk->diff_file, &iov_iter, &pos, 0);
+	chunk_up(chunk);
 	if (len < 0)
 		return len;
 	if (len == 0)
@@ -198,7 +305,7 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 	bio_advance(bio, len);
 	return 0;
 }
-
+#endif
 /*
  * Redirects bio to the original block device.
  */

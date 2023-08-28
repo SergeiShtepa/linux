@@ -495,8 +495,7 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 		/*
 		 * Data is read from the difference storage or written to it.
 		 */
-		int ret = chunk_diff_bio(chunk, bio);
-		chunk_up(chunk);
+		ret = chunk_diff_bio(chunk, bio);
 		return (ret == 0);
 	case CHUNK_ST_NEW:
 		if (!op_is_write(bio_op(bio))) {
