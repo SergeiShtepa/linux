@@ -101,6 +101,20 @@ static inline void chunk_up(struct chunk *chunk)
 	diff_area_put(diff_area);
 };
 
+struct chunk_io_ctx {
+	struct list_head link;
+#ifdef CHUNK_DIFF_BIO_SYNC
+	bool is_write;
+	loff_t pos;
+#else
+	struct kiocb iocb;
+#endif
+	struct iov_iter iov_iter;
+	struct chunk *chunk;
+	struct bio *bio;
+};
+void chunk_diff_bio_execute(struct chunk_io_ctx *io_ctx);
+
 void chunk_store_failed(struct chunk *chunk, int error);
 struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio);
 

@@ -121,6 +121,7 @@ void diff_area_free(struct kref *kref)
 
 	might_sleep();
 
+	flush_work(&diff_area->image_io_work);
 	flush_work(&diff_area->store_queue_work);
 	xa_for_each(&diff_area->chunk_map, inx, chunk)
 		if (chunk)
@@ -203,6 +204,26 @@ static void diff_area_store_queue_work(struct work_struct *work)
 	current->blk_filter = NULL;
 }
 
+static void diff_area_image_io_work(struct work_struct *work)
+{
+	struct chunk_io_ctx *io_ctx;
+	struct diff_area *diff_area = container_of(
+		work, struct diff_area, image_io_work);
+
+	for(;;) {
+		spin_lock(&diff_area->image_io_queue_lock);
+		io_ctx = list_first_entry_or_null(&diff_area->image_io_queue,
+						  struct chunk_io_ctx, link);
+		if (io_ctx)
+			list_del(&io_ctx->link);
+		spin_unlock(&diff_area->image_io_queue_lock);
+
+		if (!io_ctx)
+			break;
+		chunk_diff_bio_execute(io_ctx);
+	};
+}
+
 struct diff_area *diff_area_new(struct tracker *tracker,
 				struct diff_storage *diff_storage)
 {
@@ -240,6 +261,10 @@ struct diff_area *diff_area_new(struct tracker *tracker,
 	spin_lock_init(&diff_area->free_diff_buffers_lock);
 	INIT_LIST_HEAD(&diff_area->free_diff_buffers);
 	atomic_set(&diff_area->free_diff_buffers_count, 0);
+
+	spin_lock_init(&diff_area->image_io_queue_lock);
+	INIT_LIST_HEAD(&diff_area->image_io_queue);
+	INIT_WORK(&diff_area->image_io_work, diff_area_image_io_work);
 
 	diff_area->physical_blksz = bdev_physical_block_size(bdev);
 	diff_area->logical_blksz = bdev_logical_block_size(bdev);
