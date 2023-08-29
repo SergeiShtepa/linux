@@ -24,6 +24,9 @@ static void snapimage_submit_bio(struct bio *bio)
 {
 	struct tracker *tracker = bio->bi_bdev->bd_disk->private_data;
 	struct diff_area *diff_area = tracker->diff_area;
+	unsigned int old_nofs;
+	struct blkfilter *prev_filter;
+	bool is_success = true;
 
 	/*
 	 * The diff_area is not blocked from releasing now, because
@@ -43,16 +46,18 @@ static void snapimage_submit_bio(struct bio *bio)
 		cbt_map_set_both(tracker->cbt_map, bio->bi_iter.bi_sector,
 				 bio_sectors(bio));
 
+	prev_filter = current->blk_filter;
 	current->blk_filter = &tracker->filter;
-	while (bio->bi_iter.bi_size) {
-		if (!diff_area_submit_chunk(diff_area, bio)) {
-			bio_io_error(bio);
-			return;
-		}
-	}
-	current->blk_filter = NULL;
+	old_nofs = memalloc_nofs_save();
+	while (bio->bi_iter.bi_size && is_success)
+		is_success = diff_area_submit_chunk(diff_area, bio);
+	memalloc_nofs_restore(old_nofs);
+	current->blk_filter = prev_filter;
 
-	bio_endio(bio);
+	if (is_success)
+		bio_endio(bio);
+	else
+		bio_io_error(bio);
 }
 
 static const struct block_device_operations bd_ops = {

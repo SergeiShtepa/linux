@@ -210,10 +210,8 @@ void chunk_diff_bio_execute(struct chunk_io_ctx *io_ctx)
 {
 	struct file *diff_file = io_ctx->chunk->diff_file;
 	ssize_t len;
-	unsigned int old_nofs;
 	struct inode *inode = NULL;
 
-	old_nofs = memalloc_nofs_save();
 	if (io_ctx->iocb.ki_flags | IOCB_WRITE) {
 		inode = file_inode(diff_file);
 		__sb_start_write(inode->i_sb, SB_FREEZE_WRITE);
@@ -223,8 +221,6 @@ void chunk_diff_bio_execute(struct chunk_io_ctx *io_ctx)
 	} else
 		len = vfs_iocb_iter_read(diff_file, &io_ctx->iocb,
 					 &io_ctx->iov_iter);
-	memalloc_nofs_restore(old_nofs);
-
 	if (len != -EIOCBQUEUED) {
 		if (inode) {
 			__sb_writers_acquired(inode->i_sb, SB_FREEZE_WRITE);
