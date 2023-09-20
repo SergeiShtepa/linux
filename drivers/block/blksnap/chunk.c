@@ -153,6 +153,23 @@ struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio)
 	return bio_alloc_clone(bdev, bio, GFP_NOIO, &chunk_clone_bioset);
 }
 
+#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
+void chunk_diff_bio_tobdev(struct chunk *chunk, struct bio *bio)
+{
+	struct bio *new_bio;
+
+	new_bio = chunk_alloc_clone(chunk->diff_bdev, bio);
+	chunk_limit_iter(chunk, bio, chunk->diff_ofs_sect, &new_bio->bi_iter);
+	new_bio->bi_end_io = chunk_clone_endio;
+	new_bio->bi_private = bio;
+
+	bio_advance(bio, new_bio->bi_iter.bi_size);
+	bio_inc_remaining(bio);
+
+	submit_bio_noacct(new_bio);
+}
+#endif
+
 static inline void chunk_io_ctx_free(struct chunk_io_ctx *io_ctx, long ret)
 {
 	struct chunk *chunk = io_ctx->chunk;
@@ -169,7 +186,7 @@ static inline void chunk_io_ctx_free(struct chunk_io_ctx *io_ctx, long ret)
 	chunk_up(chunk);
 }
 
-#ifdef CHUNK_DIFF_BIO_SYNC
+#ifdef CONFIG_BLKSNAP_CHUNK_DIFF_BIO_SYNC
 void chunk_diff_bio_execute(struct chunk_io_ctx *io_ctx)
 {
 	struct file *diff_file = io_ctx->chunk->diff_file;
@@ -241,7 +258,7 @@ static inline void chunk_diff_bio_schedule(struct diff_area *diff_area,
 }
 
 /*
- * The data from bio is read to the diff file or read from it.
+ * The data from bio is write to the diff file or read from it.
  */
 int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 {
@@ -271,7 +288,7 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 	iov_iter_bvec(&io_ctx->iov_iter, is_write ? ITER_SOURCE : ITER_DEST,
 		      bio_bvec, nr_segs, nbytes);
 	io_ctx->iov_iter.iov_offset = bio->bi_iter.bi_bvec_done;
-#ifdef CHUNK_DIFF_BIO_SYNC
+#ifdef CONFIG_BLKSNAP_CHUNK_DIFF_BIO_SYNC
 	io_ctx->pos = (chunk->diff_ofs_sect << SECTOR_SHIFT) + chunk_ofs;
 	io_ctx->is_write = is_write;
 #else
@@ -392,8 +409,9 @@ static void chunk_notify_store(struct chunk *chunk, int err)
 	}
 	chunk_up(chunk);
 }
-#if 0
-static void chunk_notify_store(struct work_struct *work)
+
+#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
+static void chunk_notify_store_tobdev(struct work_struct *work)
 {
 	struct chunk_bio *cbio = container_of(work, struct chunk_bio, work);
 	struct chunk *chunk;
@@ -418,6 +436,7 @@ static void chunk_notify_store(struct work_struct *work)
 	bio_put(&cbio->bio);
 }
 #endif
+
 static void chunk_io_endio(struct bio *bio)
 {
 	struct chunk_bio *cbio = container_of(bio, struct chunk_bio, bio);
@@ -435,6 +454,53 @@ static inline unsigned short calc_max_vecs(sector_t left)
 {
 	return bio_max_segs(round_up(left, PAGE_SECTORS) / PAGE_SECTORS);
 }
+
+#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
+void chunk_store_tobdev(struct chunk *chunk)
+{
+	struct block_device *bdev = chunk->diff_bdev;
+	sector_t sector = chunk->diff_ofs_sect;
+	sector_t count = chunk->sector_count;
+	unsigned int inx = 0;
+	struct bio *bio;
+	struct chunk_bio *cbio;
+
+	bio = bio_alloc_bioset(bdev, calc_max_vecs(count),
+			       REQ_OP_WRITE | REQ_SYNC | REQ_FUA, GFP_NOIO,
+			       &chunk_io_bioset);
+	bio->bi_iter.bi_sector = sector;
+
+	while (count) {
+		struct bio *next;
+		sector_t portion = min_t(sector_t, count, PAGE_SECTORS);
+		unsigned int bytes = portion << SECTOR_SHIFT;
+
+		if (bio_add_page(bio, chunk->diff_buffer->bvec[inx].bv_page,
+				 bytes, 0) == bytes) {
+			inx++;
+			count -= portion;
+			continue;
+		}
+
+		/* Create next bio */
+		next = bio_alloc_bioset(bdev, calc_max_vecs(count),
+					REQ_OP_WRITE | REQ_SYNC | REQ_FUA,
+					GFP_NOIO, &chunk_io_bioset);
+		next->bi_iter.bi_sector = bio_end_sector(bio);
+		bio_chain(bio, next);
+		submit_bio_noacct(bio);
+		bio = next;
+	}
+
+	cbio = container_of(bio, struct chunk_bio, bio);
+
+	INIT_WORK(&cbio->work, chunk_notify_store_tobdev);
+	INIT_LIST_HEAD(&cbio->chunks);
+	list_add_tail(&chunk->link, &cbio->chunks);
+	cbio->orig_bio = NULL;
+	chunk_submit_bio(bio);
+}
+#endif
 
 /*
  * Synchronously store chunk to diff file.

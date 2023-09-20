@@ -14,8 +14,16 @@ struct blksnap_sectors;
  *	The reference counter.
  * @lock:
  *	Spinlock allows to guarantee the safety of linked lists.
+ * @dev_id:
+ *	ID of the block device on which the difference storage file is located.
+ * @bdev:
+ *	A pointer to the block device that has been selected for the
+ *	difference storage. Available only if configuration BLKSNAP_DIFF_BLKDEV
+ *	is enabled.
+ * @file:
+ *	A pointer to the file that was selected for the difference storage.
  * @capacity:
- *	Total amount of available storage space.
+ *	Total amount of available difference storage space.
  * @filled:
  *	The number of sectors already filled in.
  * @requested:
@@ -41,6 +49,10 @@ struct diff_storage {
 	struct kref kref;
 	spinlock_t lock;
 
+	dev_t dev_id;
+#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
+	struct block_device *bdev;
+#endif
 	struct file *file;
 	sector_t capacity;
 	sector_t limit;
@@ -67,9 +79,12 @@ static inline void diff_storage_put(struct diff_storage *diff_storage)
 		kref_put(&diff_storage->kref, diff_storage_free);
 };
 
-int diff_storage_set_file(struct diff_storage *diff_storage,
-			     unsigned int fd, sector_t limit);
-int diff_storage_alloc(struct diff_storage *diff_storage, sector_t count,
-		       struct file **file, sector_t *sector);
+int diff_storage_set_diff_storage(struct diff_storage *diff_storage,
+				  unsigned int fd, sector_t limit);
 
+int diff_storage_alloc(struct diff_storage *diff_storage, sector_t count,
+#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
+		       struct block_device **bdev,
+#endif
+		       struct file **file, sector_t *sector);
 #endif /* __BLKSNAP_DIFF_STORAGE_H */

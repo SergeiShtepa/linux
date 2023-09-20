@@ -55,6 +55,8 @@ enum chunk_st {
  *	Allows to protect the difference area from early release.
  * @state:
  *	Defines the state of a chunk.
+ * @diff_bdev:
+ *      The difference storage block device.
  * @diff_file:
  *	The difference storage file.
  * @diff_ofs_sect:
@@ -86,6 +88,9 @@ struct chunk {
 
 	enum chunk_st state;
 
+#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
+	struct block_device *diff_bdev;
+#endif
 	struct file *diff_file;
 	sector_t diff_ofs_sect;
 
@@ -103,7 +108,7 @@ static inline void chunk_up(struct chunk *chunk)
 
 struct chunk_io_ctx {
 	struct list_head link;
-#ifdef CHUNK_DIFF_BIO_SYNC
+#ifdef CONFIG_BLKSNAP_CHUNK_DIFF_BIO_SYNC
 	bool is_write;
 	loff_t pos;
 #else
@@ -120,6 +125,10 @@ struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio);
 
 void chunk_copy_bio(struct chunk *chunk, struct bio *bio,
 		    struct bvec_iter *iter);
+#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
+void chunk_diff_bio_tobdev(struct chunk *chunk, struct bio *bio);
+void chunk_store_tobdev(struct chunk *chunk);
+#endif
 int chunk_diff_bio(struct chunk *chunk, struct bio *bio);
 void chunk_origin_bio(struct chunk *chunk, struct bio *bio);
 void chunk_diff_write(struct chunk *chunk);

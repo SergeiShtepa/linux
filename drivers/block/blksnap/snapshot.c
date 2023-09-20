@@ -110,10 +110,11 @@ int snapshot_create(struct blksnap_snapshot_create *arg)
 
 	export_uuid(arg->id.b, &snapshot->id);
 
-	ret = diff_storage_set_file(snapshot->diff_storage,
-				       arg->diff_storage_fd,
-				       arg->diff_storage_limit_sect);
+	ret = diff_storage_set_diff_storage(snapshot->diff_storage,
+					    arg->diff_storage_fd,
+					    arg->diff_storage_limit_sect);
 	if (ret) {
+		pr_err("Unable to create snapshot: invalid difference storage file\n");
 		snapshot_put(snapshot);
 		return ret;
 	}
