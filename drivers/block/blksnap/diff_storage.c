@@ -15,6 +15,19 @@
 #include "diff_storage.h"
 #include "params.h"
 
+static inline int diff_storage_reallocate(struct diff_storage *diff_storage,
+					  sector_t req_sect)
+{
+	int ret;
+
+	ret = vfs_fallocate(diff_storage->file, 0, 0,
+			     (loff_t)(req_sect << SECTOR_SHIFT));
+	if (ret)
+		pr_err("Failed to fallocate difference storage file\n");
+
+	return ret;
+}
+
 static void diff_storage_reallocate_work(struct work_struct *work)
 {
 	int ret;
@@ -27,18 +40,10 @@ static void diff_storage_reallocate_work(struct work_struct *work)
 		spin_lock(&diff_storage->lock);
 		req_sect = diff_storage->requested;
 		spin_unlock(&diff_storage->lock);
-#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
-		if (unlikely(!diff_storage->file)) {
-			pr_warn("Reallocating is allowed only for a regular file\n");
+
+		ret = diff_storage_reallocate(diff_storage, req_sect);
+		if (ret)
 			return;
-		}
-#endif
-		ret = vfs_fallocate(diff_storage->file, 0, 0,
-				    (loff_t)(req_sect << SECTOR_SHIFT));
-		if (ret) {
-			pr_err("Failed to fallocate difference storage file\n");
-			return;
-		}
 
 		spin_lock(&diff_storage->lock);
 		diff_storage->capacity = req_sect;
@@ -53,35 +58,27 @@ static void diff_storage_reallocate_work(struct work_struct *work)
 	} while (!stop);
 }
 
-static void diff_storage_event_low(struct diff_storage *diff_storage)
+static sector_t diff_storage_calculate_req_sect(struct diff_storage
+								*diff_storage)
 {
-	sector_t req_sect;
+	sector_t req_sect = 0;
 
 	spin_lock(&diff_storage->lock);
-	if (diff_storage->capacity < diff_storage->limit) {
-		req_sect = min(get_diff_storage_minimum(),
-			diff_storage->limit - diff_storage->capacity);
 
-		diff_storage->requested += req_sect;
-	} else
-		req_sect = 0;
-	spin_unlock(&diff_storage->lock);
+	if (diff_storage->capacity < diff_storage->limit) {
+		diff_storage->requested += min(get_diff_storage_minimum(),
+				diff_storage->limit - diff_storage->capacity);
+		req_sect = diff_storage->requested;
+	}
 
 	pr_debug("The size of the difference storage was %llu MiB\n",
 		 diff_storage->capacity >> (20 - SECTOR_SHIFT));
 	pr_debug("The limit is %llu MiB\n",
 		 diff_storage->limit >> (20 - SECTOR_SHIFT));
 
-	if (req_sect == 0) {
-		pr_info("The limit size of the difference storage has been reached\n");
-		atomic_inc(&diff_storage->overflow_flag);
-		return;
-	}
+	spin_unlock(&diff_storage->lock);
 
-	pr_debug("Diff storage low free space. Portion: %llu sectors, requested: %llu\n",
-		 req_sect, diff_storage->requested);
-
-	queue_work(system_wq, &diff_storage->reallocate_work);
+	return req_sect;
 }
 
 static inline bool is_halffull(const sector_t sectors_left)
@@ -94,8 +91,22 @@ static inline void check_halffull(struct diff_storage *diff_storage,
 				  const sector_t sectors_left)
 {
 	if (is_halffull(sectors_left) &&
-	    (atomic_inc_return(&diff_storage->low_space_flag) == 1))
-		diff_storage_event_low(diff_storage);
+	    (atomic_inc_return(&diff_storage->low_space_flag) == 1)) {
+		sector_t req_sect;
+
+		req_sect = diff_storage_calculate_req_sect(diff_storage);
+		if (req_sect == 0) {
+			pr_info("The limit size of the difference storage has been reached\n");
+			atomic_inc(&diff_storage->overflow_flag);
+		} else {
+			pr_debug("Diff storage low free space. Requested: %llu sectors\n",
+				 req_sect);
+			if (diff_storage->file)
+				queue_work(system_wq, &diff_storage->reallocate_work);
+			else
+				pr_warn("Reallocating is allowed only for a regular file\n");
+		}
+	}
 }
 
 struct diff_storage *diff_storage_new(void)
@@ -145,9 +156,11 @@ static void diff_storage_mark_dead(struct block_device *bdev)
 {
 	struct diff_storage *diff_storage = bdev->bd_holder;
 
-	spin_lock(&diff_storage->lock);
-	diff_storage->bdev = NULL;
-	spin_unlock(&diff_storage->lock);
+	pr_info("The block device of the difference storage has been lost.\n");
+	atomic_inc(&diff_storage->overflow_flag);
+
+	event_gen(&diff_storage->event_queue, GFP_NOIO,
+		  blksnap_event_code_diff_storage_loss, NULL, 0);
 }
 
 static const struct blk_holder_ops diff_storage_hops = {
@@ -160,10 +173,9 @@ int diff_storage_set_diff_storage(struct diff_storage *diff_storage,
 {
 	int ret = 0;
 	struct file *file;
-	sector_t sectors_left;
-#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
+	sector_t capacity;
 	struct block_device *bdev = NULL;
-#endif
+
 	umode_t mode;
 
 	file = fget(fd);
@@ -179,7 +191,6 @@ int diff_storage_set_diff_storage(struct diff_storage *diff_storage,
 		goto fail_fput;
 	}
 
-#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
 	if (S_ISBLK(mode)) {
 		dev_t dev_id = file_inode(file)->i_rdev;
 
@@ -187,47 +198,74 @@ int diff_storage_set_diff_storage(struct diff_storage *diff_storage,
 			MAJOR(dev_id), MINOR(dev_id));
 		bdev = blkdev_get_by_dev(dev_id,
 				BLK_OPEN_READ | BLK_OPEN_WRITE | BLK_OPEN_EXCL,
-				diff_storage, &diff_storage_hops);
+#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
+				diff_storage, &diff_storage_hops
+#else
+				NULL, NULL
+#endif
+				);
 		if (IS_ERR(bdev)) {
 			pr_err("Cannot open block device %d:%d\n",
 				MAJOR(dev_id), MINOR(dev_id));
 			ret = PTR_ERR(bdev);
 			goto fail_fput;
 		}
-	}
-#endif
+		pr_debug("A block device is selected for difference storage\n");
+	} else
+		pr_debug("A regular file is selected for difference storage\n");
 
-	spin_lock(&diff_storage->lock);
-	diff_storage->dev_id = S_ISBLK(mode) ?
-		file_inode(file)->i_rdev : file_inode(file)->i_sb->s_dev;
+	if (bdev) {
+		diff_storage->dev_id = file_inode(file)->i_rdev;
+		diff_storage->capacity = bdev_nr_sectors(bdev);
+	} else {
+		diff_storage->dev_id = file_inode(file)->i_sb->s_dev;
+		diff_storage->capacity =
+				i_size_read(file_inode(file)) >> SECTOR_SHIFT;
+	}
+	diff_storage->requested = diff_storage->capacity;
 
 #if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
 	if (bdev) {
-		diff_storage->bdev = bdev;
 		diff_storage->file = NULL;
-		diff_storage->capacity = diff_storage->requested =
-			bdev_nr_sectors(bdev);
-		pr_debug("A block device is selected for difference storage\n");
+		diff_storage->bdev = bdev;
+		bdev = NULL;
 	} else {
 		diff_storage->bdev = NULL;
 		diff_storage->file = get_file(file);
-		diff_storage->capacity = diff_storage->requested =
-			i_size_read(file_inode(file)) >> SECTOR_SHIFT;
-		pr_debug("A regular file is selected for difference storage\n");
 	}
 #else
 	diff_storage->file = get_file(file);
-	diff_storage->capacity = diff_storage->requested =
-		i_size_read(file_inode(file)) >> SECTOR_SHIFT;
 #endif
-
 	diff_storage->limit = limit;
+	capacity = diff_storage->capacity;
 
-	sectors_left = diff_storage->requested - diff_storage->filled;
-	spin_unlock(&diff_storage->lock);
 
-	check_halffull(diff_storage, sectors_left);
+	if (is_halffull(capacity)) {
+		sector_t req_sect;
+
+		req_sect = diff_storage_calculate_req_sect(diff_storage);
+		if (req_sect == 0) {
+			pr_info("The limit size of the difference storage has been reached\n");
+			ret = -ENOSPC;
+			goto fail_fput;
+		}
+
+		pr_debug("Diff storage low free space. Requested: %llu sectors\n",
+			 req_sect);
+		if (diff_storage->file) {
+			ret = diff_storage_reallocate(diff_storage, req_sect);
+			if (ret) {
+				pr_err("The difference storage is not large enough\n");
+				goto fail_fput;
+			}
+		} else
+			pr_warn("Reallocating is allowed only for a regular file\n");
+
+		diff_storage->capacity = req_sect;
+	}
 fail_fput:
+	if (bdev)
+		blkdev_put(bdev, diff_storage);
 	fput(file);
 	return ret;
 }

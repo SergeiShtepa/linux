@@ -158,6 +158,11 @@ int snapshot_add_device(const uuid_t *id, struct tracker *tracker)
 		return -ESRCH;
 
 	down_write(&snapshot->rw_lock);
+	if (tracker->dev_id == snapshot->diff_storage->dev_id) {
+		pr_err("The block device %d:%d is already being used as difference storage\n",
+			MAJOR(tracker->dev_id), MINOR(tracker->dev_id));
+		goto out_up;
+	}
 	if (!list_empty(&snapshot->trackers)) {
 		struct tracker *tr;
 
@@ -165,17 +170,16 @@ int snapshot_add_device(const uuid_t *id, struct tracker *tracker)
 			if ((tr == tracker) ||
 			    (tr->dev_id == tracker->dev_id)) {
 				ret = -EALREADY;
-				break;
+				goto out_up;
 			}
 		}
 	}
-	if (!ret) {
-		if (list_empty(&tracker->link)) {
-			tracker_get(tracker);
-			list_add_tail(&tracker->link, &snapshot->trackers);
-		} else
-			ret = -EBUSY;
-	}
+	if (list_empty(&tracker->link)) {
+		tracker_get(tracker);
+		list_add_tail(&tracker->link, &snapshot->trackers);
+	} else
+		ret = -EBUSY;
+out_up:
 	up_write(&snapshot->rw_lock);
 
 	snapshot_put(snapshot);

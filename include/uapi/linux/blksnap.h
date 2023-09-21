@@ -328,6 +328,7 @@ struct blksnap_snapshot_collect {
  */
 enum blksnap_event_codes {
 	blksnap_event_code_corrupted,
+        blksnap_event_code_diff_storage_loss,
 };
 
 /**

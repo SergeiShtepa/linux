@@ -294,12 +294,6 @@ struct diff_area *diff_area_new(struct tracker *tracker,
 	diff_area->corrupt_flag = 0;
 	diff_area->store_queue_processing = false;
 
-	if (!diff_storage->capacity) {
-		pr_err("Difference storage is empty\n");
-		pr_err("In-memory difference storage is not supported\n");
-		ret = -EFAULT;
-	}
-
 	if (ret) {
 		diff_area_put(diff_area);
 		return ERR_PTR(ret);
