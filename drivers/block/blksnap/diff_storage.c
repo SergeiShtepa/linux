@@ -146,37 +146,31 @@ void diff_storage_free(struct kref *kref)
 	kfree(diff_storage);
 }
 
-static inline bool unsupported_files(const umode_t m)
+static inline bool unsupported_mode(const umode_t m)
 {
 	return (S_ISCHR(m) || S_ISFIFO(m) || S_ISSOCK(m));
 }
 
-#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
-static void diff_storage_mark_dead(struct block_device *bdev)
+static inline bool unsupported_flags(const unsigned int flags)
 {
-	struct diff_storage *diff_storage = bdev->bd_holder;
+	if (!(flags | O_RDWR)) {
+		pr_err("Read and write access is required\n");
+		return true;
+	}
 
-	pr_info("The block device of the difference storage has been lost.\n");
-	atomic_inc(&diff_storage->overflow_flag);
+	if (!(flags | O_EXCL)) {
+		pr_err("Exclusive access is required\n");
+		return true;
+	}
 
-	event_gen(&diff_storage->event_queue, GFP_NOIO,
-		  blksnap_event_code_diff_storage_loss, NULL, 0);
+	return false;
 }
-
-static const struct blk_holder_ops diff_storage_hops = {
-	.mark_dead = diff_storage_mark_dead,
-};
-#endif
 
 int diff_storage_set_diff_storage(struct diff_storage *diff_storage,
 				  unsigned int fd, sector_t limit)
 {
 	int ret = 0;
 	struct file *file;
-	sector_t capacity;
-	struct block_device *bdev = NULL;
-
-	umode_t mode;
 
 	file = fget(fd);
 	if (!file) {
@@ -184,63 +178,60 @@ int diff_storage_set_diff_storage(struct diff_storage *diff_storage,
 		return -EINVAL;
 	}
 
-	mode = file_inode(file)->i_mode;
-	if (unsupported_files(mode)) {
+	if (unsupported_mode(file_inode(file)->i_mode)) {
 		pr_err("The difference storage can only be a regular file or a block device\n");
 		ret = -EINVAL;
 		goto fail_fput;
 	}
 
-	if (S_ISBLK(mode)) {
+	if (unsupported_flags(file->f_flags)) {
+		pr_err("Invalid flags 0x%x with which the file was opened\n", file->f_flags);
+		ret = -EINVAL;
+		goto fail_fput;
+	}
+
+	if (S_ISBLK(file_inode(file)->i_mode)) {
+		struct block_device *bdev;
 		dev_t dev_id = file_inode(file)->i_rdev;
 
-		pr_debug("Open block device %d:%d\n",
+		pr_debug("Open a block device %d:%d\n",
 			MAJOR(dev_id), MINOR(dev_id));
+		/*
+		 * The block device is opened non-exclusively.
+		 * It should be exclusive to open the file whose descriptor is
+		 * passed to the module.
+		 */
 		bdev = blkdev_get_by_dev(dev_id,
-				BLK_OPEN_READ | BLK_OPEN_WRITE | BLK_OPEN_EXCL,
-#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
-				diff_storage, &diff_storage_hops
-#else
-				NULL, NULL
-#endif
-				);
+					 BLK_OPEN_READ | BLK_OPEN_WRITE,
+					 NULL, NULL);
 		if (IS_ERR(bdev)) {
-			pr_err("Cannot open block device %d:%d\n",
+			pr_err("Cannot open a block device %d:%d\n",
 				MAJOR(dev_id), MINOR(dev_id));
 			ret = PTR_ERR(bdev);
+			bdev = NULL;
 			goto fail_fput;
 		}
-		pr_debug("A block device is selected for difference storage\n");
-	} else
-		pr_debug("A regular file is selected for difference storage\n");
 
-	if (bdev) {
+		pr_debug("A block device is selected for difference storage\n");
 		diff_storage->dev_id = file_inode(file)->i_rdev;
 		diff_storage->capacity = bdev_nr_sectors(bdev);
+#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
+		diff_storage->bdev = bdev;
+#else
+		blkdev_put(bdev, NULL);
+#endif
 	} else {
+		pr_debug("A regular file is selected for difference storage\n");
 		diff_storage->dev_id = file_inode(file)->i_sb->s_dev;
 		diff_storage->capacity =
 				i_size_read(file_inode(file)) >> SECTOR_SHIFT;
 	}
-	diff_storage->requested = diff_storage->capacity;
 
-#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
-	if (bdev) {
-		diff_storage->file = NULL;
-		diff_storage->bdev = bdev;
-		bdev = NULL;
-	} else {
-		diff_storage->bdev = NULL;
-		diff_storage->file = get_file(file);
-	}
-#else
 	diff_storage->file = get_file(file);
-#endif
+	diff_storage->requested = diff_storage->capacity;
 	diff_storage->limit = limit;
-	capacity = diff_storage->capacity;
 
-
-	if (is_halffull(capacity)) {
+	if (is_halffull(diff_storage->requested)) {
 		sector_t req_sect;
 
 		req_sect = diff_storage_calculate_req_sect(diff_storage);
@@ -250,22 +241,26 @@ int diff_storage_set_diff_storage(struct diff_storage *diff_storage,
 			goto fail_fput;
 		}
 
-		pr_debug("Diff storage low free space. Requested: %llu sectors\n",
-			 req_sect);
-		if (diff_storage->file) {
-			ret = diff_storage_reallocate(diff_storage, req_sect);
-			if (ret) {
-				pr_err("The difference storage is not large enough\n");
-				goto fail_fput;
-			}
-		} else
-			pr_warn("Reallocating is allowed only for a regular file\n");
+#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
+		if (diff_storage->bdev) {
+			pr_warn("Difference storage on block device is not large enough\n");
+			pr_warn("Requested: %llu sectors\n", req_sect);
+			ret = 0;
+			goto fail_fput;
+		}
+#endif
+		pr_debug("Difference storage is not large enough\n");
+		pr_debug("Requested: %llu sectors\n", req_sect);
 
+		ret = diff_storage_reallocate(diff_storage, req_sect);
+		if (ret) {
+			pr_err("The difference storage is not large enough\n");
+			goto fail_fput;
+		}
 		diff_storage->capacity = req_sect;
+
 	}
 fail_fput:
-	if (bdev)
-		blkdev_put(bdev, diff_storage);
 	fput(file);
 	return ret;
 }
