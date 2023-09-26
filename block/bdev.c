@@ -967,7 +967,7 @@ void bdev_mark_dead(struct block_device *bdev, bool surprise)
 	mutex_unlock(&bdev->bd_holder_lock);
 
 	invalidate_bdev(bdev);
-	blkfilter_detach(part);
+	blkfilter_detach(bdev);
 }
 #ifdef CONFIG_DASD_MODULE
 /*
