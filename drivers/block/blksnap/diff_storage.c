@@ -137,7 +137,7 @@ void diff_storage_free(struct kref *kref)
 
 #if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
 	if (diff_storage->bdev)
-		blkdev_put(diff_storage->bdev, diff_storage);
+		blkdev_put(diff_storage->bdev, NULL);
 #endif
 
 	if (diff_storage->file)
