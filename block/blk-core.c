@@ -18,6 +18,7 @@
 #include <linux/blkdev.h>
 #include <linux/blk-pm.h>
 #include <linux/blk-integrity.h>
+#include <linux/blk-filter.h>
 #include <linux/highmem.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
@@ -592,12 +593,34 @@ static inline blk_status_t blk_check_zone_append(struct request_queue *q,
 
 static void __submit_bio(struct bio *bio)
 {
+	struct request_queue *q = bdev_get_queue(bio->bi_bdev);
+	bool skip_bio = false;
+
+	if (unlikely(bio_queue_enter(bio)))
+		return;
+
+	if (bio->bi_bdev->bd_filter &&
+	    bio->bi_bdev->bd_filter != current->blk_filter) {
+		struct blkfilter *prev = current->blk_filter;
+
+	    	current->blk_filter = bio->bi_bdev->bd_filter;
+		skip_bio = bio->bi_bdev->bd_filter->ops->submit_bio(bio);
+		current->blk_filter = prev;
+	}
+
+	blk_queue_exit(q);
+	if (skip_bio)
+		return;
+
 	if (unlikely(!blk_crypto_bio_prep(&bio)))
 		return;
 
 	if (!bio->bi_bdev->bd_has_submit_bio) {
 		blk_mq_submit_bio(bio);
-	} else if (likely(bio_queue_enter(bio) == 0)) {
+		return;
+	}
+
+	if (likely(bio_queue_enter(bio) == 0)) {
 		struct gendisk *disk = bio->bi_bdev->bd_disk;
 
 		disk->fops->submit_bio(bio);
@@ -681,6 +704,15 @@ static void __submit_bio_noacct_mq(struct bio *bio)
 	current->bio_list = NULL;
 }
 
+/**
+ * submit_bio_noacct_nocheck - re-submit a bio to the block device layer for I/O
+ *	from block device filter.
+ * @bio:  The bio describing the location in memory and on the device.
+ *
+ * This is a version of submit_bio() that shall only be used for I/O that is
+ * resubmitted to lower level by block device filters.  All file  systems and
+ * other upper level users of the block layer should use submit_bio() instead.
+ */
 void submit_bio_noacct_nocheck(struct bio *bio)
 {
 	blk_cgroup_bio_start(bio);
@@ -708,6 +740,7 @@ void submit_bio_noacct_nocheck(struct bio *bio)
 	else
 		__submit_bio_noacct(bio);
 }
+EXPORT_SYMBOL_GPL(submit_bio_noacct_nocheck);
 
 /**
  * submit_bio_noacct - re-submit a bio to the block device layer for I/O

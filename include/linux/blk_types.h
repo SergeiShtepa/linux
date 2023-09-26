@@ -74,6 +74,7 @@ struct block_device {
 	 * path
 	 */
 	struct device		bd_device;
+	struct blkfilter	*bd_filter;
 } __randomize_layout;
 
 #define bdev_whole(_bdev) \

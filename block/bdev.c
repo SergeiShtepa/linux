@@ -412,6 +412,7 @@ struct block_device *bdev_alloc(struct gendisk *disk, u8 partno)
 		return NULL;
 	}
 	bdev->bd_disk = disk;
+	bdev->bd_filter = NULL;
 	return bdev;
 }
 
@@ -966,6 +967,7 @@ void bdev_mark_dead(struct block_device *bdev, bool surprise)
 	mutex_unlock(&bdev->bd_holder_lock);
 
 	invalidate_bdev(bdev);
+	blkfilter_detach(part);
 }
 #ifdef CONFIG_DASD_MODULE
 /*

@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Block device snapshot module configuration
+#
+
+config BLKSNAP
+	tristate "Block Devices Snapshots Module (blksnap)"
+	help
+	  Allow to create snapshots and track block changes for block devices.
+	  Designed for creating backups for simple block devices. Snapshots are
+	  temporary and are released when backup is completed. Change block
+	  tracking allows to create incremental or differential backups.
+
+config BLKSNAP_DIFF_BLKDEV
+	bool "Use an optimized algorithm to store difference on a block device.
+	depends on BLKSNAP
+	default y
+	help
+	  The difference storage for a snapshot can be a regular file or a
+	  block device. We can work with a block device through the interface
+	  of a regular file. However, direct management of I/O units should
+	  allow for higher performance.
+
+config BLKSNAP_CHUNK_DIFF_BIO_SYNC
+	bool "Use a synchronous I/O unit processing algorithm for the snapshot image"
+	depends on BLKSNAP
+	default n
+	help
+	  Theoretical asynchronous algorithm for processing I/O units should
+	  have higher performance.
