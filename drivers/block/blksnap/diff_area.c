@@ -221,6 +221,21 @@ static void diff_area_store_queue_work(struct work_struct *work)
 	current->blk_filter = prev_filter;
 }
 
+static inline struct chunk_io_ctx *chunk_io_ctx_take(
+						struct diff_area *diff_area)
+{
+	struct chunk_io_ctx *io_ctx;
+
+	spin_lock(&diff_area->image_io_queue_lock);
+	io_ctx = list_first_entry_or_null(&diff_area->image_io_queue,
+						  struct chunk_io_ctx, link);
+	if (io_ctx)
+		list_del(&io_ctx->link);
+	spin_unlock(&diff_area->image_io_queue_lock);
+
+	return io_ctx;
+}
+
 static void diff_area_image_io_work(struct work_struct *work)
 {
 	struct diff_area *diff_area = container_of(
@@ -231,18 +246,8 @@ static void diff_area_image_io_work(struct work_struct *work)
 
 	current->blk_filter = &diff_area->tracker->filter;
 	old_nofs = memalloc_nofs_save();
-	for(;;) {
-		spin_lock(&diff_area->image_io_queue_lock);
-		io_ctx = list_first_entry_or_null(&diff_area->image_io_queue,
-						  struct chunk_io_ctx, link);
-		if (io_ctx)
-			list_del(&io_ctx->link);
-		spin_unlock(&diff_area->image_io_queue_lock);
-
-		if (!io_ctx)
-			break;
+	while((io_ctx = chunk_io_ctx_take(diff_area)))
 		chunk_diff_bio_execute(io_ctx);
-	};
 	memalloc_nofs_restore(old_nofs);
 	current->blk_filter = prev_filter;
 }

@@ -192,7 +192,7 @@ void chunk_diff_bio_execute(struct chunk_io_ctx *io_ctx)
 	struct file *diff_file = io_ctx->chunk->diff_file;
 	ssize_t len;
 
-	if (io_ctx->is_write) {
+	if (io_ctx->iov_iter.data_source) {
 		file_start_write(diff_file);
 		len = vfs_iter_write(diff_file, &io_ctx->iov_iter,
 				     &io_ctx->pos, 0);
@@ -215,36 +215,46 @@ static void chunk_diff_bio_complete_read(struct kiocb *iocb, long ret)
 static void chunk_diff_bio_complete_write(struct kiocb *iocb, long ret)
 {
 	struct chunk_io_ctx *io_ctx = container_of(iocb, struct chunk_io_ctx, iocb);
-	struct inode *inode = file_inode(io_ctx->iocb.ki_filp);
 
-	__sb_writers_acquired(inode->i_sb, SB_FREEZE_WRITE);
-	__sb_end_write(inode->i_sb, SB_FREEZE_WRITE);
-
+	file_end_write(io_ctx->iocb.ki_filp);
 	chunk_io_ctx_free(io_ctx, ret);
+}
+
+static inline void chunk_diff_bio_execute_write(struct chunk_io_ctx *io_ctx)
+{
+	struct file *diff_file = io_ctx->chunk->diff_file;
+	ssize_t len;
+
+	file_start_write(diff_file);
+	len = vfs_iocb_iter_write(diff_file, &io_ctx->iocb,  &io_ctx->iov_iter);
+
+	if (len != -EIOCBQUEUED) {
+		if (unlikely(len < 0))
+			pr_err("Failed to write data to difference storage\n");
+		file_end_write(diff_file);
+		chunk_io_ctx_free(io_ctx, len);
+	}
+}
+
+static inline void chunk_diff_bio_execute_read(struct chunk_io_ctx *io_ctx)
+{
+	struct file *diff_file = io_ctx->chunk->diff_file;
+	ssize_t len;
+
+	len = vfs_iocb_iter_read(diff_file, &io_ctx->iocb, &io_ctx->iov_iter);
+	if (len != -EIOCBQUEUED) {
+		if (unlikely(len < 0))
+			pr_err("Failed to read data from difference storage\n");
+		chunk_io_ctx_free(io_ctx, len);
+	}
 }
 
 void chunk_diff_bio_execute(struct chunk_io_ctx *io_ctx)
 {
-	struct file *diff_file = io_ctx->chunk->diff_file;
-	ssize_t len;
-	struct inode *inode = NULL;
-
-	if (io_ctx->iocb.ki_flags | IOCB_WRITE) {
-		inode = file_inode(diff_file);
-		__sb_start_write(inode->i_sb, SB_FREEZE_WRITE);
-		__sb_writers_release(inode->i_sb, SB_FREEZE_WRITE);
-		len = vfs_iocb_iter_write(diff_file, &io_ctx->iocb,
-					  &io_ctx->iov_iter);
-	} else
-		len = vfs_iocb_iter_read(diff_file, &io_ctx->iocb,
-					 &io_ctx->iov_iter);
-	if (len != -EIOCBQUEUED) {
-		if (inode) {
-			__sb_writers_acquired(inode->i_sb, SB_FREEZE_WRITE);
-			__sb_end_write(inode->i_sb, SB_FREEZE_WRITE);
-		}
-		chunk_io_ctx_free(io_ctx, len);
-	}
+	if (io_ctx->iov_iter.data_source)
+		chunk_diff_bio_execute_write(io_ctx);
+	else
+		chunk_diff_bio_execute_read(io_ctx);
 }
 #endif
 
@@ -285,20 +295,21 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 		nr_segs++;
 	}
 	bio_bvec = __bvec_iter_bvec(bio->bi_io_vec, bio->bi_iter);
-	iov_iter_bvec(&io_ctx->iov_iter, is_write ? ITER_SOURCE : ITER_DEST,
+	iov_iter_bvec(&io_ctx->iov_iter, is_write ? WRITE : READ,
 		      bio_bvec, nr_segs, nbytes);
 	io_ctx->iov_iter.iov_offset = bio->bi_iter.bi_bvec_done;
 #ifdef CONFIG_BLKSNAP_CHUNK_DIFF_BIO_SYNC
 	io_ctx->pos = (chunk->diff_ofs_sect << SECTOR_SHIFT) + chunk_ofs;
-	io_ctx->is_write = is_write;
 #else
 	io_ctx->iocb.ki_filp = chunk->diff_file;
-	io_ctx->iocb.ki_pos = (chunk->diff_ofs_sect << SECTOR_SHIFT) + chunk_ofs;
-	io_ctx->iocb.ki_flags = is_write ?
-		IOCB_DIRECT | IOCB_WRITE : IOCB_DIRECT;
+	io_ctx->iocb.ki_pos = (chunk->diff_ofs_sect << SECTOR_SHIFT) +
+								chunk_ofs;
+	io_ctx->iocb.ki_flags = IOCB_DIRECT;
+	if (is_write)
+		io_ctx->iocb.ki_flags |= IOCB_WRITE;
 	io_ctx->iocb.ki_ioprio = get_current_ioprio();
-	io_ctx->iocb.ki_complete = is_write ?
-		chunk_diff_bio_complete_write : chunk_diff_bio_complete_read;
+	io_ctx->iocb.ki_complete = is_write ? chunk_diff_bio_complete_write
+					    : chunk_diff_bio_complete_read;
 #endif
 	io_ctx->chunk = chunk;
 	io_ctx->bio = bio;
