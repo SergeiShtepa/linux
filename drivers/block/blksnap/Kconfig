@@ -12,7 +12,7 @@ config BLKSNAP
 	  tracking allows to create incremental or differential backups.
 
 config BLKSNAP_DIFF_BLKDEV
-	bool "Use an optimized algorithm to store difference on a block device.
+	bool "Use an optimized algorithm to store difference on a block device."
 	depends on BLKSNAP
 	default y
 	help
