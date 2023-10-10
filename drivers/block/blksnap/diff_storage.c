@@ -58,33 +58,28 @@ static void diff_storage_reallocate_work(struct work_struct *work)
 	} while (!stop);
 }
 
-static sector_t diff_storage_calculate_req_sect(struct diff_storage
-								*diff_storage)
+static bool diff_storage_calculate_requested(struct diff_storage *diff_storage)
 {
-	sector_t req_sect = 0;
+	bool ret = false;
 
 	spin_lock(&diff_storage->lock);
-
 	if (diff_storage->capacity < diff_storage->limit) {
 		diff_storage->requested += min(get_diff_storage_minimum(),
 				diff_storage->limit - diff_storage->capacity);
-		req_sect = diff_storage->requested;
+		ret = true;
 	}
-
 	pr_debug("The size of the difference storage was %llu MiB\n",
 		 diff_storage->capacity >> (20 - SECTOR_SHIFT));
 	pr_debug("The limit is %llu MiB\n",
 		 diff_storage->limit >> (20 - SECTOR_SHIFT));
-
 	spin_unlock(&diff_storage->lock);
 
-	return req_sect;
+	return ret;
 }
 
 static inline bool is_halffull(const sector_t sectors_left)
 {
-	return sectors_left <=
-		((get_diff_storage_minimum() >> 1) & ~(PAGE_SECTORS - 1));
+	return sectors_left <= (get_diff_storage_minimum() / 2);
 }
 
 static inline void check_halffull(struct diff_storage *diff_storage,
@@ -92,20 +87,20 @@ static inline void check_halffull(struct diff_storage *diff_storage,
 {
 	if (is_halffull(sectors_left) &&
 	    (atomic_inc_return(&diff_storage->low_space_flag) == 1)) {
-		sector_t req_sect;
 
-		req_sect = diff_storage_calculate_req_sect(diff_storage);
-		if (req_sect == 0) {
-			pr_info("The limit size of the difference storage has been reached\n");
-			atomic_inc(&diff_storage->overflow_flag);
-		} else {
-			pr_debug("Diff storage low free space. Requested: %llu sectors\n",
-				 req_sect);
-			if (diff_storage->file)
-				queue_work(system_wq, &diff_storage->reallocate_work);
-			else
-				pr_warn("Reallocating is allowed only for a regular file\n");
+#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
+		if (diff_storage->bdev) {
+			pr_warn("Reallocating is allowed only for a regular file\n");
+			return;
 		}
+#endif
+		if (!diff_storage_calculate_requested(diff_storage)) {
+			pr_info("The limit size of the difference storage has been reached\n");
+			return;
+		}
+
+		pr_debug("Diff storage low free space.\n");
+		queue_work(system_wq, &diff_storage->reallocate_work);
 	}
 }
 
@@ -234,12 +229,21 @@ int diff_storage_set_diff_storage(struct diff_storage *diff_storage,
 	if (is_halffull(diff_storage->requested)) {
 		sector_t req_sect;
 
-		req_sect = diff_storage_calculate_req_sect(diff_storage);
-		if (req_sect == 0) {
+		if (diff_storage->capacity == diff_storage->limit) {
 			pr_info("The limit size of the difference storage has been reached\n");
+			ret = 0;
+			goto fail_fput;
+		}
+		if (diff_storage->capacity > diff_storage->limit) {
+			pr_err("The limit size of the difference storage has been exceeded\n");
 			ret = -ENOSPC;
 			goto fail_fput;
 		}
+
+		diff_storage->requested += min(get_diff_storage_minimum(),
+				diff_storage->limit - diff_storage->capacity);
+		req_sect = diff_storage->requested;
+
 
 #if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
 		if (diff_storage->bdev) {
@@ -278,6 +282,12 @@ int diff_storage_alloc(struct diff_storage *diff_storage, sector_t count,
 		return -ENOSPC;
 
 	spin_lock(&diff_storage->lock);
+	if ((diff_storage->filled + count) > diff_storage->requested) {
+		atomic_inc(&diff_storage->overflow_flag);
+		spin_unlock(&diff_storage->lock);
+		return -ENOSPC;
+	}
+
 #if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
 	*bdev = diff_storage->bdev;
 #endif
@@ -285,11 +295,10 @@ int diff_storage_alloc(struct diff_storage *diff_storage, sector_t count,
 	*sector = diff_storage->filled;
 
 	diff_storage->filled += count;
-
 	sectors_left = diff_storage->requested - diff_storage->filled;
+
 	spin_unlock(&diff_storage->lock);
 
 	check_halffull(diff_storage, sectors_left);
-
 	return 0;
 }
