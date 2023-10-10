@@ -313,6 +313,11 @@ static struct miscdevice blksnap_ctrl_misc = {
 	.fops		= &blksnap_ctrl_fops,
 };
 
+static inline sector_t chunk_minimum_sectors(void )
+{
+	return (1ull << (chunk_minimum_shift - SECTOR_SHIFT));
+};
+
 static int __init parameters_init(void)
 {
 	pr_debug("tracking_block_minimum_shift: %d\n",
@@ -337,10 +342,25 @@ static int __init parameters_init(void)
 			 tracking_block_maximum_shift);
 	}
 
+	if (chunk_minimum_shift < PAGE_SHIFT) {
+		chunk_minimum_shift = PAGE_SHIFT;
+		pr_warn("fixed chunk_minimum_shift: %d\n",
+			 chunk_minimum_shift);
+	}
 	if (chunk_maximum_shift < chunk_minimum_shift) {
 		chunk_maximum_shift = chunk_minimum_shift;
 		pr_warn("fixed chunk_maximum_shift: %d\n",
 			 chunk_maximum_shift);
+	}
+	if (diff_storage_minimum < (chunk_minimum_sectors() * 2)) {
+		diff_storage_minimum = chunk_minimum_sectors() * 2;
+		pr_warn("fixed diff_storage_minimum: %d\n",
+			 diff_storage_minimum);
+	}
+	if (diff_storage_minimum & (chunk_minimum_sectors() - 1)) {
+		diff_storage_minimum &= ~(chunk_minimum_sectors() - 1);
+		pr_warn("fixed diff_storage_minimum: %d\n",
+			 diff_storage_minimum);
 	}
 
 	/*
