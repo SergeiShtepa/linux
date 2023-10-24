@@ -129,9 +129,7 @@ void chunk_diff_bio_tobdev(struct chunk *chunk, struct bio *bio);
 void chunk_store_tobdev(struct chunk *chunk);
 #endif
 int chunk_diff_bio(struct chunk *chunk, struct bio *bio);
-void chunk_origin_bio(struct chunk *chunk, struct bio *bio);
 void chunk_diff_write(struct chunk *chunk);
-//int chunk_diff_read(struct chunk *chunk);
 bool chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio);
 int chunk_load_and_postpone_io(struct chunk *chunk, struct bio **chunk_bio);
 void chunk_load_and_postpone_io_finish(struct list_head *chunks,

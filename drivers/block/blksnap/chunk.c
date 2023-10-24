@@ -303,8 +303,13 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 		if (chunk_left == 0)
 			break;
 
-		chunk_left -= iter_bvec.bv_len;
-		nbytes += iter_bvec.bv_len;
+		if (chunk_left > iter_bvec.bv_len) {
+			chunk_left -= iter_bvec.bv_len;
+			nbytes += iter_bvec.bv_len;
+		} else {
+			nbytes += chunk_left;
+			chunk_left = 0;
+		}
 		nr_segs++;
 	}
 	bio_bvec = __bvec_iter_bvec(bio->bi_io_vec, bio->bi_iter);
@@ -332,31 +337,6 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 	chunk_diff_bio_schedule(chunk->diff_area, io_ctx);
 
 	return 0;
-}
-
-/*
- * Redirects bio to the original block device.
- */
-void chunk_origin_bio(struct chunk *chunk, struct bio *bio)
-{
-	sector_t sector;
-	struct bio *new_bio;
-	struct block_device *bdev;
-
-	bdev = chunk->diff_area->orig_bdev;
-	sector = chunk_sector(chunk);
-
-	new_bio = chunk_alloc_clone(bdev, bio);
-	WARN_ON(!new_bio);
-
-	chunk_limit_iter(chunk, bio, sector, &new_bio->bi_iter);
-	new_bio->bi_end_io = chunk_clone_endio;
-	new_bio->bi_private = bio;
-
-	bio_advance(bio, new_bio->bi_iter.bi_size);
-	bio_inc_remaining(bio);
-
-	submit_bio_noacct(new_bio);
 }
 
 static inline struct chunk *get_chunk_from_cbio(struct chunk_bio *cbio)

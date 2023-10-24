@@ -556,7 +556,7 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 			/*
 			 * Read from original block device
 			 */
-			chunk_origin_bio(chunk, bio);
+			orig_clone_bio(diff_area, bio);
 			chunk_up(chunk);
 			return true;
 		}
