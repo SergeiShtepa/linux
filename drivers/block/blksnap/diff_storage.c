@@ -124,17 +124,15 @@ struct diff_storage *diff_storage_new(void)
 
 void diff_storage_free(struct kref *kref)
 {
-	struct diff_storage *diff_storage =
-		container_of(kref, struct diff_storage, kref);
+	struct diff_storage *diff_storage;
 
+	diff_storage = container_of(kref, struct diff_storage, kref);
 	flush_work(&diff_storage->reallocate_work);
-
 
 #if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
 	if (diff_storage->bdev)
 		blkdev_put(diff_storage->bdev, NULL);
 #endif
-
 	if (diff_storage->file)
 		fput(diff_storage->file);
 	event_queue_done(&diff_storage->event_queue);
@@ -152,7 +150,6 @@ static inline bool unsupported_flags(const unsigned int flags)
 		pr_err("Read and write access is required\n");
 		return true;
 	}
-
 	if (!(flags | O_EXCL)) {
 		pr_err("Exclusive access is required\n");
 		return true;
@@ -180,7 +177,8 @@ int diff_storage_set_diff_storage(struct diff_storage *diff_storage,
 	}
 
 	if (unsupported_flags(file->f_flags)) {
-		pr_err("Invalid flags 0x%x with which the file was opened\n", file->f_flags);
+		pr_err("Invalid flags 0x%x with which the file was opened\n",
+			file->f_flags);
 		ret = -EINVAL;
 		goto fail_fput;
 	}
@@ -243,7 +241,6 @@ int diff_storage_set_diff_storage(struct diff_storage *diff_storage,
 		diff_storage->requested += min(get_diff_storage_minimum(),
 				diff_storage->limit - diff_storage->capacity);
 		req_sect = diff_storage->requested;
-
 
 #if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
 		if (diff_storage->bdev) {

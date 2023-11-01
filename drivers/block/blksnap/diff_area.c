@@ -116,10 +116,10 @@ void diff_area_free(struct kref *kref)
 {
 	unsigned long inx = 0;
 	struct chunk *chunk;
-	struct diff_area *diff_area =
-		container_of(kref, struct diff_area, kref);
+	struct diff_area *diff_area;
 
 	might_sleep();
+	diff_area = container_of(kref, struct diff_area, kref);
 
 	flush_work(&diff_area->image_io_work);
 	flush_work(&diff_area->store_queue_work);
@@ -147,9 +147,8 @@ static inline bool diff_area_store_one(struct diff_area *diff_area)
 			break;
 		}
 		/*
-		 * If it is not possible to lock a chunk for writing,
-		 * then it is currently in use, and we try to clean up the
-		 * next chunk.
+		 * If it is not possible to lock a chunk for writing, then it is
+		 * currently in use, and we try to clean up the next chunk.
 		 */
 	}
 	if (!chunk)

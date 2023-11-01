@@ -23,8 +23,8 @@ static void cbt_map_calculate_block_size(struct cbt_map *cbt_map)
 
 	pr_debug("Device capacity %llu sectors\n", cbt_map->device_capacity);
 	/*
-	 * The size of the tracking block is calculated based on the size of the disk
-	 * so that the CBT table does not exceed a reasonable size.
+	 * The size of the tracking block is calculated based on the size of
+	 * the disk so that the CBT table does not exceed a reasonable size.
 	 */
 	count = count_by_shift(cbt_map->device_capacity, shift);
 	pr_debug("Blocks count %llu\n", count);
@@ -152,7 +152,8 @@ void cbt_map_switch(struct cbt_map *cbt_map)
 
 		pr_debug("CBT reset\n");
 	} else
-		memcpy(cbt_map->read_map, cbt_map->write_map, cbt_map->blk_count);
+		memcpy(cbt_map->read_map, cbt_map->write_map,
+		       cbt_map->blk_count);
 	spin_unlock(&cbt_map->locker);
 }
 

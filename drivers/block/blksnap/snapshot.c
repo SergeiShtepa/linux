@@ -21,8 +21,6 @@ static void snapshot_free(struct kref *kref)
 	struct snapshot *snapshot = container_of(kref, struct snapshot, kref);
 
 	pr_info("Release snapshot %pUb\n", &snapshot->id);
-
-
 	while (!list_empty(&snapshot->trackers)) {
 		struct tracker *tracker;
 
@@ -35,7 +33,6 @@ static void snapshot_free(struct kref *kref)
 
 	diff_storage_put(snapshot->diff_storage);
 	snapshot->diff_storage = NULL;
-
 	kfree(snapshot);
 }
 
@@ -95,7 +92,6 @@ void __exit snapshot_done(void)
 		snapshot_put(snapshot);
 	} while (snapshot);
 }
-
 
 int snapshot_create(struct blksnap_snapshot_create *arg)
 {

@@ -160,6 +160,7 @@ static int ctl_cbtmap(struct tracker *tracker, __u8 __user *buf, __u32 *plen)
 	*plen = 0;
 	return 0;
 }
+
 static int ctl_cbtdirty(struct tracker *tracker, __u8 __user *buf, __u32 *plen)
 {
 	struct cbt_map *cbt_map = tracker->cbt_map;
@@ -190,6 +191,7 @@ static int ctl_cbtdirty(struct tracker *tracker, __u8 __user *buf, __u32 *plen)
 	*plen = 0;
 	return 0;
 }
+
 static int ctl_snapshotadd(struct tracker *tracker,
 			   __u8 __user *buf, __u32 *plen)
 {
@@ -215,14 +217,14 @@ static int ctl_snapshotinfo(struct tracker *tracker,
 	if (copy_from_user(&arg, buf, sizeof(arg)))
 		return -ENODATA;
 
-
 	if (tracker->diff_area && diff_area_is_corrupted(tracker->diff_area))
 		arg.error_code = tracker->diff_area->error_code;
 	else
 		arg.error_code = 0;
 
 	if (tracker->snap_disk)
-		strscpy(arg.image, tracker->snap_disk->disk_name, IMAGE_DISK_NAME_LEN);
+		strscpy(arg.image, tracker->snap_disk->disk_name,
+			IMAGE_DISK_NAME_LEN);
 
 	if (copy_to_user(buf, &arg, sizeof(arg)))
 		return -ENODATA;

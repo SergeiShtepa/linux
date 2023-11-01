@@ -220,15 +220,17 @@ void chunk_diff_bio_execute(struct chunk_io_ctx *io_ctx)
 #else
 static void chunk_diff_bio_complete_read(struct kiocb *iocb, long ret)
 {
-	struct chunk_io_ctx *io_ctx = container_of(iocb, struct chunk_io_ctx, iocb);
+	struct chunk_io_ctx *io_ctx;
 
+	io_ctx = container_of(iocb, struct chunk_io_ctx, iocb);
 	chunk_io_ctx_free(io_ctx, ret);
 }
 
 static void chunk_diff_bio_complete_write(struct kiocb *iocb, long ret)
 {
-	struct chunk_io_ctx *io_ctx = container_of(iocb, struct chunk_io_ctx, iocb);
+	struct chunk_io_ctx *io_ctx;
 
+	io_ctx = container_of(iocb, struct chunk_io_ctx, iocb);
 	file_end_write(io_ctx->iocb.ki_filp);
 	chunk_io_ctx_free(io_ctx, ret);
 }
@@ -297,7 +299,8 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 	if (!io_ctx)
 		return -ENOMEM;
 
-	chunk_ofs = (bio->bi_iter.bi_sector - chunk_sector(chunk)) << SECTOR_SHIFT;
+	chunk_ofs = (bio->bi_iter.bi_sector - chunk_sector(chunk))
+			<< SECTOR_SHIFT;
 	chunk_left = (chunk->sector_count << SECTOR_SHIFT) - chunk_ofs;
 	bio_for_each_segment(iter_bvec, bio, iter) {
 		if (chunk_left == 0)
@@ -524,7 +527,8 @@ void chunk_diff_write(struct chunk *chunk)
 		len = vfs_iter_write(chunk->diff_file, &iov_iter, &pos, 0);
 		if (len < 0) {
 			err = (int)len;
-			pr_debug("vfs_iter_write complete with error code %zd", len);
+			pr_debug("vfs_iter_write complete with error code %zd",
+				 len);
 			break;
 		}
 		length -= len;
