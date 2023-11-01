@@ -222,7 +222,7 @@ static int ctl_snapshotinfo(struct tracker *tracker,
 		arg.error_code = 0;
 
 	if (tracker->snap_disk)
-		strncpy(arg.image, tracker->snap_disk->disk_name, IMAGE_DISK_NAME_LEN);
+		strscpy(arg.image, tracker->snap_disk->disk_name, IMAGE_DISK_NAME_LEN);
 
 	if (copy_to_user(buf, &arg, sizeof(arg)))
 		return -ENODATA;

@@ -246,7 +246,7 @@ static void diff_area_image_io_work(struct work_struct *work)
 
 	current->blk_filter = &diff_area->tracker->filter;
 	old_nofs = memalloc_nofs_save();
-	while((io_ctx = chunk_io_ctx_take(diff_area)))
+	while ((io_ctx = chunk_io_ctx_take(diff_area)))
 		chunk_diff_bio_execute(io_ctx);
 	memalloc_nofs_restore(old_nofs);
 	current->blk_filter = prev_filter;

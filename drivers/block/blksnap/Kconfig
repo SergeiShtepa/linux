@@ -27,4 +27,5 @@ config BLKSNAP_CHUNK_DIFF_BIO_SYNC
 	default n
 	help
 	  Theoretical asynchronous algorithm for processing I/O units should
-	  have higher performance.
+	  have higher performance. However, an attempt to confirm this on test
+	  runs did not bring any results.

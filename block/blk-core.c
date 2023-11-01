@@ -603,7 +603,7 @@ static void __submit_bio(struct bio *bio)
 	    bio->bi_bdev->bd_filter != current->blk_filter) {
 		struct blkfilter *prev = current->blk_filter;
 
-	    	current->blk_filter = bio->bi_bdev->bd_filter;
+		current->blk_filter = bio->bi_bdev->bd_filter;
 		skip_bio = bio->bi_bdev->bd_filter->ops->submit_bio(bio);
 		current->blk_filter = prev;
 	}

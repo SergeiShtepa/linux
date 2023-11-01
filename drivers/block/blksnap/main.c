@@ -313,7 +313,7 @@ static struct miscdevice blksnap_ctrl_misc = {
 	.fops		= &blksnap_ctrl_fops,
 };
 
-static inline sector_t chunk_minimum_sectors(void )
+static inline sector_t chunk_minimum_sectors(void)
 {
 	return (1ull << (chunk_minimum_shift - SECTOR_SHIFT));
 };
