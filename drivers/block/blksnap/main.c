@@ -132,7 +132,14 @@ unsigned int get_chunk_maximum_shift(void)
 
 unsigned long get_chunk_maximum_count(void)
 {
-	return (1ul << chunk_maximum_count_shift);
+	/*
+	 * The XArray is used to store chunks. And 'unsigned long' is used as
+	 * chunk number parameter. So, The number of chunks cannot exceed the
+	 * limits of ULONG_MAX.
+	 */
+	if ((chunk_maximum_count_shift >> 3) < sizeof(unsigned long))
+		return (1ul << chunk_maximum_count_shift);
+	return ULONG_MAX;
 }
 
 unsigned int get_chunk_maximum_in_queue(void)
@@ -362,18 +369,6 @@ static int __init parameters_init(void)
 		pr_warn("fixed diff_storage_minimum: %d\n",
 			 diff_storage_minimum);
 	}
-
-	/*
-	 * The XArray is used to store chunks. And 'unsigned long' is used as
-	 * chunk number parameter. So, The number of chunks cannot exceed the
-	 * limits of ULONG_MAX.
-	 */
-	if (sizeof(unsigned long) < 4)
-		chunk_maximum_count_shift = min(16u, chunk_maximum_count_shift);
-	else if (sizeof(unsigned long) == 4)
-		chunk_maximum_count_shift = min(32u, chunk_maximum_count_shift);
-	else if (sizeof(unsigned long) >= 8)
-		chunk_maximum_count_shift = min(64u, chunk_maximum_count_shift);
 
 	return 0;
 }
