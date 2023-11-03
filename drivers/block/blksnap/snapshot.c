@@ -237,7 +237,9 @@ static int snapshot_take_trackers(struct snapshot *snapshot)
 	if (ret)
 		goto fail;
 
-	/* Try to flush and freeze file system on each original block device. */
+	/*
+	 * Try to flush and freeze file system on each original block device.
+	 */
 	list_for_each_entry(tracker, &snapshot->trackers, link) {
 		if (freeze_bdev(tracker->diff_area->orig_bdev))
 			pr_warn("Failed to freeze device [%u:%u]\n",
@@ -249,8 +251,8 @@ static int snapshot_take_trackers(struct snapshot *snapshot)
 	}
 
 	/*
-	 * Take snapshot - switch CBT tables and enable COW logic
-	 * for each tracker.
+	 * Take snapshot - switch CBT tables and enable COW logic for each
+	 * tracker.
 	 */
 	list_for_each_entry(tracker, &snapshot->trackers, link) {
 		ret = tracker_take_snapshot(tracker);
@@ -264,7 +266,9 @@ static int snapshot_take_trackers(struct snapshot *snapshot)
 	if (!ret)
 		snapshot->is_taken = true;
 
-	/* Thaw file systems on original block devices. */
+	/*
+	 * Thaw file systems on original block devices.
+	 */
 	list_for_each_entry(tracker, &snapshot->trackers, link) {
 		if (thaw_bdev(tracker->diff_area->orig_bdev))
 			pr_warn("Failed to thaw device [%u:%u]\n",
@@ -287,8 +291,8 @@ fail:
 }
 
 /*
- * Sometimes a snapshot is in the state of corrupt immediately
- * after it is taken.
+ * Sometimes a snapshot is in the state of corrupt immediately after it is
+ * taken.
  */
 static int snapshot_check_trackers(struct snapshot *snapshot)
 {

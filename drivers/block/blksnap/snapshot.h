@@ -34,11 +34,10 @@ struct diff_storage;
  *	List of block device trackers.
  *
  * A snapshot corresponds to a single backup session and provides snapshot
- * images for multiple block devices. Several backup sessions can be
- * performed at the same time, which means that several snapshots can
- * exist at the same time. However, the original block device can only
- * belong to one snapshot. Creating multiple snapshots from the same block
- * device is not allowed.
+ * images for multiple block devices. Several backup sessions can be performed
+ * at the same time, which means that several snapshots can exist at the same
+ * time. However, the original block device can only belong to one snapshot.
+ * Creating multiple snapshots from the same block device is not allowed.
  */
 struct snapshot {
 	struct list_head link;

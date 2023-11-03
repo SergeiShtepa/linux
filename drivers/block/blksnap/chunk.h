@@ -70,12 +70,14 @@ enum chunk_st {
  * with when executing the copy-on-write algorithm and when performing I/O
  * to snapshot images.
  *
- * If the data of the chunk has been changed or has just been read, then
- * the chunk gets into store queue.
+ * If the data of the chunk has been changed, then the chunk gets into store
+ * queue. The queue provides caching of chunks. Saving chunks to the storage is
+ * performed in a separate working thread. This ensures the best system
+ * performance.
  *
  * The semaphore is blocked for writing if there is no actual data in the
  * buffer, since a block of data is being read from the original device or
- * from a diff storage. If data is being read from or written to the
+ * from a difference storage. If data is being read from or written to the
  * diff_buffer, the semaphore must be locked.
  */
 struct chunk {

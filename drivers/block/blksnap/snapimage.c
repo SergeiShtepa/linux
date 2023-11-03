@@ -29,6 +29,7 @@ static void snapimage_submit_bio(struct bio *bio)
 	bool is_success = true;
 
 	/*
+	 * We can use the diff_area here without fear that it will be released.
 	 * The diff_area is not blocked from releasing now, because
 	 * snapimage_free() is calling before diff_area_put() in
 	 * tracker_release_snapshot().
@@ -39,8 +40,9 @@ static void snapimage_submit_bio(struct bio *bio)
 	}
 
 	/*
-	 * The change tracking table should represent that the snapshot data
-	 * has been changed.
+	 * The change tracking table should indicate that the image block device
+	 * is different from the original device. At the next snapshot, such
+	 * blocks must be inevitably reread.
 	 */
 	if (op_is_write(bio_op(bio)))
 		cbt_map_set_both(tracker->cbt_map, bio->bi_iter.bi_sector,

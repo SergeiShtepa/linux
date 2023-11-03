@@ -13,7 +13,8 @@ struct blksnap_sectors;
  * @kref:
  *	The reference counter.
  * @lock:
- *	Spinlock allows to guarantee the safety of linked lists.
+ *	Spinlock allows to safely change structure fields in a multithreaded
+ *	environment.
  * @dev_id:
  *	ID of the block device on which the difference storage file is located.
  * @bdev:
@@ -39,11 +40,17 @@ struct blksnap_sectors;
  *	owner can notify its snapshot about events like snapshot overflow,
  *	low free space and snapshot terminated.
  *
- * The difference storage manages the regions of block devices that are used
+ * The difference storage manages the block device or file that are used
  * to store the data of the original block devices in the snapshot.
  * The difference storage is created one per snapshot and is used to store
- * data from all the original snapshot block devices. At the same time, the
- * difference storage itself can contain regions on various block devices.
+ * data from all block devices.
+ *
+ * The difference storage file has the ability to increase while holding the
+ * snapshot as needed within the specified limits. To do this, vfs_fallocate()
+ * is called in the working thread.
+ *
+ * The event queue allows to inform the user land about changes in the state
+ * of the difference storage.
  */
 struct diff_storage {
 	struct kref kref;

@@ -435,7 +435,9 @@ fail:
 		bio_endio(bio);
 		return true;
 	}
-	/* In any other case, the processing of the I/O unit continues.	*/
+	/*
+	 * In any other case, the processing of the I/O unit continues.
+	 */
 	return false;
 }
 
@@ -498,8 +500,7 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 		}
 
 		/*
-		 * To process a write bio, we need to allocate a new
-		 * chunk.
+		 * To process a write bio, we need to allocate a new chunk.
 		 */
 		chunk = chunk_alloc(diff_area, nr);
 		WARN_ON_ONCE(!chunk);

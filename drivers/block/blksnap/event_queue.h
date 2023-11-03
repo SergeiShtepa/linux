@@ -20,12 +20,11 @@
  * @data_size:
  *	The number of bytes in the event data array.
  * @data:
- *	An array of event data. The allowed size of the array is limited
- *      so that the size of the entire structure does not exceed PAGE_SIZE.
+ *	An array of event data.
  *
  * Events can be different, so they contain different data. The size of the
  * data array is not defined exactly, but it has limitations. The size of
- * the event structure may exceed the PAGE_SIZE.
+ * the event structure is limited by the PAGE_SIZE (4096 bytes).
  */
 struct event {
 	struct list_head link;

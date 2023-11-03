@@ -27,7 +27,7 @@ struct diff_area;
  * @link:
  *	List header. Allows to combine trackers into a list in a snapshot.
  * @kref:
- *	The link counter allows to control the lifetime of the tracker.
+ *	The reference counter allows to control the lifetime of the tracker.
  * @dev_id:
  *	Original block device ID.
  * @snapshot_is_taken:
@@ -40,9 +40,9 @@ struct diff_area;
  * @snap_disk:
  *	Snapshot image disk.
  *
- * The goal of the tracker is to handle I/O unit. The tracker detectes
- * the range of sectors that will change and transmits them to the CBT map
- * and to the difference area.
+ * The goal of the tracker is to handle I/O unit. The tracker detectes the range
+ * of sectors that will change and transmits them to the CBT map and to the
+ * difference area.
  */
 struct tracker {
 	struct blkfilter filter;
