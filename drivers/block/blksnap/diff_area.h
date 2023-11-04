@@ -92,7 +92,7 @@ struct tracker;
  * writing from the snapshot image is also performed using &struct diff_area.
  *
  * The map of chunks is a xarray. It has a capacity limit. This can be
- * especially noticeable on 32-bit systems, . The maximum number of chunks for
+ * especially noticeable on 32-bit systems. The maximum number of chunks for
  * 32-bit systems cannot be equal or more than 2^32.
  *
  * For example, for a 256 TiB disk and a chunk size of 65536 bytes, the number
