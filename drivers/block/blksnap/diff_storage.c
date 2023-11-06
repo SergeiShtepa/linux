@@ -15,47 +15,36 @@
 #include "diff_storage.h"
 #include "params.h"
 
-static inline int diff_storage_reallocate(struct diff_storage *diff_storage,
-					  sector_t req_sect)
-{
-	int ret;
-
-	ret = vfs_fallocate(diff_storage->file, 0, 0,
-			     (loff_t)(req_sect << SECTOR_SHIFT));
-	if (ret)
-		pr_err("Failed to fallocate difference storage file\n");
-
-	return ret;
-}
-
 static void diff_storage_reallocate_work(struct work_struct *work)
 {
 	int ret;
 	sector_t req_sect;
 	struct diff_storage *diff_storage = container_of(
 		work, struct diff_storage, reallocate_work);
-	bool stop = false;
+	bool complete = false;
 
 	do {
 		spin_lock(&diff_storage->lock);
 		req_sect = diff_storage->requested;
 		spin_unlock(&diff_storage->lock);
 
-		ret = diff_storage_reallocate(diff_storage, req_sect);
-		if (ret)
-			return;
+		ret = vfs_fallocate(diff_storage->file, 0, 0,
+				    (loff_t)(req_sect << SECTOR_SHIFT));
+		if (ret) {
+			pr_err("Failed to fallocate difference storage file\n");
+			break;
+		}
 
 		spin_lock(&diff_storage->lock);
 		diff_storage->capacity = req_sect;
-		if (diff_storage->capacity >= diff_storage->requested) {
+		complete = (diff_storage->capacity >= diff_storage->requested);
+		if (complete)
 			atomic_set(&diff_storage->low_space_flag, 0);
-			stop = true;
-		}
 		spin_unlock(&diff_storage->lock);
 
 		pr_debug("Diff storage reallocate. Capacity: %llu sectors\n",
 			 req_sect);
-	} while (!stop);
+	} while (!complete);
 }
 
 static bool diff_storage_calculate_requested(struct diff_storage *diff_storage)
@@ -253,13 +242,14 @@ int diff_storage_set_diff_storage(struct diff_storage *diff_storage,
 		pr_debug("Difference storage is not large enough\n");
 		pr_debug("Requested: %llu sectors\n", req_sect);
 
-		ret = diff_storage_reallocate(diff_storage, req_sect);
+		ret = vfs_fallocate(diff_storage->file, 0, 0,
+				    (loff_t)(req_sect << SECTOR_SHIFT));
 		if (ret) {
-			pr_err("The difference storage is not large enough\n");
+			pr_err("Failed to fallocate difference storage file\n");
+			pr_warn("The difference storage is not large enough\n");
 			goto fail_fput;
 		}
 		diff_storage->capacity = req_sect;
-
 	}
 fail_fput:
 	fput(file);
