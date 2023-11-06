@@ -25,6 +25,8 @@ struct blksnap_sectors;
  *	A pointer to the file that was selected for the difference storage.
  * @capacity:
  *	Total amount of available difference storage space.
+ * @limit:
+ *	The limit to which the difference storage can be allowed to grow.
  * @filled:
  *	The number of sectors already filled in.
  * @requested:
@@ -35,10 +37,10 @@ struct blksnap_sectors;
  * @overflow_flag:
  *	The request for a free region failed due to the absence of free
  *	regions in the difference storage.
+ * @reallocate_work:
+ *	The working thread in which the difference storage file is growing.
  * @event_queue:
- *	A queue of events to pass events to user space. Diff storage and its
- *	owner can notify its snapshot about events like snapshot overflow,
- *	low free space and snapshot terminated.
+ *	A queue of events to pass events to user space.
  *
  * The difference storage manages the block device or file that are used
  * to store the data of the original block devices in the snapshot.
@@ -46,8 +48,13 @@ struct blksnap_sectors;
  * data from all block devices.
  *
  * The difference storage file has the ability to increase while holding the
- * snapshot as needed within the specified limits. To do this, vfs_fallocate()
- * is called in the working thread.
+ * snapshot as needed within the specified limits. This is done using the
+ * function vfs_fallocate().
+ *
+ * Changing the file size leads to a change in the file metadata in the file
+ * system, which leads to the generation of I/O units for the block device.
+ * Using a separate working thread ensures that metadata changes will be
+ * handled and correctly processed by the block-level filters.
  *
  * The event queue allows to inform the user land about changes in the state
  * of the difference storage.
