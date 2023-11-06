@@ -10,13 +10,13 @@ Introduction
 At first glance, there is no novelty in the idea of creating snapshots for
 block devices. The Linux kernel already has mechanisms for creating snapshots.
 Device Mapper includes dm-snap, which allows to create snapshots of block
-devices. BTRFS supports snapshots at the file system level. However, both
-of these options have flaws that do not allow to use them as a universal
-tool for creating backups.
+devices. BTRFS supports snapshots at the filesystem level. However, both of
+these options have flaws that do not allow to use them as a universal tool for
+creating backups.
 
 The main properties that a backup tool should have are:
 
-- Simplicity and versatility of use
+- Simplicity and universality of use
 - Reliability
 - Minimal consumption of system resources during backup
 - Minimal time required for recovery or replication of the entire system
@@ -51,21 +51,21 @@ Snapshot at the block device level
 A snapshot at the block device level allows to simplify the backup algorithm
 and reduce consumption of system resources. It also allows to perform linear
 reading of disk space directly, which allows to achieve maximum reading speed
-with minimal use of processor time. At the same time, the versatility of
+with minimal use of processor time. At the same time, the universality of
 creating snapshots for any block device is achieved, regardless of the file
 system located on it. The exceptions are BTRFS, ZFS and cluster file systems.
 
 Dynamic allocation of storage space for differences
 ---------------------------------------------------
 
-To store differences, the module does not require a pre-reserved block
-device range. A range of sectors can be allocated on any block device
-immediately before creating a snapshot in individual files on the file
-system. In addition, the size of the difference storage can be increased
-after the snapshot is created by adding new sector ranges on block devices.
-Sector ranges can be allocated on any block devices of the system, including
-those on which the snapshot was created. A shared difference storage for
-all images of snapshot block devices allows to optimize the use of disk space.
+To store differences, the module does not require a pre-reserved space on
+filesystem. The space for storing differences can be allocated in file in any
+filesystem. In addition, the size of the difference storage can be increased
+after the snapshot is created, but only for a filesystem that supports
+fallocate. A shared difference storage for all images of snapshot block devices
+allows to optimize the use of storage space. However, there is one limitation.
+A snapshot cannot be taken from a block device on which the difference storage
+is located.
 
 Snapshot overflow resistance
 ----------------------------
@@ -104,8 +104,8 @@ from the difference storage.
 Change tracking
 ---------------
 
-A change tracker map is created for each block device. One byte
-of this map corresponds to one block. The block size is set by the
+A change tracker map is created for each block device. One byte of this map
+corresponds to one block. The block size is set by the
 ``tracking_block_minimum_shift`` and ``tracking_block_maximum_count``
 module parameters. The ``tracking_block_minimum_shift`` parameter limits
 the minimum block size for tracking, while ``tracking_block_maximum_count``
@@ -157,25 +157,25 @@ snapshot. The size of the chunk must be a power of two. The module parameter
 size reaches the allowable limit, the number of chunks will exceed the
 ``chunk_maximum_count`` parameter.
 
-One chunk is described by the ``struct chunk`` structure. An array of structures
+One chunk is described by the ``struct chunk`` structure. A map of structures
 is created for each block device. The structure contains all the necessary
 information to copy the chunks data from the original block device to the
 difference storage. This information allows to describe the snapshot image.
 A semaphore is located in the structure, which allows synchronization of threads
 accessing the chunk.
 
-The block level has a feature. If a read I/O unit was sent, and a write I/O
-unit was sent after it, then a write can be performed first, and only then
-a read. Therefore, the copy-on-write algorithm is executed synchronously.
-If a write request is handled, the execution of this I/O unit will be
-delayed until the overwritten chunks are copied to the difference storage.
-But if, when handling a write I/O unit, it turns out that the recorded range
-of sectors has already been copied to the difference storage, then the I/O
-unit is simply passed.
+The block level in Linux has a feature. If a read I/O unit was sent, and a
+write I/O unit was sent after it, then a write can be performed first, and only
+then a read. Therefore, the copy-on-write algorithm is executed synchronously.
+If the write request is handled, the execution of this I/O unit will be delayed
+until the overwritten chunks are read from the original device for later
+storing to the difference store. But if, when handling a write I/O unit, it
+turns out that the written range of sectors has already been prepared for
+storing to the difference storage, then the I/O unit is simply passed.
 
-This algorithm allows to efficiently perform backups of systems that run
-Round Robin Database. Such databases can be overwritten several times during
-the system backup. Of course, the value of a backup of the RRD monitoring
+This algorithm makes it possible to efficiently perform backup even systems
+with a Round-Robin databases. Such databases can be overwritten several times
+during the system backup. Of course, the value of a backup of the RRD monitoring
 system data can be questioned. However, it is often a task to make a backup
 of the entire enterprise infrastructure in order to restore or replicate it
 entirely in case of problems.
@@ -184,7 +184,7 @@ There is also a flaw in the algorithm. When overwriting at least one sector,
 an entire chunk is copied. Thus, a situation of rapid filling of the difference
 storage when writing data to a block device in small portions in random order
 is possible. This situation is possible in case of strong fragmentation of
-data on the file system. But it must be borne in mind that with such data
+data on the filesystem. But it must be borne in mind that with such data
 fragmentation, performance of systems usually degrades greatly. So, this
 problem does not occur on real servers, although it can easily be created
 by artificial tests.
@@ -192,41 +192,48 @@ by artificial tests.
 Difference storage
 ------------------
 
-The difference storage is a pool of disk space areas, and it is shared with
-all block devices in the snapshot. Therefore, there is no need to divide
-the difference storage area between block devices, and the difference storage
-itself can be located on different block devices.
+The difference storage can be a block device or it can be a file on a
+filesystem. Using a block device allows to achieve slightly higher performance,
+but in this case, the block device is used by the kernel module exclusively.
+Usually the disk space is marked up so that there is no available free space
+for backup purposes. Using a file allows to place the difference storage on a
+filesystem.
 
-There is no need to allocate a large disk space immediately before creating
-a snapshot. Even while the snapshot is being held, the difference storage
-can be expanded. It is enough to have free space on the file system.
+The difference storage can be expanded already while the snapshot is being held,
+but only if the filesystem supports fallocate(). If the free space in the
+difference storage remains less than half of the value of the module parameter
+``diff_storage_minimum``, then the kernel module can expand the difference
+storage  file within the specified limits. This limit is set when creating a
+snapshot.
 
-Areas of disk space can be allocated on the file system using fallocate(),
-and the file location can be requested using Fiemap Ioctl or Fibmap Ioctl.
-Unfortunately, not all file systems support these mechanisms, but the most
-common XFS, EXT4 and BTRFS file systems support it. BTRFS requires additional
-conversion of virtual offsets to physical ones.
-
-While holding the snapshot, the user process can poll the status of the module.
-When free space in the difference storage is reduced to a threshold value, the
-module generates an event about it. The user process can prepare a new area
-and pass it to the module to expand the difference storage. The threshold
-value is determined as half of the value of the ``diff_storage_minimum``
-module parameter.
-
-If free space in the difference storage runs out, an event is generated about
-the overflow of the snapshot. Such a snapshot is considered corrupted, and
-read I/O units to snapshot images will be terminated with an error code.
-The difference storage stores outdated data required for snapshot images,
-so when the snapshot is overflowed, the backup process is interrupted,
+If free space in the difference storage runs out, an event to user land is
+generated about the overflow of the snapshot. Such a snapshot is considered
+corrupted, and read I/O units to snapshot images will be terminated with an
+error code. The difference storage stores outdated data required for snapshot
+images, so when the snapshot is overflowed, the backup process is interrupted,
 but the system maintains its operability without data loss.
+
+The difference storage has a limitation. The device cannot be added to the
+snapshot where the difference storage is located. In this case, the difference
+storage can be located in virtual memory, which consists of RAM and a swap
+partition (or file). To do this, it is enough to use a file in /dev/shm, or a
+new tmpfs filesystem can be created for this purpose. Obviously, this variant
+can be useful if the system has a lot of RAM or a large swap. The good news is
+that the modern Linux kernel allows to increase the size of the swap file "on
+the fly" without changing the system configuration.
+
+A regular file or a block device file for the difference storage must be opened
+with the O_EXCL flag. If an unnamed file with the O_TMPFILE flag is created,
+then such a file will be automatically released when the snapshot is destroyed.
+In addition, the use of an unnamed temporary file ensures that no one can open
+this file and read its contents.
 
 Performing I/O for a snapshot image
 -----------------------------------
 
 To read snapshot data, when taking a snapshot, block devices of snapshot images
 are created. The snapshot image block devices support the write operation.
-This allows to perform additional data preparation on the file system before
+This allows to perform additional data preparation on the filesystem before
 creating a backup.
 
 To process the I/O unit, clones of the I/O unit are created, which redirect
@@ -318,8 +325,8 @@ commands with usage description, see ``blksnap --help`` command. The ``blksnap
 parameters of each command call. This option may be convenient when creating
 proprietary software, as it allows not to compile with the open source code.
 At the same time, the blksnap tool can be used for creating backup scripts.
-For example, rsync can be called to synchronize files on the file system of
-the mounted snapshot image and files in the archive on a file system that
+For example, rsync can be called to synchronize files on the filesystem of
+the mounted snapshot image and files in the archive on a filesystem that
 supports compression.
 
 Tests
