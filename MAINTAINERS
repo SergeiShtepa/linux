@@ -3593,6 +3593,12 @@ F:	block/blk-filter.c
 F:	include/linux/blk-filter.h
 F:	include/uapi/linux/blk-filter.h
 
+BLOCK DEVICE SNAPSHOTS MODULE
+M:	Sergei Shtepa <sergei.shtepa@veeam.com>
+L:	linux-block@vger.kernel.org
+S:	Supported
+F:	Documentation/block/blksnap.rst
+
 BLOCK LAYER
 M:	Jens Axboe <axboe@kernel.dk>
 L:	linux-block@vger.kernel.org
