@@ -149,6 +149,13 @@ int snapshot_add_device(const uuid_t *id, struct tracker *tracker)
 	int ret = 0;
 	struct snapshot *snapshot = NULL;
 
+#ifdef CONFIG_BLK_INLINE_ENCRYPTION
+	if (tracker->orig_bdev->bd_queue->crypto_profile) {
+		pr_err("blksnap is not compatible with block devices with 'inline encryption' feature\n");
+		ret = -EPERM;
+		goto out_up;
+	}
+#endif
 	snapshot = snapshot_get_by_id(id);
 	if (!snapshot)
 		return -ESRCH;
