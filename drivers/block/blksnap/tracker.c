@@ -57,6 +57,20 @@ static bool tracker_submit_bio(struct bio *bio)
 	if (diff_area_is_corrupted(tracker->diff_area))
 		return false;
 
+#ifdef CONFIG_BLK_INLINE_ENCRYPTION
+	if (bio->bi_crypt_context) {
+		pr_err_once("Hardware inline encryption is not supported\n");
+		diff_area_set_corrupted(tracker->diff_area, -EPERM);
+		return false;
+	}
+#endif
+#ifdef CONFIG_BLK_DEV_INTEGRITY
+	if (bio->bi_integrity) {
+		pr_err_once("Data integrity is not supported\n");
+		diff_area_set_corrupted(tracker->diff_area, -EPERM);
+		return false;
+	}
+#endif
 	return diff_area_cow(bio, tracker->diff_area, &copy_iter);
 }
 

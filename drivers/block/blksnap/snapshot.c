@@ -149,6 +149,23 @@ int snapshot_add_device(const uuid_t *id, struct tracker *tracker)
 	int ret = 0;
 	struct snapshot *snapshot = NULL;
 
+#ifdef CONFIG_BLK_DEV_INTEGRITY
+	if (tracker->orig_bdev->bd_disk->queue->integrity.profile) {
+		pr_err("Blksnap is not compatible with data integrity\n");
+		ret = -EPERM;
+		goto out_up;
+	} else
+		pr_debug("Data integrity not found\n");
+#endif
+
+#ifdef CONFIG_BLK_INLINE_ENCRYPTION
+	if (tracker->orig_bdev->bd_disk->queue->crypto_profile) {
+		pr_err("Blksnap is not compatible with hardware inline encryption\n");
+		ret = -EPERM;
+		goto out_up;
+	} else
+		pr_debug("Inline encryption not found\n");
+#endif
 	snapshot = snapshot_get_by_id(id);
 	if (!snapshot)
 		return -ESRCH;
