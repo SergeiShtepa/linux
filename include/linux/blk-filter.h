@@ -4,9 +4,8 @@
 #define _LINUX_BLK_FILTER_H
 
 #include <uapi/linux/blk-filter.h>
+#include <linux/bio.h>
 
-struct bio;
-struct block_device;
 struct blkfilter_operations;
 
 /**
@@ -47,5 +46,23 @@ struct blkfilter_operations {
 
 int blkfilter_register(struct blkfilter_operations *ops);
 void blkfilter_unregister(struct blkfilter_operations *ops);
+
+static inline bool blkfilter_bio(struct bio *bio)
+{
+	bool skip_bio = false;
+
+	if (bio->bi_bdev->bd_filter &&
+	    bio->bi_bdev->bd_filter != current->blk_filter) {
+		struct blkfilter *prev = current->blk_filter;
+
+		current->blk_filter = bio->bi_bdev->bd_filter;
+		skip_bio = bio->bi_bdev->bd_filter->ops->submit_bio(bio);
+		current->blk_filter = prev;
+	}
+
+	return skip_bio;
+};
+
+void blkfilter_resubmit_bio(struct bio *bio, struct blkfilter *flt);
 
 #endif /* _UAPI_LINUX_BLK_FILTER_H */

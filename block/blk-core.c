@@ -593,39 +593,22 @@ static inline blk_status_t blk_check_zone_append(struct request_queue *q,
 
 static void __submit_bio(struct bio *bio)
 {
-	struct request_queue *q = bdev_get_queue(bio->bi_bdev);
-	bool skip_bio = false;
-
-	if (unlikely(bio_queue_enter(bio)))
-		return;
-
-	if (bio->bi_bdev->bd_filter &&
-	    bio->bi_bdev->bd_filter != current->blk_filter) {
-		struct blkfilter *prev = current->blk_filter;
-
-		current->blk_filter = bio->bi_bdev->bd_filter;
-		skip_bio = bio->bi_bdev->bd_filter->ops->submit_bio(bio);
-		current->blk_filter = prev;
-	}
-
-	blk_queue_exit(q);
-	if (skip_bio)
-		return;
+	struct gendisk *disk;
 
 	if (unlikely(!blk_crypto_bio_prep(&bio)))
 		return;
 
-	if (!bio->bi_bdev->bd_has_submit_bio) {
-		blk_mq_submit_bio(bio);
+	if (unlikely(bio_queue_enter(bio)))
 		return;
-	}
 
-	if (likely(bio_queue_enter(bio) == 0)) {
-		struct gendisk *disk = bio->bi_bdev->bd_disk;
-
-		disk->fops->submit_bio(bio);
-		blk_queue_exit(disk->queue);
+	disk = bio->bi_bdev->bd_disk;
+	if (!blkfilter_bio(bio)) {
+		if (!bio->bi_bdev->bd_has_submit_bio)
+			blk_mq_submit_bio(bio);
+		else
+			disk->fops->submit_bio(bio);
 	}
+	blk_queue_exit(disk->queue);
 }
 
 /*
@@ -705,14 +688,30 @@ static void __submit_bio_noacct_mq(struct bio *bio)
 }
 
 /**
- * submit_bio_noacct_nocheck - re-submit a bio to the block device layer for I/O
- *	from block device filter.
+ * submit_bio_noacct_nocheck_resubmit - re-submit a bio to the block device
+ *	layer for I/O from block device filter.
  * @bio:  The bio describing the location in memory and on the device.
  *
  * This is a version of submit_bio() that shall only be used for I/O that is
  * resubmitted to lower level by block device filters.  All file  systems and
  * other upper level users of the block layer should use submit_bio() instead.
  */
+void submit_bio_noacct_nocheck_resubmit(struct bio *bio)
+{
+	/*
+	 * We only want one ->submit_bio to be active at a time, else stack
+	 * usage with stacked devices could be a problem.  Use current->bio_list
+	 * to collect a list of requests submited by a ->submit_bio method while
+	 * it is active, and then process them after it returned.
+	 */
+	if (current->bio_list)
+		bio_list_add(&current->bio_list[0], bio);
+	else if (!bio->bi_bdev->bd_has_submit_bio)
+		__submit_bio_noacct_mq(bio);
+	else
+		__submit_bio_noacct(bio);
+}
+
 void submit_bio_noacct_nocheck(struct bio *bio)
 {
 	blk_cgroup_bio_start(bio);
@@ -727,20 +726,8 @@ void submit_bio_noacct_nocheck(struct bio *bio)
 		bio_set_flag(bio, BIO_TRACE_COMPLETION);
 	}
 
-	/*
-	 * We only want one ->submit_bio to be active at a time, else stack
-	 * usage with stacked devices could be a problem.  Use current->bio_list
-	 * to collect a list of requests submited by a ->submit_bio method while
-	 * it is active, and then process them after it returned.
-	 */
-	if (current->bio_list)
-		bio_list_add(&current->bio_list[0], bio);
-	else if (!bio->bi_bdev->bd_has_submit_bio)
-		__submit_bio_noacct_mq(bio);
-	else
-		__submit_bio_noacct(bio);
+	submit_bio_noacct_nocheck_resubmit(bio);
 }
-EXPORT_SYMBOL_GPL(submit_bio_noacct_nocheck);
 
 /**
  * submit_bio_noacct - re-submit a bio to the block device layer for I/O

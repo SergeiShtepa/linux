@@ -102,11 +102,10 @@ static void __blkfilter_detach(struct block_device *bdev)
 
 void blkfilter_detach(struct block_device *bdev)
 {
-	if (bdev->bd_filter) {
-		blk_mq_freeze_queue(bdev->bd_queue);
+	blk_mq_freeze_queue(bdev->bd_queue);
+	if (bdev->bd_filter)
 		__blkfilter_detach(bdev);
-		blk_mq_unfreeze_queue(bdev->bd_queue);
-	}
+	blk_mq_unfreeze_queue(bdev->bd_queue);
 }
 
 int blkfilter_ioctl_detach(struct block_device *bdev,
@@ -236,3 +235,13 @@ void blkfilter_unregister(struct blkfilter_operations *ops)
 	spin_unlock(&blkfilters_lock);
 }
 EXPORT_SYMBOL_GPL(blkfilter_unregister);
+
+void blkfilter_resubmit_bio(struct bio *bio, struct blkfilter *flt)
+{
+	struct blkfilter *prev = current->blk_filter;
+
+	current->blk_filter = flt;
+	submit_bio_noacct_nocheck_resubmit(bio);
+	current->blk_filter = prev;
+}
+EXPORT_SYMBOL_GPL(blkfilter_resubmit_bio);

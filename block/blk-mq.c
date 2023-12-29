@@ -2959,21 +2959,15 @@ void blk_mq_submit_bio(struct bio *bio)
 			return;
 		if (blk_mq_can_use_cached_rq(rq, plug, bio))
 			goto done;
-		percpu_ref_get(&q->q_usage_counter);
 	} else {
-		if (unlikely(bio_queue_enter(bio)))
-			return;
 		if (!bio_integrity_prep(bio))
-			goto fail;
+			return;
 	}
 
 	rq = blk_mq_get_new_requests(q, plug, bio, nr_segs);
-	if (unlikely(!rq)) {
-fail:
-		blk_queue_exit(q);
+	if (unlikely(!rq))
 		return;
-	}
-
+	percpu_ref_get(&q->q_usage_counter);
 done:
 	trace_block_getrq(bio);
 
