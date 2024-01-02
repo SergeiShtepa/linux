@@ -275,6 +275,9 @@ bool __blk_crypto_bio_prep(struct bio **bio_ptr)
 	struct bio *bio = *bio_ptr;
 	const struct blk_crypto_key *bc_key = bio->bi_crypt_context->bc_key;
 
+	if (bio_flagged(bio, BIO_CRYPTO_PREPARED))
+		return true;
+
 	/* Error if bio has no data. */
 	if (WARN_ON_ONCE(!bio_has_data(bio))) {
 		bio->bi_status = BLK_STS_IOERR;
@@ -292,12 +295,15 @@ bool __blk_crypto_bio_prep(struct bio **bio_ptr)
 	 */
 	if (blk_crypto_config_supported_natively(bio->bi_bdev,
 						 &bc_key->crypto_cfg))
-		return true;
+		goto success;
 	if (blk_crypto_fallback_bio_prep(bio_ptr))
-		return true;
+		goto success;
 fail:
 	bio_endio(*bio_ptr);
 	return false;
+success:
+	bio_set_flag(*bio_ptr, BIO_CRYPTO_PREPARED);
+	return true;
 }
 
 int __blk_crypto_rq_bio_prep(struct request *rq, struct bio *bio,
