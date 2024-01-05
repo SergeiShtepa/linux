@@ -76,13 +76,10 @@ static inline void check_halffull(struct diff_storage *diff_storage,
 {
 	if (is_halffull(sectors_left) &&
 	    (atomic_inc_return(&diff_storage->low_space_flag) == 1)) {
-
-#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
 		if (diff_storage->bdev) {
 			pr_warn("Reallocating is allowed only for a regular file\n");
 			return;
 		}
-#endif
 		if (!diff_storage_calculate_requested(diff_storage)) {
 			pr_info("The limit size of the difference storage has been reached\n");
 			return;
@@ -118,10 +115,8 @@ void diff_storage_free(struct kref *kref)
 	diff_storage = container_of(kref, struct diff_storage, kref);
 	flush_work(&diff_storage->reallocate_work);
 
-#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
 	if (diff_storage->bdev)
 		blkdev_put(diff_storage->bdev, NULL);
-#endif
 	if (diff_storage->file)
 		fput(diff_storage->file);
 	event_queue_done(&diff_storage->event_queue);
@@ -197,11 +192,7 @@ int diff_storage_set_diff_storage(struct diff_storage *diff_storage,
 		pr_debug("A block device is selected for difference storage\n");
 		diff_storage->dev_id = file_inode(file)->i_rdev;
 		diff_storage->capacity = bdev_nr_sectors(bdev);
-#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
 		diff_storage->bdev = bdev;
-#else
-		blkdev_put(bdev, NULL);
-#endif
 	} else {
 		pr_debug("A regular file is selected for difference storage\n");
 		diff_storage->dev_id = file_inode(file)->i_sb->s_dev;
@@ -231,14 +222,13 @@ int diff_storage_set_diff_storage(struct diff_storage *diff_storage,
 				diff_storage->limit - diff_storage->capacity);
 		req_sect = diff_storage->requested;
 
-#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
 		if (diff_storage->bdev) {
 			pr_warn("Difference storage on block device is not large enough\n");
 			pr_warn("Requested: %llu sectors\n", req_sect);
 			ret = 0;
 			goto fail_fput;
 		}
-#endif
+
 		pr_debug("Difference storage is not large enough\n");
 		pr_debug("Requested: %llu sectors\n", req_sect);
 
@@ -257,10 +247,8 @@ fail_fput:
 }
 
 int diff_storage_alloc(struct diff_storage *diff_storage, sector_t count,
-#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
-			struct block_device **bdev,
-#endif
-			struct file **file, sector_t *sector)
+			struct block_device **bdev, struct file **file,
+			sector_t *sector)
 
 {
 	sector_t sectors_left;
@@ -275,9 +263,7 @@ int diff_storage_alloc(struct diff_storage *diff_storage, sector_t count,
 		return -ENOSPC;
 	}
 
-#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
 	*bdev = diff_storage->bdev;
-#endif
 	*file = diff_storage->file;
 	*sector = diff_storage->filled;
 

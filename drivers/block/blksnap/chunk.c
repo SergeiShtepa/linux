@@ -168,7 +168,6 @@ struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio)
 	return bio_alloc_clone(bdev, bio, GFP_NOIO, &chunk_clone_bioset);
 }
 
-#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
 void chunk_diff_bio_tobdev(struct chunk *chunk, struct bio *bio)
 {
 	struct bio *new_bio;
@@ -183,7 +182,6 @@ void chunk_diff_bio_tobdev(struct chunk *chunk, struct bio *bio)
 
 	submit_bio_noacct(new_bio);
 }
-#endif
 
 static inline void chunk_io_ctx_free(struct chunk_io_ctx *io_ctx, long ret)
 {
@@ -419,7 +417,6 @@ static void chunk_notify_store(struct chunk *chunk, int err)
 	chunk_up(chunk);
 }
 
-#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
 static void chunk_notify_store_tobdev(struct work_struct *work)
 {
 	struct chunk_bio *cbio = container_of(work, struct chunk_bio, work);
@@ -444,7 +441,6 @@ static void chunk_notify_store_tobdev(struct work_struct *work)
 
 	bio_put(&cbio->bio);
 }
-#endif
 
 static void chunk_io_endio(struct bio *bio)
 {
@@ -464,7 +460,6 @@ static inline unsigned short calc_max_vecs(sector_t left)
 	return bio_max_segs(round_up(left, PAGE_SECTORS) / PAGE_SECTORS);
 }
 
-#if defined(CONFIG_BLKSNAP_DIFF_BLKDEV)
 void chunk_store_tobdev(struct chunk *chunk)
 {
 	struct block_device *bdev = chunk->diff_bdev;
@@ -509,7 +504,6 @@ void chunk_store_tobdev(struct chunk *chunk)
 	cbio->orig_bio = NULL;
 	chunk_submit_bio(bio);
 }
-#endif
 
 /*
  * Synchronously store chunk to diff file.
