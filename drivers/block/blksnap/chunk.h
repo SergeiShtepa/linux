@@ -108,11 +108,7 @@ static inline void chunk_up(struct chunk *chunk)
 
 struct chunk_io_ctx {
 	struct list_head link;
-#ifdef CONFIG_BLKSNAP_CHUNK_DIFF_BIO_SYNC
-	loff_t pos;
-#else
 	struct kiocb iocb;
-#endif
 	struct iov_iter iov_iter;
 	struct chunk *chunk;
 	struct bio *bio;

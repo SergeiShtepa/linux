@@ -10,12 +10,3 @@ config BLKSNAP
 	  Designed for creating backups for block devices. Snapshots are
 	  temporary and are released when backup is completed. Change block
 	  tracking allows to create incremental or differential backups.
-
-config BLKSNAP_CHUNK_DIFF_BIO_SYNC
-	bool "Use a synchronous I/O unit processing algorithm for the snapshot image"
-	depends on BLKSNAP
-	default n
-	help
-	  Theoretical asynchronous algorithm for processing I/O units should
-	  have higher performance. However, an attempt to confirm this on test
-	  runs did not bring any results.

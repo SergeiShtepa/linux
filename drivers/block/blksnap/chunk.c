@@ -199,25 +199,6 @@ static inline void chunk_io_ctx_free(struct chunk_io_ctx *io_ctx, long ret)
 	chunk_up(chunk);
 }
 
-#ifdef CONFIG_BLKSNAP_CHUNK_DIFF_BIO_SYNC
-void chunk_diff_bio_execute(struct chunk_io_ctx *io_ctx)
-{
-	struct file *diff_file = io_ctx->chunk->diff_file;
-	ssize_t len;
-
-	if (io_ctx->iov_iter.data_source) {
-		file_start_write(diff_file);
-		len = vfs_iter_write(diff_file, &io_ctx->iov_iter,
-				     &io_ctx->pos, 0);
-		file_end_write(diff_file);
-	} else {
-		len = vfs_iter_read(diff_file, &io_ctx->iov_iter,
-				    &io_ctx->pos, 0);
-	}
-
-	chunk_io_ctx_free(io_ctx, len);
-}
-#else
 static void chunk_diff_bio_complete_read(struct kiocb *iocb, long ret)
 {
 	struct chunk_io_ctx *io_ctx;
@@ -271,7 +252,6 @@ void chunk_diff_bio_execute(struct chunk_io_ctx *io_ctx)
 	else
 		chunk_diff_bio_execute_read(io_ctx);
 }
-#endif
 
 static inline void chunk_diff_bio_schedule(struct diff_area *diff_area,
 					   struct chunk_io_ctx *io_ctx)
@@ -319,9 +299,6 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 	iov_iter_bvec(&io_ctx->iov_iter, is_write ? WRITE : READ,
 		      bio_bvec, nr_segs, nbytes);
 	io_ctx->iov_iter.iov_offset = bio->bi_iter.bi_bvec_done;
-#ifdef CONFIG_BLKSNAP_CHUNK_DIFF_BIO_SYNC
-	io_ctx->pos = (chunk->diff_ofs_sect << SECTOR_SHIFT) + chunk_ofs;
-#else
 	io_ctx->iocb.ki_filp = chunk->diff_file;
 	io_ctx->iocb.ki_pos = (chunk->diff_ofs_sect << SECTOR_SHIFT) +
 								chunk_ofs;
@@ -331,7 +308,6 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 	io_ctx->iocb.ki_ioprio = get_current_ioprio();
 	io_ctx->iocb.ki_complete = is_write ? chunk_diff_bio_complete_write
 					    : chunk_diff_bio_complete_read;
-#endif
 	io_ctx->chunk = chunk;
 	io_ctx->bio = bio;
 	bio_inc_remaining(bio);
