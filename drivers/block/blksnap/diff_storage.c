@@ -158,7 +158,7 @@ static inline int diff_storage_set_tmpfile(struct diff_storage *diff_storage,
 {
 	struct file *file;
 	int flags = O_EXCL | O_RDWR | O_LARGEFILE | O_DIRECT | O_NOATIME |
-		    O_CREAT | O_TMPFILE;
+		    O_TMPFILE;
 
 	file = filp_open(dirname, flags, S_IRUSR | S_IWUSR);
 	if (IS_ERR(file)) {
