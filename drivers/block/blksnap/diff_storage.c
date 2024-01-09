@@ -124,15 +124,15 @@ void diff_storage_free(struct kref *kref)
 }
 
 static inline int diff_storage_set_bdev(struct diff_storage *diff_storage,
-					const char *filename)
+					const char *devpath)
 {
 	struct block_device *bdev;
 
-	bdev = blkdev_get_by_path(filename,
+	bdev = blkdev_get_by_path(devpath,
 				 BLK_OPEN_EXCL | BLK_OPEN_READ | BLK_OPEN_WRITE,
 				 diff_storage, NULL);
 	if (IS_ERR(bdev)) {
-		pr_err("Failed to open a block device '%s'\n", filename);
+		pr_err("Failed to open a block device '%s'\n", devpath);
 		return PTR_ERR(bdev);
 	}
 
@@ -146,9 +146,10 @@ static inline int diff_storage_set_bdev(struct diff_storage *diff_storage,
 static inline void ___set_file(struct diff_storage *diff_storage,
 			       struct file *file)
 {
-	diff_storage->dev_id = file_inode(file)->i_sb->s_dev;
-	diff_storage->capacity =
-			i_size_read(file_inode(file)) >> SECTOR_SHIFT;
+	struct inode *inode = file_inode(file);
+
+	diff_storage->dev_id = inode->i_sb->s_dev;
+	diff_storage->capacity = i_size_read(inode) >> SECTOR_SHIFT;
 	diff_storage->file = file;
 }
 
@@ -160,10 +161,10 @@ static inline int diff_storage_set_tmpfile(struct diff_storage *diff_storage,
 		    O_CREAT | O_TMPFILE;
 
 	file = filp_open(dirname, flags, S_IRUSR | S_IWUSR);
-	if (!file) {
+	if (IS_ERR(file)) {
 		pr_err("Failed to create a temp file in directory '%s'\n",
 			dirname);
-		return -EINVAL;
+		return PTR_ERR(file);
 	}
 
 	pr_debug("A temp file is selected for difference storage\n");
@@ -178,9 +179,9 @@ static inline int diff_storage_set_regfile(struct diff_storage *diff_storage,
 	int flags = O_EXCL | O_RDWR | O_LARGEFILE | O_DIRECT | O_NOATIME;
 
 	file = filp_open(filename, flags, S_IRUSR | S_IWUSR);
-	if (!file) {
+	if (IS_ERR(file)) {
 		pr_err("Failed to open a regular file '%s'\n", filename);
-		return -EINVAL;
+		return PTR_ERR(file);
 	}
 
 	pr_debug("A regular file is selected for difference storage\n");
