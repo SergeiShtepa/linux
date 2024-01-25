@@ -432,16 +432,6 @@ fail:
 	return false;
 }
 
-static void orig_clone_endio(struct bio *bio)
-{
-	struct bio *orig_bio = bio->bi_private;
-
-	if (unlikely(bio->bi_status != BLK_STS_OK))
-		bio_io_error(orig_bio);
-	else
-		bio_endio(orig_bio);
-}
-
 static void orig_clone_bio(struct diff_area *diff_area, struct bio *bio)
 {
 	struct bio *new_bio;
@@ -458,11 +448,8 @@ static void orig_clone_bio(struct diff_area *diff_area, struct bio *bio)
 	new_bio->bi_iter.bi_size = min_t(unsigned int,
 			bio->bi_iter.bi_size, chunk_limit << SECTOR_SHIFT);
 
-	new_bio->bi_end_io = orig_clone_endio;
-	new_bio->bi_private = bio;
-
 	bio_advance(bio, new_bio->bi_iter.bi_size);
-	bio_inc_remaining(bio);
+	bio_chain(new_bio, bio);
 
 	submit_bio_noacct(new_bio);
 }
