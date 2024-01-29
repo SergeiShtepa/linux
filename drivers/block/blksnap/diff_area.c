@@ -54,7 +54,7 @@ static inline struct chunk *chunk_alloc(struct diff_area *diff_area,
 {
 	struct chunk *chunk;
 
-	chunk = kzalloc(sizeof(struct chunk), GFP_NOIO);
+	chunk = kzalloc(sizeof(struct chunk), GFP_KERNEL);
 	if (!chunk)
 		return NULL;
 
@@ -68,11 +68,9 @@ static inline struct chunk *chunk_alloc(struct diff_area *diff_area,
 	/*
 	 * The last chunk has a special size.
 	 */
-	if (unlikely((number + 1) == diff_area->chunk_count)) {
+	if (unlikely((number + 1) == diff_area->chunk_count))
 		chunk->sector_count = bdev_nr_sectors(diff_area->orig_bdev) -
-					(chunk->sector_count * number);
-	}
-
+						(chunk->sector_count * number);
 	return chunk;
 }
 
@@ -311,11 +309,14 @@ static inline unsigned int chunk_limit(struct chunk *chunk,
 bool diff_area_cow(struct diff_area *diff_area, struct bio *bio,
 		   struct bvec_iter *iter)
 {
+	bool skip_bio = false;
 	bool nowait = bio->bi_opf & REQ_NOWAIT;
 	struct bio *chunk_bio = NULL;
 	LIST_HEAD(chunks);
 	int ret = 0;
+	unsigned int flags;
 
+	flags = memalloc_noio_save();
 	while (iter->bi_size) {
 		unsigned long nr = diff_area_chunk_number(diff_area,
 							  iter->bi_sector);
@@ -331,7 +332,7 @@ bool diff_area_cow(struct diff_area *diff_area, struct bio *bio,
 			}
 
 			ret = xa_insert(&diff_area->chunk_map, nr, chunk,
-					GFP_NOIO);
+					GFP_KERNEL);
 			if (likely(!ret)) {
 				/* new chunk has been added */
 			} else if (ret == -EBUSY) {
@@ -405,10 +406,11 @@ bool diff_area_cow(struct diff_area *diff_area, struct bio *bio,
 		/* Postpone bio processing in a callback. */
 		chunk_load_and_postpone_io_finish(&diff_area->tracker->filter,
 						  &chunks, chunk_bio, bio);
-		return true;
+		skip_bio = true;
+
 	}
 	/* Pass bio to the low level */
-	return false;
+	goto out;
 
 fail:
 	if (chunk_bio) {
@@ -424,12 +426,12 @@ fail:
 		 */
 		bio->bi_status = BLK_STS_AGAIN;
 		bio_endio(bio);
-		return true;
+		skip_bio = true;
 	}
-	/*
-	 * In any other case, the processing of the I/O unit continues.
-	 */
-	return false;
+
+out:
+	memalloc_noio_restore(flags);
+	return skip_bio;
 }
 
 static void orig_clone_bio(struct diff_area *diff_area, struct bio *bio)
@@ -485,8 +487,7 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 		if (unlikely(!chunk))
 			return false;
 
-		ret = xa_insert(&diff_area->chunk_map, nr, chunk,
-				GFP_NOIO);
+		ret = xa_insert(&diff_area->chunk_map, nr, chunk,GFP_KERNEL);
 		if (likely(!ret)) {
 			/* new chunk has been added */
 		} else if (ret == -EBUSY) {
@@ -558,8 +559,9 @@ static inline void diff_area_event_corrupted(struct diff_area *diff_area)
 		.err_code = abs(diff_area->error_code),
 	};
 
-	event_gen(&diff_area->diff_storage->event_queue, GFP_NOIO,
-		  blksnap_event_code_corrupted, &data,
+	event_gen(&diff_area->diff_storage->event_queue,
+		  blksnap_event_code_corrupted,
+		  &data,
 		  sizeof(struct blksnap_event_corrupted));
 }
 

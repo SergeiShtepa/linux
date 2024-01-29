@@ -24,7 +24,7 @@ static void snapimage_submit_bio(struct bio *bio)
 {
 	struct tracker *tracker = bio->bi_bdev->bd_disk->private_data;
 	struct diff_area *diff_area = tracker->diff_area;
-	unsigned int old_noio;
+	unsigned int flags;
 	struct blkfilter *prev_filter;
 	bool is_success = true;
 
@@ -39,6 +39,7 @@ static void snapimage_submit_bio(struct bio *bio)
 		return;
 	}
 
+	flags = memalloc_noio_save();
 	/*
 	 * The change tracking table should indicate that the image block device
 	 * is different from the original device. At the next snapshot, such
@@ -50,16 +51,16 @@ static void snapimage_submit_bio(struct bio *bio)
 
 	prev_filter = current->blk_filter;
 	current->blk_filter = &tracker->filter;
-	old_noio = memalloc_noio_save();
 	while (bio->bi_iter.bi_size && is_success)
 		is_success = diff_area_submit_chunk(diff_area, bio);
-	memalloc_noio_restore(old_noio);
 	current->blk_filter = prev_filter;
 
 	if (is_success)
 		bio_endio(bio);
 	else
 		bio_io_error(bio);
+
+	memalloc_noio_restore(flags);
 }
 
 static const struct block_device_operations bd_ops = {

@@ -165,7 +165,7 @@ static inline unsigned int chunk_limit(struct chunk *chunk, struct bio *bio)
 
 struct bio *chunk_alloc_clone(struct block_device *bdev, struct bio *bio)
 {
-	return bio_alloc_clone(bdev, bio, GFP_NOIO, &chunk_clone_bioset);
+	return bio_alloc_clone(bdev, bio, GFP_KERNEL, &chunk_clone_bioset);
 }
 
 void chunk_diff_bio_tobdev(struct chunk *chunk, struct bio *bio)
@@ -272,7 +272,7 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 	size_t nbytes = 0;
 	struct chunk_io_ctx *io_ctx;
 
-	io_ctx = kzalloc(sizeof(struct chunk_io_ctx), GFP_NOIO);
+	io_ctx = kzalloc(sizeof(struct chunk_io_ctx), GFP_KERNEL);
 	if (!io_ctx)
 		return -ENOMEM;
 
@@ -443,8 +443,8 @@ void chunk_store_tobdev(struct chunk *chunk)
 	struct chunk_bio *cbio;
 
 	bio = bio_alloc_bioset(bdev, calc_max_vecs(count),
-			       REQ_OP_WRITE | REQ_SYNC | REQ_FUA, GFP_NOIO,
-			       &chunk_io_bioset);
+			       REQ_OP_WRITE | REQ_SYNC | REQ_FUA,
+			       GFP_KERNEL, &chunk_io_bioset);
 	bio->bi_iter.bi_sector = sector;
 
 	while (count) {
@@ -462,7 +462,7 @@ void chunk_store_tobdev(struct chunk *chunk)
 		/* Create next bio */
 		next = bio_alloc_bioset(bdev, calc_max_vecs(count),
 					REQ_OP_WRITE | REQ_SYNC | REQ_FUA,
-					GFP_NOIO, &chunk_io_bioset);
+					GFP_KERNEL, &chunk_io_bioset);
 		next->bi_iter.bi_sector = bio_end_sector(bio);
 		bio_chain(bio, next);
 		submit_bio_noacct(bio);
@@ -522,8 +522,8 @@ static struct bio *chunk_origin_load_async(struct chunk *chunk)
 	bdev = chunk->diff_area->orig_bdev;
 	sector = chunk_sector(chunk);
 
-	bio = bio_alloc_bioset(bdev, calc_max_vecs(count),
-			       REQ_OP_READ, GFP_NOIO, &chunk_io_bioset);
+	bio = bio_alloc_bioset(bdev, calc_max_vecs(count), REQ_OP_READ,
+			       GFP_KERNEL, &chunk_io_bioset);
 	bio->bi_iter.bi_sector = sector;
 
 	while (count) {
@@ -539,9 +539,8 @@ static struct bio *chunk_origin_load_async(struct chunk *chunk)
 		}
 
 		/* Create next bio */
-		next = bio_alloc_bioset(bdev, calc_max_vecs(count),
-					REQ_OP_READ, GFP_NOIO,
-					&chunk_io_bioset);
+		next = bio_alloc_bioset(bdev, calc_max_vecs(count), REQ_OP_READ,
+					GFP_KERNEL, &chunk_io_bioset);
 		next->bi_iter.bi_sector = bio_end_sector(bio);
 		bio_chain(bio, next);
 		submit_bio_noacct(bio);

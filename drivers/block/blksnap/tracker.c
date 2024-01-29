@@ -31,18 +31,6 @@ void tracker_free(struct kref *kref)
 	kfree(tracker);
 }
 
-static inline bool tracker_cow(struct tracker *tracker, struct bio *bio,
-			       struct bvec_iter *iter)
-{
-	bool skip_bio;
-	unsigned int old_noio;
-
-	old_noio = memalloc_noio_save();
-	skip_bio = diff_area_cow(tracker->diff_area, bio, iter);
-	memalloc_noio_restore(old_noio);
-	return skip_bio;
-}
-
 static bool tracker_submit_bio(struct bio *bio)
 {
 	struct blkfilter *flt = bio->bi_bdev->bd_filter;
@@ -87,7 +75,7 @@ static bool tracker_submit_bio(struct bio *bio)
 		return false;
 	}
 #endif
-	return tracker_cow(tracker, bio, &copy_iter);
+	return diff_area_cow(tracker->diff_area, bio, &copy_iter);
 }
 
 static struct blkfilter *tracker_attach(struct block_device *bdev)
