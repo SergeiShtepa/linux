@@ -19,38 +19,38 @@
 /**
  * enum blkfilter_ctl_blksnap - List of commands for BLKFILTER_CTL ioctl
  *
- * @blkfilter_ctl_blksnap_cbtinfo:
+ * @BLKFILTER_CTL_BLKSNAP_CBTINFO:
  *	Get CBT information.
  *	The result of executing the command is a &struct blksnap_cbtinfo.
  *	Return 0 if succeeded, negative errno otherwise.
- * @blkfilter_ctl_blksnap_cbtmap:
+ * @BLKFILTER_CTL_BLKSNAP_CBTMAP:
  *	Read the CBT map.
  *	The option passes the &struct blksnap_cbtmap.
  *	The size of the table can be quite large. Thus, the table is read in
  *	a loop, in each cycle of which the next offset is set to
  *	&blksnap_tracker_read_cbt_bitmap.offset.
  *	Return a count of bytes read if succeeded, negative errno otherwise.
- * @blkfilter_ctl_blksnap_cbtdirty:
+ * @BLKFILTER_CTL_BLKSNAP_CBTDIRTY:
  *	Set dirty blocks in the CBT map.
  *	The option passes the &struct blksnap_cbtdirty.
  *	There are cases when some blocks need to be marked as changed.
  *	This ioctl allows to do this.
  *	Return 0 if succeeded, negative errno otherwise.
- * @blkfilter_ctl_blksnap_snapshotadd:
+ * @BLKFILTER_CTL_BLKSNAP_SNAPSHOTADD:
  *	Add device to snapshot.
  *	The option passes the &struct blksnap_snapshotadd.
  *	Return 0 if succeeded, negative errno otherwise.
- * @blkfilter_ctl_blksnap_snapshotinfo:
+ * @BLKFILTER_CTL_BLKSNAP_SNAPSHOTINFO:
  *	Get information about snapshot.
  *	The result of executing the command is a &struct blksnap_snapshotinfo.
  *	Return 0 if succeeded, negative errno otherwise.
  */
 enum blkfilter_ctl_blksnap {
-	blkfilter_ctl_blksnap_cbtinfo,
-	blkfilter_ctl_blksnap_cbtmap,
-	blkfilter_ctl_blksnap_cbtdirty,
-	blkfilter_ctl_blksnap_snapshotadd,
-	blkfilter_ctl_blksnap_snapshotinfo,
+	BLKFILTER_CTL_BLKSNAP_CBTINFO = 0,
+	BLKFILTER_CTL_BLKSNAP_CBTMAP = 1,
+	BLKFILTER_CTL_BLKSNAP_CBTDIRTY = 2,
+	BLKFILTER_CTL_BLKSNAP_SNAPSHOTADD = 3,
+	BLKFILTER_CTL_BLKSNAP_SNAPSHOTINFO = 4,
 };
 
 #ifndef UUID_SIZE
@@ -69,7 +69,7 @@ struct blksnap_uuid {
 
 /**
  * struct blksnap_cbtinfo - Result for the command
- *	&blkfilter_ctl_blksnap.blkfilter_ctl_blksnap_cbtinfo.
+ *	&BLKFILTER_CTL_BLKSNAP_CBTINFO.
  *
  * @device_capacity:
  *	Device capacity in bytes.
@@ -92,7 +92,7 @@ struct blksnap_cbtinfo {
 
 /**
  * struct blksnap_cbtmap - Option for the command
- *	&blkfilter_ctl_blksnap.blkfilter_ctl_blksnap_cbtmap.
+ *	&BLKFILTER_CTL_BLKSNAP_CBTMAP.
  *
  * @offset:
  *	Offset from the beginning of the CBT bitmap in bytes.
@@ -122,7 +122,7 @@ struct blksnap_sectors {
 
 /**
  * struct blksnap_cbtdirty - Option for the command
- *	&blkfilter_ctl_blksnap.blkfilter_ctl_blksnap_cbtdirty.
+ *	&BLKFILTER_CTL_BLKSNAP_CBTDIRTY.
  *
  * @count:
  *	Count of elements in the @dirty_sectors.
@@ -136,7 +136,7 @@ struct blksnap_cbtdirty {
 
 /**
  * struct blksnap_snapshotadd - Option for the command
- *	&blkfilter_ctl_blksnap.blkfilter_ctl_blksnap_snapshotadd.
+ *	&BLKFILTER_CTL_BLKSNAP_SNAPSHOTADD.
  *
  * @id:
  *	ID of the snapshot to which the block device should be added.
@@ -149,7 +149,7 @@ struct blksnap_snapshotadd {
 
 /**
  * struct blksnap_snapshotinfo - Result for the command
- *	&blkfilter_ctl_blksnap.blkfilter_ctl_blksnap_snapshotinfo.
+ *	&BLKFILTER_CTL_BLKSNAP_SNAPSHOTINFO.
  *
  * @error_code:
  *	Zero if there were no errors while holding the snapshot.
@@ -172,12 +172,12 @@ struct blksnap_snapshotinfo {
  * Control commands that are transmitted through the blksnap module interface.
  */
 enum blksnap_ioctl {
-	blksnap_ioctl_version,
-	blksnap_ioctl_snapshot_create,
-	blksnap_ioctl_snapshot_destroy,
-	blksnap_ioctl_snapshot_take,
-	blksnap_ioctl_snapshot_collect,
-	blksnap_ioctl_snapshot_wait_event,
+	BLKSNAP_IOCTL_VERSION = 0,
+	BLKSNAP_IOCTL_SNAPSHOT_CREATE = 1,
+	BLKSNAP_IOCTL_SNAPSHOT_DESTROY = 2,
+	BLKSNAP_IOCTL_SNAPSHOT_TAKE = 3,
+	BLKSNAP_IOCTL_SNAPSHOT_COLLECT = 4,
+	BLKSNAP_IOCTL_SNAPSHOT_WAIT_EVENT = 5,
 };
 
 /**
@@ -211,7 +211,7 @@ struct blksnap_version {
  * Return: 0 if succeeded, negative errno otherwise.
  */
 #define IOCTL_BLKSNAP_VERSION							\
-	_IOR(BLKSNAP, blksnap_ioctl_version, struct blksnap_version)
+	_IOR(BLKSNAP, BLKSNAP_IOCTL_VERSION, struct blksnap_version)
 
 /**
  * struct blksnap_snapshot_create - Argument for the
@@ -248,7 +248,7 @@ struct blksnap_snapshot_create {
  * Return: 0 if succeeded, negative errno otherwise.
  */
 #define IOCTL_BLKSNAP_SNAPSHOT_CREATE						\
-	_IOWR(BLKSNAP, blksnap_ioctl_snapshot_create,				\
+	_IOWR(BLKSNAP, BLKSNAP_IOCTL_SNAPSHOT_CREATE,				\
 	     struct blksnap_snapshot_create)
 
 /**
@@ -261,7 +261,7 @@ struct blksnap_snapshot_create {
  * Return: 0 if succeeded, negative errno otherwise.
  */
 #define IOCTL_BLKSNAP_SNAPSHOT_DESTROY						\
-	_IOW(BLKSNAP, blksnap_ioctl_snapshot_destroy,				\
+	_IOW(BLKSNAP, BLKSNAP_IOCTL_SNAPSHOT_DESTROY,				\
 	     struct blksnap_uuid)
 
 /**
@@ -274,7 +274,7 @@ struct blksnap_snapshot_create {
  * Return: 0 if succeeded, negative errno otherwise.
  */
 #define IOCTL_BLKSNAP_SNAPSHOT_TAKE						\
-	_IOW(BLKSNAP, blksnap_ioctl_snapshot_take,				\
+	_IOW(BLKSNAP, BLKSNAP_IOCTL_SNAPSHOT_TAKE,				\
 	     struct blksnap_uuid)
 
 /**
@@ -312,7 +312,7 @@ struct blksnap_snapshot_collect {
  * to store collection of active snapshots, or negative errno otherwise.
  */
 #define IOCTL_BLKSNAP_SNAPSHOT_COLLECT						\
-	_IOR(BLKSNAP, blksnap_ioctl_snapshot_collect,				\
+	_IOR(BLKSNAP, BLKSNAP_IOCTL_SNAPSHOT_COLLECT,				\
 	     struct blksnap_snapshot_collect)
 
 /**
@@ -365,7 +365,7 @@ struct blksnap_snapshot_event {
  * Return: 0 if succeeded, negative errno otherwise.
  */
 #define IOCTL_BLKSNAP_SNAPSHOT_WAIT_EVENT					\
-	_IOR(BLKSNAP, blksnap_ioctl_snapshot_wait_event,			\
+	_IOR(BLKSNAP, BLKSNAP_IOCTL_SNAPSHOT_WAIT_EVENT,			\
 	     struct blksnap_snapshot_event)
 
 /**

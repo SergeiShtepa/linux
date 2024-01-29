@@ -271,19 +271,19 @@ static int tracker_ctl(struct blkfilter *flt, const unsigned int cmd,
 
 	mutex_lock(&tracker->ctl_lock);
 	switch (cmd) {
-	case blkfilter_ctl_blksnap_cbtinfo:
+	case BLKFILTER_CTL_BLKSNAP_CBTINFO:
 		ret = ctl_cbtinfo(tracker, buf, plen);
 		break;
-	case blkfilter_ctl_blksnap_cbtmap:
+	case BLKFILTER_CTL_BLKSNAP_CBTMAP:
 		ret = ctl_cbtmap(tracker, buf, plen);
 		break;
-	case blkfilter_ctl_blksnap_cbtdirty:
+	case BLKFILTER_CTL_BLKSNAP_CBTDIRTY:
 		ret = ctl_cbtdirty(tracker, buf, plen);
 		break;
-	case blkfilter_ctl_blksnap_snapshotadd:
+	case BLKFILTER_CTL_BLKSNAP_SNAPSHOTADD:
 		ret = ctl_snapshotadd(tracker, buf, plen);
 		break;
-	case blkfilter_ctl_blksnap_snapshotinfo:
+	case BLKFILTER_CTL_BLKSNAP_SNAPSHOTINFO:
 		ret = ctl_snapshotinfo(tracker, buf, plen);
 		break;
 	default:

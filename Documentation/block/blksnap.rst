@@ -272,17 +272,17 @@ device and get the result of its execution. The module provides the
 ``include/uapi/blksnap.h`` header file with a description of the commands and
 their data structures.
 
-1. ``blkfilter_ctl_blksnap_cbtinfo`` allows to get information from the
+1. ``BLKFILTER_CTL_BLKSNAP_CBTINFO`` allows to get information from the
    change tracker.
-2. ``blkfilter_ctl_blksnap_cbtmap`` reads the change tracker table. If a write
+2. ``BLKFILTER_CTL_BLKSNAP_CBTMAP`` reads the change tracker table. If a write
    operation was performed for the snapshot, then the change tracker takes this
    into account. Therefore, it is necessary to receive tracker data after write
    operations have been completed.
-3. ``blkfilter_ctl_blksnap_cbtdirty`` mark blocks as changed in the change
+3. ``BLKFILTER_CTL_BLKSNAP_CBTDIRTY`` mark blocks as changed in the change
    tracker table. This is necessary if post-processing is performed after the
    backup is created, which changes the backup blocks.
-4. ``blkfilter_ctl_blksnap_snapshotadd`` adds a block device to the snapshot.
-5. ``blkfilter_ctl_blksnap_snapshotinfo`` allows to get the name of the snapshot
+4. ``BLKFILTER_CTL_BLKSNAP_SNAPSHOTADD`` adds a block device to the snapshot.
+5. ``BLKFILTER_CTL_BLKSNAP_SNAPSHOTINFO`` allows to get the name of the snapshot
    image block device and the presence of an error.
 
 Using ioctl
@@ -293,17 +293,16 @@ the blksnap module. A control file ``blksnap-control`` is created to manage
 snapshots. The control commands are also described in the file
 ``include/uapi/blksnap.h``.
 
-1. ``blksnap_ioctl_version`` get the version number.
-2. ``blk_snap_ioctl_snapshot_create`` initiates the snapshot creation process.
-3. ``blk_snap_ioctl_snapshot_append_storage`` add the range of blocks to
+1. ``BLKSNAP_IOCTL_VERSION`` get the version number.
+2. ``BLKSNAP_IOCTL_SNAPSHOT_CREATE`` initiates a snapshot and prepares a
    difference storage.
-4. ``blk_snap_ioctl_snapshot_take`` creates block devices of block device
+3. ``BLKSNAP_IOCTL_SNAPSHOT_TAKE`` creates block devices of block device
    snapshot images.
-5. ``blk_snap_ioctl_snapshot_collect`` collect all created snapshots.
-6. ``blk_snap_ioctl_snapshot_wait_event`` allows to track the status of
+4. ``BLKSNAP_IOCTL_SNAPSHOT_COLLECT`` collect all created snapshots.
+5. ``BLKSNAP_IOCTL_SNAPSHOT_WAIT_EVENT`` allows to track the status of
    snapshots and receive events about the requirement to expand the difference
    storage or about snapshot overflow.
-7. ``blk_snap_ioctl_snapshot_destroy`` releases the snapshot.
+6. ``BLKSNAP_IOCTL_SNAPSHOT_DESTROY`` releases the snapshot.
 
 Static C++ library
 ------------------
