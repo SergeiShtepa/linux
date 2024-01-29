@@ -285,13 +285,13 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 	iov_iter_bvec(&io_ctx->iov_iter, is_write ? WRITE : READ,
 		      bio_bvec, nr_segs, nbytes);
 	io_ctx->iov_iter.iov_offset = bio->bi_iter.bi_bvec_done;
+
+	init_sync_kiocb(&io_ctx->iocb, chunk->diff_file);
 	io_ctx->iocb.ki_filp = chunk->diff_file;
 	io_ctx->iocb.ki_pos = (chunk->diff_ofs_sect << SECTOR_SHIFT) +
 								chunk_ofs;
-	io_ctx->iocb.ki_flags = IOCB_DIRECT;
 	if (is_write)
 		io_ctx->iocb.ki_flags |= IOCB_WRITE;
-	io_ctx->iocb.ki_ioprio = get_current_ioprio();
 	io_ctx->iocb.ki_complete = is_write ? chunk_diff_bio_complete_write
 					    : chunk_diff_bio_complete_read;
 	io_ctx->chunk = chunk;
