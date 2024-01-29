@@ -21,6 +21,7 @@ struct chunk_bio {
 
 static struct bio_set chunk_io_bioset;
 static struct bio_set chunk_clone_bioset;
+static struct workqueue_struct *chunk_wq;
 
 static inline sector_t chunk_sector(struct chunk *chunk)
 {
@@ -88,7 +89,7 @@ static void chunk_schedule_storing(struct chunk *chunk)
 
 	if (need_work) {
 		/* Initiate the queue clearing process */
-		queue_work(system_wq, &diff_area->store_queue_work);
+		queue_work(chunk_wq, &diff_area->store_queue_work);
 	}
 	diff_area_put(diff_area);
 }
@@ -256,7 +257,7 @@ static inline void chunk_diff_bio_schedule(struct diff_area *diff_area,
 	spin_lock(&diff_area->image_io_queue_lock);
 	list_add_tail(&io_ctx->link, &diff_area->image_io_queue);
 	spin_unlock(&diff_area->image_io_queue_lock);
-	queue_work(system_wq, &diff_area->image_io_work);
+	queue_work(chunk_wq, &diff_area->image_io_work);
 }
 
 /*
@@ -419,7 +420,7 @@ static void chunk_io_endio(struct bio *bio)
 {
 	struct chunk_bio *cbio = container_of(bio, struct chunk_bio, bio);
 
-	queue_work(system_wq, &cbio->work);
+	queue_work(chunk_wq, &cbio->work);
 }
 
 static inline void chunk_submit_bio(struct bio *bio)
@@ -624,9 +625,26 @@ int __init chunk_init(void)
 	ret = bioset_init(&chunk_io_bioset, 64,
 			  offsetof(struct chunk_bio, bio),
 			  BIOSET_NEED_BVECS | BIOSET_NEED_RESCUER);
-	if (!ret)
-		ret = bioset_init(&chunk_clone_bioset, 64, 0,
-				  BIOSET_NEED_BVECS | BIOSET_NEED_RESCUER);
+	if (ret)
+		return ret;
+
+	ret = bioset_init(&chunk_clone_bioset, 64, 0,
+			  BIOSET_NEED_BVECS | BIOSET_NEED_RESCUER);
+	if (ret)
+		goto fail_bioset_init;
+
+	chunk_wq = create_workqueue("blksnap");
+	if (!chunk_wq) {
+		ret = -ENOMEM;
+		goto fail_alloc_wq;
+	}
+	return 0;
+
+fail_alloc_wq:
+	bioset_exit(&chunk_clone_bioset);
+fail_bioset_init:
+	bioset_exit(&chunk_io_bioset);
+
 	return ret;
 }
 
@@ -634,4 +652,5 @@ void chunk_done(void)
 {
 	bioset_exit(&chunk_io_bioset);
 	bioset_exit(&chunk_clone_bioset);
+	destroy_workqueue(chunk_wq);
 }

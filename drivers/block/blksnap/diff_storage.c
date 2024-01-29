@@ -86,7 +86,7 @@ static inline void check_halffull(struct diff_storage *diff_storage,
 		}
 
 		pr_debug("Diff storage low free space.\n");
-		queue_work(system_wq, &diff_storage->reallocate_work);
+		queue_work(system_highpri_wq, &diff_storage->reallocate_work);
 	}
 }
 
