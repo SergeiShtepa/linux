@@ -128,16 +128,6 @@ void chunk_copy_bio(struct chunk *chunk, struct bio *bio,
 	}
 }
 
-static void chunk_clone_endio(struct bio *bio)
-{
-	struct bio *orig_bio = bio->bi_private;
-
-	if (unlikely(bio->bi_status != BLK_STS_OK))
-		bio_io_error(orig_bio);
-	else
-		bio_endio(orig_bio);
-}
-
 static inline sector_t chunk_offset(struct chunk *chunk, struct bio *bio)
 {
 	return bio->bi_iter.bi_sector - chunk_sector(chunk);
@@ -175,11 +165,9 @@ void chunk_diff_bio_tobdev(struct chunk *chunk, struct bio *bio)
 
 	new_bio = chunk_alloc_clone(chunk->diff_bdev, bio);
 	chunk_limit_iter(chunk, bio, chunk->diff_ofs_sect, &new_bio->bi_iter);
-	new_bio->bi_end_io = chunk_clone_endio;
-	new_bio->bi_private = bio;
 
 	bio_advance(bio, new_bio->bi_iter.bi_size);
-	bio_inc_remaining(bio);
+	bio_chain(new_bio, bio);
 
 	submit_bio_noacct(new_bio);
 }
