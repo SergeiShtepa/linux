@@ -53,10 +53,6 @@ enum blkfilter_ctl_blksnap {
 	BLKFILTER_CTL_BLKSNAP_SNAPSHOTINFO = 4,
 };
 
-#ifndef UUID_SIZE
-#define UUID_SIZE 16
-#endif
-
 /**
  * struct blksnap_uuid - Unique 16-byte identifier.
  *
@@ -64,7 +60,7 @@ enum blkfilter_ctl_blksnap {
  *	An array of 16 bytes.
  */
 struct blksnap_uuid {
-	__u8 b[UUID_SIZE];
+	__u8 b[16];
 };
 
 /**
