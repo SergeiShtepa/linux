@@ -25,8 +25,8 @@ static struct workqueue_struct *chunk_wq;
 
 static inline sector_t chunk_sector(struct chunk *chunk)
 {
-	return (sector_t)(chunk->number)
-	       << (chunk->diff_area->chunk_shift - SECTOR_SHIFT);
+	return (sector_t)(chunk->number) <<
+		(chunk->diff_area->chunk_shift - SECTOR_SHIFT);
 }
 
 static inline sector_t chunk_sector_end(struct chunk *chunk)

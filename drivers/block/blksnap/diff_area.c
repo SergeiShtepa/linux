@@ -91,7 +91,7 @@ static void diff_area_calculate_chunk_size(struct diff_area *diff_area)
 	sector_t min_io_sect;
 
 	min_io_sect = (sector_t)(bdev_io_min(diff_area->orig_bdev) >>
-		SECTOR_SHIFT);
+								SECTOR_SHIFT);
 	capacity = bdev_nr_sectors(diff_area->orig_bdev);
 	pr_debug("Minimal IO block %llu sectors\n", min_io_sect);
 	pr_debug("Device capacity %llu sectors\n", capacity);
@@ -121,9 +121,10 @@ void diff_area_free(struct kref *kref)
 
 	flush_work(&diff_area->image_io_work);
 	flush_work(&diff_area->store_queue_work);
-	xa_for_each(&diff_area->chunk_map, inx, chunk)
+	xa_for_each(&diff_area->chunk_map, inx, chunk) {
 		if (chunk)
 			chunk_free(diff_area, chunk);
+	}
 	xa_destroy(&diff_area->chunk_map);
 
 	diff_buffer_cleanup(diff_area);
@@ -459,10 +460,10 @@ static void orig_clone_bio(struct diff_area *diff_area, struct bio *bio)
 bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 {
 	int ret;
+	unsigned long nr;
 	struct chunk *chunk;
-	unsigned long nr = diff_area_chunk_number(diff_area,
-						  bio->bi_iter.bi_sector);
 
+	nr = diff_area_chunk_number(diff_area, bio->bi_iter.bi_sector);
 	chunk = xa_load(&diff_area->chunk_map, nr);
 	/*
 	 * If this chunk is not in the chunk map, then the COW algorithm did
