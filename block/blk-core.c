@@ -18,6 +18,7 @@
 #include <linux/blkdev.h>
 #include <linux/blk-pm.h>
 #include <linux/blk-integrity.h>
+#include <linux/blk-filter.h>
 #include <linux/highmem.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
@@ -609,7 +610,8 @@ static void __submit_bio(struct bio *bio)
 	} else if (likely(bio_queue_enter(bio) == 0)) {
 		struct gendisk *disk = bio->bi_bdev->bd_disk;
 
-		disk->fops->submit_bio(bio);
+		if (!blkfilter_bio(bio))
+			disk->fops->submit_bio(bio);
 		blk_queue_exit(disk->queue);
 	}
 }
@@ -690,6 +692,31 @@ static void __submit_bio_noacct_mq(struct bio *bio)
 	current->bio_list = NULL;
 }
 
+/**
+ * submit_bio_noacct_nocheck_resubmit - re-submit a bio to the block device
+ *	layer for I/O from block device filter.
+ * @bio:  The bio describing the location in memory and on the device.
+ *
+ * This is a version of submit_bio() that shall only be used for I/O that is
+ * resubmitted to lower level by block device filters.  All file  systems and
+ * other upper level users of the block layer should use submit_bio() instead.
+ */
+void submit_bio_noacct_nocheck_resubmit(struct bio *bio)
+{
+	/*
+	 * We only want one ->submit_bio to be active at a time, else stack
+	 * usage with stacked devices could be a problem.  Use current->bio_list
+	 * to collect a list of requests submitted by a ->submit_bio method
+	 * while it is active, and then process them after it returned.
+	 */
+	if (current->bio_list)
+		bio_list_add(&current->bio_list[0], bio);
+	else if (!bio->bi_bdev->bd_has_submit_bio)
+		__submit_bio_noacct_mq(bio);
+	else
+		__submit_bio_noacct(bio);
+}
+
 void submit_bio_noacct_nocheck(struct bio *bio)
 {
 	blk_cgroup_bio_start(bio);
@@ -704,18 +731,7 @@ void submit_bio_noacct_nocheck(struct bio *bio)
 		bio_set_flag(bio, BIO_TRACE_COMPLETION);
 	}
 
-	/*
-	 * We only want one ->submit_bio to be active at a time, else stack
-	 * usage with stacked devices could be a problem.  Use current->bio_list
-	 * to collect a list of requests submited by a ->submit_bio method while
-	 * it is active, and then process them after it returned.
-	 */
-	if (current->bio_list)
-		bio_list_add(&current->bio_list[0], bio);
-	else if (!bio->bi_bdev->bd_has_submit_bio)
-		__submit_bio_noacct_mq(bio);
-	else
-		__submit_bio_noacct(bio);
+	submit_bio_noacct_nocheck_resubmit(bio);
 }
 
 /**
