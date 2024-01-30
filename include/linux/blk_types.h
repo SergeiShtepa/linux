@@ -346,6 +346,10 @@ enum {
 	BIO_QOS_MERGED,		/* but went through rq_qos merge path */
 	BIO_REMAPPED,
 	BIO_ZONE_WRITE_LOCKED,	/* Owns a zoned device zone write lock */
+#ifdef CONFIG_BLK_INLINE_ENCRYPTION
+	BIO_CRYPTO_PREPARED,	/* Flag that the context for inline cryptography
+				 * is initialized */
+#endif
 	BIO_FLAG_LAST
 };
 
