@@ -418,6 +418,7 @@ struct block_device *bdev_alloc(struct gendisk *disk, u8 partno)
 		return NULL;
 	}
 	bdev->bd_disk = disk;
+	bdev->bd_filter = NULL;
 	return bdev;
 }
 
@@ -1055,6 +1056,7 @@ void bdev_mark_dead(struct block_device *bdev, bool surprise)
 	}
 
 	invalidate_bdev(bdev);
+	blkfilter_detach(bdev);
 }
 /*
  * New drivers should not use this directly.  There are some drivers however
