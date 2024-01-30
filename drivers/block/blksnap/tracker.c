@@ -350,6 +350,9 @@ void tracker_release_snapshot(struct tracker *tracker)
 
 	blk_mq_unfreeze_queue(tracker->orig_bdev->bd_queue);
 
+	flush_work(&diff_area->image_io_work);
+	flush_work(&diff_area->store_queue_work);
+
 	diff_area_put(diff_area);
 }
 

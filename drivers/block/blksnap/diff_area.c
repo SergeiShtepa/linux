@@ -119,8 +119,6 @@ void diff_area_free(struct kref *kref)
 	might_sleep();
 	diff_area = container_of(kref, struct diff_area, kref);
 
-	flush_work(&diff_area->image_io_work);
-	flush_work(&diff_area->store_queue_work);
 	xa_for_each(&diff_area->chunk_map, inx, chunk) {
 		if (chunk)
 			chunk_free(diff_area, chunk);

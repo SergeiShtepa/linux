@@ -55,15 +55,12 @@ void chunk_store_failed(struct chunk *chunk, int error)
 
 static inline void chunk_io_failed(struct chunk *chunk)
 {
-	struct diff_area *diff_area = diff_area_get(chunk->diff_area);
-
 	if (likely(chunk->diff_buffer)) {
-		diff_buffer_release(diff_area, chunk->diff_buffer);
+		diff_buffer_release(chunk->diff_area, chunk->diff_buffer);
 		chunk->diff_buffer = NULL;
 	}
 
 	chunk_up(chunk);
-	diff_area_put(diff_area);
 }
 
 static void chunk_schedule_storing(struct chunk *chunk)
