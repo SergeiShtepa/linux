@@ -477,7 +477,6 @@ void chunk_diff_write(struct chunk *chunk)
 
 	iov_iter_bvec(&iov_iter, ITER_SOURCE, chunk->diff_buffer->bvec,
 		      chunk->diff_buffer->nr_pages, length);
-	file_start_write(chunk->diff_file);
 	while (length) {
 		len = vfs_iter_write(chunk->diff_file, &iov_iter, &pos, 0);
 		if (len < 0) {
@@ -488,7 +487,6 @@ void chunk_diff_write(struct chunk *chunk)
 		}
 		length -= len;
 	}
-	file_end_write(chunk->diff_file);
 	chunk_notify_store(chunk, err);
 }
 
