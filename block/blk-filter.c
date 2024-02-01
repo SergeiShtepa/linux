@@ -20,6 +20,17 @@ static inline struct blkfilter_operations *__blkfilter_find(const char *name)
 	return NULL;
 }
 
+static inline int is_disk_alive(struct gendisk *disk)
+{
+	int ret = 0;
+
+	mutex_lock(&disk->open_mutex);
+	if (!disk_live(disk))
+		ret = -ENODEV;
+	mutex_unlock(&disk->open_mutex);
+	return ret;
+}
+
 int blkfilter_ioctl_attach(struct block_device *bdev,
 		    struct blkfilter_name __user *argp)
 {
@@ -39,14 +50,13 @@ int blkfilter_ioctl_attach(struct block_device *bdev,
 	if (!ops)
 		return -ENOENT;
 
-	mutex_lock(&bdev->bd_disk->open_mutex);
-	if (!disk_live(bdev->bd_disk)) {
-		ret = -ENODEV;
-		goto out_mutex_unlock;
-	}
+	ret = is_disk_alive(bdev->bd_disk);
+	if (ret)
+		goto out_module_put;
+
 	ret = bdev_freeze(bdev);
 	if (ret)
-		goto out_mutex_unlock;
+		goto out_module_put;
 	blk_mq_freeze_queue(bdev->bd_queue);
 
 	spin_lock(&blkfilters_lock);
@@ -83,9 +93,8 @@ int blkfilter_ioctl_attach(struct block_device *bdev,
 out_unfreeze:
 	blk_mq_unfreeze_queue(bdev->bd_queue);
 	bdev_thaw(bdev);
-out_mutex_unlock:
-	mutex_unlock(&bdev->bd_disk->open_mutex);
 	if (ret)
+out_module_put:
 		module_put(ops->owner);
 	return ret;
 }
@@ -126,11 +135,10 @@ int blkfilter_ioctl_detach(struct block_device *bdev,
 	if (copy_from_user(&name, argp, sizeof(name)))
 		return -EFAULT;
 
-	mutex_lock(&bdev->bd_disk->open_mutex);
-	if (!disk_live(bdev->bd_disk)) {
-		ret = -ENODEV;
-		goto out_mutex_unlock;
-	}
+	ret = is_disk_alive(bdev->bd_disk);
+	if (ret)
+		return ret;
+
 	blk_mq_freeze_queue(bdev->bd_queue);
 
 	spin_lock(&blkfilters_lock);
@@ -147,10 +155,7 @@ int blkfilter_ioctl_detach(struct block_device *bdev,
 	spin_unlock(&blkfilters_lock);
 
 	__blkfilter_detach(flt);
-
 	blk_mq_unfreeze_queue(bdev->bd_queue);
-out_mutex_unlock:
-	mutex_unlock(&bdev->bd_disk->open_mutex);
 	return ret;
 }
 
@@ -164,14 +169,13 @@ int blkfilter_ioctl_ctl(struct block_device *bdev,
 	if (copy_from_user(&ctl, argp, sizeof(ctl)))
 		return -EFAULT;
 
-	mutex_lock(&bdev->bd_disk->open_mutex);
-	if (!disk_live(bdev->bd_disk)) {
-		ret = -ENODEV;
-		goto out_mutex_unlock;
-	}
+	ret = is_disk_alive(bdev->bd_disk);
+	if (ret)
+		return ret;
+
 	ret = blk_queue_enter(bdev_get_queue(bdev), 0);
 	if (ret)
-		goto out_mutex_unlock;
+		return ret;
 
 	spin_lock(&blkfilters_lock);
 	flt = bdev->bd_filter;
@@ -185,19 +189,17 @@ int blkfilter_ioctl_ctl(struct block_device *bdev,
 		ret = flt->ops->ctl(flt, ctl.cmd, u64_to_user_ptr(ctl.opt),
 								&ctl.optlen);
 	blk_queue_exit(bdev_get_queue(bdev));
-out_mutex_unlock:
-	mutex_unlock(&bdev->bd_disk->open_mutex);
 	return ret;
 }
 
 ssize_t blkfilter_show(struct block_device *bdev, char *buf)
 {
-	ssize_t ret;
+	int ret = 0;
 	const char *name = NULL;
 
-	mutex_lock(&bdev->bd_disk->open_mutex);
-	if (!disk_live(bdev->bd_disk))
-		goto fail;
+	ret = is_disk_alive(bdev->bd_disk);
+	if (ret)
+		goto out;
 
 	blk_mq_freeze_queue(bdev->bd_queue);
 	spin_lock(&blkfilters_lock);
@@ -207,12 +209,9 @@ ssize_t blkfilter_show(struct block_device *bdev, char *buf)
 	blk_mq_unfreeze_queue(bdev->bd_queue);
 
 	if (name)
-		ret = sprintf(buf, "%s\n", name);
-	else
-fail:
-		ret = sprintf(buf, "\n");
-	mutex_unlock(&bdev->bd_disk->open_mutex);
-	return ret;
+		return sprintf(buf, "%s\n", name);
+out:
+	return sprintf(buf, "\n");
 }
 
 /**
