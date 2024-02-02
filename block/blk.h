@@ -527,6 +527,4 @@ static inline int req_ref_read(struct request *req)
 	return atomic_read(&req->ref);
 }
 
-void submit_bio_noacct_nocheck_resubmit(struct bio *bio);
-
 #endif /* BLK_INTERNAL_H */
