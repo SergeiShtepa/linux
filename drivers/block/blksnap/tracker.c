@@ -62,7 +62,7 @@ static bool tracker_submit_bio(struct bio *bio)
 		return false;
 
 #ifdef CONFIG_BLK_INLINE_ENCRYPTION
-	if (bio_has_crypt_ctx(bio) || bio_flagged(bio, BIO_CRYPTO_PREPARED)) {
+	if (bio_has_crypt_ctx(bio)) {
 		pr_err("Inline encryption is not supported\n");
 		diff_area_set_corrupted(tracker->diff_area, -EPERM);
 		return false;
