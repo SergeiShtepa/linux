@@ -171,18 +171,14 @@ void chunk_diff_bio_tobdev(struct chunk *chunk, struct bio *bio)
 
 static inline void chunk_io_ctx_free(struct chunk_io_ctx *io_ctx, long ret)
 {
-	struct chunk *chunk = io_ctx->chunk;
-	struct bio *bio = io_ctx->bio;
-
-	kfree(io_ctx);
 	if (ret < 0) {
-		bio_io_error(bio);
-		chunk_io_failed(chunk);
-		return;
+		bio_io_error(io_ctx->bio);
+		chunk_io_failed(io_ctx->chunk);
+	} else {
+		bio_endio(io_ctx->bio);
+		chunk_up(io_ctx->chunk);
 	}
-
-	bio_endio(bio);
-	chunk_up(chunk);
+	kfree(io_ctx);
 }
 
 static void chunk_diff_bio_complete_read(struct kiocb *iocb, long ret)
