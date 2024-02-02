@@ -254,21 +254,3 @@ void blkfilter_unregister(struct blkfilter_operations *ops)
 	spin_unlock(&blkfilters_lock);
 }
 EXPORT_SYMBOL_GPL(blkfilter_unregister);
-
-/**
- * blkfilter_resubmit_bio() - Resubmit the bio after processing by the filter.
- * @bio:	The I/O unit.
- * @flt:	The block device filter.
- *
- * The filter can skip the processing of the I/O unit. This function allows
- * to return the I/O unit for processing again.
- */
-void blkfilter_resubmit_bio(struct bio *bio, struct blkfilter *flt)
-{
-	struct blkfilter *prev = current->blk_filter;
-
-	current->blk_filter = flt;
-	submit_bio_noacct_nocheck_resubmit(bio);
-	current->blk_filter = prev;
-}
-EXPORT_SYMBOL_GPL(blkfilter_resubmit_bio);

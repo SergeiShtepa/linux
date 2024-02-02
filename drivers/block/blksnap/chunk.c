@@ -12,7 +12,6 @@
 
 struct chunk_bio {
 	struct work_struct work;
-	struct blkfilter *flt;
 	struct list_head chunks;
 	struct bio *orig_bio;
 	struct bvec_iter orig_iter;
@@ -350,7 +349,7 @@ static void notify_load_and_postpone_io(struct work_struct *work)
 	}
 
 	/* re submit filtered original bio */
-	blkfilter_resubmit_bio(cbio->orig_bio, cbio->flt);
+	resubmit_filtered_bio(cbio->orig_bio);
 	bio_put(&cbio->bio);
 }
 
@@ -453,7 +452,6 @@ void chunk_store_tobdev(struct chunk *chunk)
 
 	cbio = container_of(bio, struct chunk_bio, bio);
 	INIT_WORK(&cbio->work, chunk_notify_store_tobdev);
-	cbio->flt = NULL;
 	INIT_LIST_HEAD(&cbio->chunks);
 	list_add_tail(&chunk->link, &cbio->chunks);
 	cbio->orig_bio = NULL;
@@ -550,8 +548,8 @@ int chunk_load_and_postpone_io(struct chunk *chunk, struct bio **chunk_bio)
 	return 0;
 }
 
-void chunk_load_and_postpone_io_finish(struct blkfilter *flt,
-	struct list_head *chunks, struct bio *chunk_bio, struct bio *orig_bio)
+void chunk_load_and_postpone_io_finish(struct list_head *chunks,
+				struct bio *chunk_bio, struct bio *orig_bio)
 {
 	struct chunk_bio *cbio;
 
@@ -566,7 +564,6 @@ void chunk_load_and_postpone_io_finish(struct blkfilter *flt,
 		list_add_tail(&it->link, &cbio->chunks);
 	}
 	INIT_WORK(&cbio->work, notify_load_and_postpone_io);
-	cbio->flt = flt;
 	cbio->orig_bio = orig_bio;
 	chunk_submit_bio(chunk_bio);
 }
@@ -586,7 +583,6 @@ bool chunk_load_and_schedule_io(struct chunk *chunk, struct bio *orig_bio)
 	INIT_LIST_HEAD(&cbio->chunks);
 	list_add_tail(&chunk->link, &cbio->chunks);
 	INIT_WORK(&cbio->work, notify_load_and_schedule_io);
-	cbio->flt = NULL;
 	cbio->orig_bio = orig_bio;
 	cbio->orig_iter = orig_bio->bi_iter;
 	bio_advance_iter_single(orig_bio, &orig_bio->bi_iter,

@@ -46,7 +46,6 @@ struct blkfilter_operations {
 
 int blkfilter_register(struct blkfilter_operations *ops);
 void blkfilter_unregister(struct blkfilter_operations *ops);
-void blkfilter_resubmit_bio(struct bio *bio, struct blkfilter *flt);
 
 /*
  * The internal function for the block layer.
@@ -67,5 +66,7 @@ static inline bool blkfilter_bio(struct bio *bio)
 
 	return skip_bio;
 };
+
+void resubmit_filtered_bio(struct bio *bio);
 
 #endif /* _UAPI_LINUX_BLK_FILTER_H */
