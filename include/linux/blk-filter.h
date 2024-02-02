@@ -46,7 +46,6 @@ struct blkfilter_operations {
 
 int blkfilter_register(struct blkfilter_operations *ops);
 void blkfilter_unregister(struct blkfilter_operations *ops);
-void blkfilter_resubmit_bio(struct bio *bio, struct blkfilter *flt);
 
 /*
  * The internal function for the block layer.
