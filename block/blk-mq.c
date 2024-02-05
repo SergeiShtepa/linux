@@ -2998,7 +2998,7 @@ void blk_mq_submit_bio(struct bio *bio, bool is_filtered)
 	}
 	if (!is_filtered)
 		if (blkfilter_bio(bio))
-			return;
+			goto queue_exit;
 
 	if (unlikely(bio_may_exceed_limits(bio, &q->limits))) {
 		bio = __bio_split_to_limits(bio, &q->limits, &nr_segs);
