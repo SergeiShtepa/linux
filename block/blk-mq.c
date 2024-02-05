@@ -2961,6 +2961,7 @@ static void bio_set_ioprio(struct bio *bio)
 /**
  * blk_mq_submit_bio - Create and send a request to block device.
  * @bio: Bio pointer.
+ * @is_filtered: Indicates that the bio has been processed by the filter.
  *
  * Builds up a request structure from @q and @bio and send to the device. The
  * request may not be queued directly to hardware if:
@@ -2971,7 +2972,7 @@ static void bio_set_ioprio(struct bio *bio)
  * It will not queue the request if there is an error with the bio, or at the
  * request creation.
  */
-void blk_mq_submit_bio(struct bio *bio)
+void blk_mq_submit_bio(struct bio *bio, bool is_filtered)
 {
 	struct request_queue *q = bdev_get_queue(bio->bi_bdev);
 	struct blk_plug *plug = blk_mq_plug(bio);
@@ -2995,8 +2996,9 @@ void blk_mq_submit_bio(struct bio *bio)
 		if (unlikely(bio_queue_enter(bio)))
 			return;
 	}
-	if (blkfilter_bio(bio))
-		return;
+	if (!is_filtered)
+		if (blkfilter_bio(bio))
+			return;
 
 	if (unlikely(bio_may_exceed_limits(bio, &q->limits))) {
 		bio = __bio_split_to_limits(bio, &q->limits, &nr_segs);
