@@ -95,12 +95,19 @@ struct chunk {
 	sector_t diff_ofs_sect;
 
 	struct diff_buffer *diff_buffer;
+#ifdef CONFIG_BLKSNAP_CHUNK_DBG
+	const char *holder_func;
+	sector_t holder_sector;
+#endif
 };
 
 static inline void chunk_up(struct chunk *chunk)
 {
 	struct diff_area *diff_area = chunk->diff_area;
-
+#ifdef CONFIG_BLKSNAP_CHUNK_DBG
+	chunk->holder_func = NULL;
+	chunk->holder_sector = 0;
+#endif
 	chunk->diff_area = NULL;
 	up(&chunk->lock);
 	diff_area_put(diff_area);

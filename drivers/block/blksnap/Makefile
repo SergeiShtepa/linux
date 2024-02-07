@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0
 
+# EXTRA_CFLAGS += "-D DEBUG"
+# EXTRA_CFLAGS += "-D CONFIG_BLKSNAP_CHUNK_DBG"
+
 blksnap-y := 		\
 	cbt_map.o	\
 	chunk.o		\
