@@ -36,7 +36,7 @@ static bool tracker_submit_bio(struct bio *bio)
 	struct blkfilter *flt = bio->bi_bdev->bd_filter;
 	struct tracker *tracker = container_of(flt, struct tracker, filter);
 	sector_t count = bio_sectors(bio);
-	struct bvec_iter copy_iter;
+	sector_t sector = bio->bi_iter.bi_sector;
 
 	if (WARN_ON_ONCE(current->blk_filter != flt))
 		return false;
@@ -44,11 +44,10 @@ static bool tracker_submit_bio(struct bio *bio)
 	if (!op_is_write(bio_op(bio)) || !count)
 		return false;
 
-	copy_iter = bio->bi_iter;
 	if (bio_flagged(bio, BIO_REMAPPED))
-		copy_iter.bi_sector -= bio->bi_bdev->bd_start_sect;
+		sector -= bio->bi_bdev->bd_start_sect;
 
-	if (cbt_map_set(tracker->cbt_map, copy_iter.bi_sector, count))
+	if (cbt_map_set(tracker->cbt_map, sector, count))
 		return false;
 
 	if (!atomic_read(&tracker->snapshot_is_taken))
@@ -75,7 +74,7 @@ static bool tracker_submit_bio(struct bio *bio)
 		return false;
 	}
 #endif
-	return diff_area_cow(tracker->diff_area, bio, &copy_iter);
+	return diff_area_cow(tracker->diff_area, bio);
 }
 
 static struct blkfilter *tracker_attach(struct block_device *bdev)

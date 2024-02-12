@@ -12,6 +12,11 @@
 #include "params.h"
 #include "tracker.h"
 
+struct cow_task {
+	struct list_head link;
+	struct bio *bio;
+};
+
 static inline sector_t diff_area_chunk_offset(struct diff_area *diff_area,
 					      sector_t sector)
 {
@@ -196,6 +201,58 @@ static inline bool diff_area_store_one(struct diff_area *diff_area)
 	return true;
 }
 
+static int diff_area_cow_schedule(struct diff_area *diff_area, struct bio *bio)
+{
+	struct cow_task *task;
+
+	task = kzalloc(sizeof(struct cow_task), GFP_KERNEL);
+	if (!task)
+		return -ENOMEM;
+
+	INIT_LIST_HEAD(&task->link);
+	task->bio = bio;
+	bio_get(bio);
+
+	spin_lock(&diff_area->cow_queue_lock);
+	list_add_tail(&task->link, &diff_area->cow_queue);
+	spin_unlock(&diff_area->cow_queue_lock);
+
+	queue_work(system_highpri_wq, &diff_area->cow_queue_work);
+	return 0;
+}
+
+static inline struct bio *diff_area_cow_get_bio(struct diff_area *diff_area)
+{
+	struct bio *bio = NULL;
+	struct cow_task *task;
+
+	spin_lock(&diff_area->cow_queue_lock);
+	task = list_first_entry_or_null(&diff_area->cow_queue,
+							struct cow_task, link);
+	if (task)
+		list_del(&task->link);
+	spin_unlock(&diff_area->cow_queue_lock);
+
+	if (task) {
+		bio = task->bio;
+		kfree(task);
+	}
+	return bio;
+}
+
+static void diff_area_cow_queue_work(struct work_struct *work)
+{
+	struct diff_area *diff_area = container_of(work, struct diff_area,
+							cow_queue_work);
+	struct bio *bio;
+
+	while ((bio = diff_area_cow_get_bio(diff_area))) {
+		if (!diff_area_cow_process_bio(diff_area, bio))
+			resubmit_filtered_bio(bio);
+		bio_put(bio);
+	}
+}
+
 static void diff_area_store_queue_work(struct work_struct *work)
 {
 	struct diff_area *diff_area = container_of(
@@ -271,6 +328,10 @@ struct diff_area *diff_area_new(struct tracker *tracker,
 	tracker_get(tracker);
 	diff_area->tracker = tracker;
 
+	spin_lock_init(&diff_area->cow_queue_lock);
+	INIT_LIST_HEAD(&diff_area->cow_queue);
+	INIT_WORK(&diff_area->cow_queue_work, diff_area_cow_queue_work);
+
 	spin_lock_init(&diff_area->store_queue_lock);
 	INIT_LIST_HEAD(&diff_area->store_queue);
 	atomic_set(&diff_area->store_queue_count, 0);
@@ -309,20 +370,23 @@ static inline unsigned int chunk_limit(struct chunk *chunk,
 /*
  * Implements the copy-on-write mechanism.
  */
-bool diff_area_cow(struct diff_area *diff_area, struct bio *bio,
-		   struct bvec_iter *iter)
+bool diff_area_cow_process_bio(struct diff_area *diff_area, struct bio *bio)
 {
 	bool skip_bio = false;
 	bool nowait = bio->bi_opf & REQ_NOWAIT;
+	struct bvec_iter iter = bio->bi_iter;
 	struct bio *chunk_bio = NULL;
 	LIST_HEAD(chunks);
 	int ret = 0;
 	unsigned int flags;
 
+	if (bio_flagged(bio, BIO_REMAPPED))
+		iter.bi_sector -= bio->bi_bdev->bd_start_sect;
+
 	flags = memalloc_noio_save();
-	while (iter->bi_size) {
+	while (iter.bi_size) {
 		unsigned long nr = diff_area_chunk_number(diff_area,
-							  iter->bi_sector);
+								iter.bi_sector);
 		struct chunk *chunk = xa_load(&diff_area->chunk_map, nr);
 		unsigned int len;
 
@@ -371,13 +435,13 @@ bool diff_area_cow(struct diff_area *diff_area, struct bio *bio,
 					if (chunk->holder_func) {
 						pr_err("holder %s\n", chunk->holder_func);
 						pr_err("holder sector: %llu\n", chunk->holder_sector);
-						pr_err("current sector: %llu\n", iter->bi_sector);
+						pr_err("current sector: %llu\n", iter.bi_sector);
 					}
 				}
 				goto fail;
 			}
 			chunk->holder_func = __func__;
-			chunk->holder_sector = iter->bi_sector;
+			chunk->holder_sector = iter.bi_sector;
 #else
 			ret = down_killable(&chunk->lock);
 			if (unlikely(ret))
@@ -386,8 +450,8 @@ bool diff_area_cow(struct diff_area *diff_area, struct bio *bio,
 		}
 		chunk->diff_area = diff_area_get(diff_area);
 
-		len = chunk_limit(chunk, iter);
-		bio_advance_iter_single(bio, iter, len);
+		len = chunk_limit(chunk, &iter);
+		bio_advance_iter_single(bio, &iter, len);
 
 		if (chunk->state == CHUNK_ST_NEW) {
 			if (nowait) {
@@ -451,6 +515,29 @@ fail:
 		diff_area_set_corrupted(diff_area, ret);
 out:
 	memalloc_noio_restore(flags);
+	return skip_bio;
+}
+
+bool diff_area_cow(struct diff_area *diff_area, struct bio *bio)
+{
+	int ret;
+	bool skip_bio = true;
+	unsigned int flags;
+
+	if (bio->bi_opf & REQ_NOWAIT) {
+		bio->bi_status = BLK_STS_AGAIN;
+		bio_endio(bio);
+		return skip_bio;
+	}
+
+	flags = memalloc_noio_save();
+	ret = diff_area_cow_schedule(diff_area, bio);
+	if (ret) {
+		diff_area_set_corrupted(diff_area, ret);
+		skip_bio = false;
+	}
+	memalloc_noio_restore(flags);
+
 	return skip_bio;
 }
 
