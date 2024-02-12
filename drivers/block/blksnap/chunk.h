@@ -114,6 +114,7 @@ static inline void chunk_up(struct chunk *chunk)
 };
 
 struct chunk_io_ctx {
+	struct kref kref;
 	struct list_head link;
 	struct kiocb iocb;
 	struct iov_iter iov_iter;

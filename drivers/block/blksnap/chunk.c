@@ -168,6 +168,11 @@ void chunk_diff_bio_tobdev(struct chunk *chunk, struct bio *bio)
 	submit_bio_noacct(new_bio);
 }
 
+static void io_ctx_free(struct kref *kref)
+{
+	kfree(container_of(kref, struct chunk_io_ctx, kref));
+}
+
 static inline void chunk_io_ctx_complete(struct chunk_io_ctx *io_ctx, long ret)
 {
 	if (ret < 0) {
@@ -177,7 +182,7 @@ static inline void chunk_io_ctx_complete(struct chunk_io_ctx *io_ctx, long ret)
 		bio_endio(io_ctx->bio);
 		chunk_up(io_ctx->chunk);
 	}
-	kfree(io_ctx);
+	kref_put(&io_ctx->kref, io_ctx_free);
 }
 
 static void chunk_diff_bio_complete(struct kiocb *iocb, long ret)
@@ -204,11 +209,13 @@ void chunk_diff_bio_execute(struct chunk_io_ctx *io_ctx)
 							&io_ctx->iov_iter);
 	if (ret != -EIOCBQUEUED)
 		chunk_io_ctx_complete(io_ctx, ret);
+	kref_put(&io_ctx->kref, io_ctx_free);
 }
 
 static inline void chunk_diff_bio_schedule(struct diff_area *diff_area,
 					   struct chunk_io_ctx *io_ctx)
 {
+	kref_get(&io_ctx->kref);
 	spin_lock(&diff_area->image_io_queue_lock);
 	list_add_tail(&io_ctx->link, &diff_area->image_io_queue);
 	spin_unlock(&diff_area->image_io_queue_lock);
@@ -231,7 +238,8 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 	io_ctx = kzalloc(sizeof(struct chunk_io_ctx), GFP_KERNEL);
 	if (!io_ctx)
 		return -ENOMEM;
-
+	INIT_LIST_HEAD(&io_ctx->link);
+	kref_init(&io_ctx->kref);
 	chunk_ofs = (bio->bi_iter.bi_sector - chunk_sector(chunk))
 			<< SECTOR_SHIFT;
 	chunk_left = (chunk->sector_count << SECTOR_SHIFT) - chunk_ofs;
