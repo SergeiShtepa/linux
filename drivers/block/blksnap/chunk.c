@@ -168,7 +168,7 @@ void chunk_diff_bio_tobdev(struct chunk *chunk, struct bio *bio)
 	submit_bio_noacct(new_bio);
 }
 
-static inline void chunk_io_ctx_free(struct chunk_io_ctx *io_ctx, long ret)
+static inline void chunk_io_ctx_complete(struct chunk_io_ctx *io_ctx, long ret)
 {
 	if (ret < 0) {
 		bio_io_error(io_ctx->bio);
@@ -180,55 +180,30 @@ static inline void chunk_io_ctx_free(struct chunk_io_ctx *io_ctx, long ret)
 	kfree(io_ctx);
 }
 
-static void chunk_diff_bio_complete_read(struct kiocb *iocb, long ret)
+static void chunk_diff_bio_complete(struct kiocb *iocb, long ret)
 {
 	struct chunk_io_ctx *io_ctx;
 
-	io_ctx = container_of(iocb, struct chunk_io_ctx, iocb);
-	chunk_io_ctx_free(io_ctx, ret);
-}
-
-static void chunk_diff_bio_complete_write(struct kiocb *iocb, long ret)
-{
-	struct chunk_io_ctx *io_ctx;
+	if (unlikely(ret < 0))
+		pr_err("Failed to write data to difference storage\n");
 
 	io_ctx = container_of(iocb, struct chunk_io_ctx, iocb);
-	chunk_io_ctx_free(io_ctx, ret);
-}
-
-static inline void chunk_diff_bio_execute_write(struct chunk_io_ctx *io_ctx)
-{
-	struct file *diff_file = io_ctx->chunk->diff_file;
-	ssize_t len;
-
-	len = vfs_iocb_iter_write(diff_file, &io_ctx->iocb,  &io_ctx->iov_iter);
-
-	if (len != -EIOCBQUEUED) {
-		if (unlikely(len < 0))
-			pr_err("Failed to write data to difference storage\n");
-		chunk_io_ctx_free(io_ctx, len);
-	}
-}
-
-static inline void chunk_diff_bio_execute_read(struct chunk_io_ctx *io_ctx)
-{
-	struct file *diff_file = io_ctx->chunk->diff_file;
-	ssize_t len;
-
-	len = vfs_iocb_iter_read(diff_file, &io_ctx->iocb, &io_ctx->iov_iter);
-	if (len != -EIOCBQUEUED) {
-		if (unlikely(len < 0))
-			pr_err("Failed to read data from difference storage\n");
-		chunk_io_ctx_free(io_ctx, len);
-	}
+	chunk_io_ctx_complete(io_ctx, ret);
 }
 
 void chunk_diff_bio_execute(struct chunk_io_ctx *io_ctx)
 {
+	struct file *diff_file = io_ctx->chunk->diff_file;
+	ssize_t ret;
+
 	if (io_ctx->iov_iter.data_source)
-		chunk_diff_bio_execute_write(io_ctx);
+		ret = vfs_iocb_iter_write(diff_file, &io_ctx->iocb,
+							&io_ctx->iov_iter);
 	else
-		chunk_diff_bio_execute_read(io_ctx);
+		ret = vfs_iocb_iter_read(diff_file, &io_ctx->iocb,
+							&io_ctx->iov_iter);
+	if (ret != -EIOCBQUEUED)
+		chunk_io_ctx_complete(io_ctx, ret);
 }
 
 static inline void chunk_diff_bio_schedule(struct diff_area *diff_area,
@@ -284,8 +259,7 @@ int chunk_diff_bio(struct chunk *chunk, struct bio *bio)
 								chunk_ofs;
 	if (is_write)
 		io_ctx->iocb.ki_flags |= IOCB_WRITE;
-	io_ctx->iocb.ki_complete = is_write ? chunk_diff_bio_complete_write
-					    : chunk_diff_bio_complete_read;
+	io_ctx->iocb.ki_complete = chunk_diff_bio_complete;
 	io_ctx->chunk = chunk;
 	io_ctx->bio = bio;
 	bio_inc_remaining(bio);
