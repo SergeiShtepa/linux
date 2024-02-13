@@ -217,7 +217,7 @@ static int diff_area_cow_schedule(struct diff_area *diff_area, struct bio *bio)
 	list_add_tail(&task->link, &diff_area->cow_queue);
 	spin_unlock(&diff_area->cow_queue_lock);
 
-	queue_work(system_highpri_wq, &diff_area->cow_queue_work);
+	blksnap_queue_work(&diff_area->cow_queue_work);
 	return 0;
 }
 

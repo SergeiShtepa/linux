@@ -118,6 +118,8 @@ static const struct blksnap_version version = {
 	.build = 0,
 };
 
+static struct workqueue_struct *blksnap_wq;
+
 unsigned int get_tracking_block_minimum_shift(void)
 {
 	return tracking_block_minimum_shift;
@@ -168,6 +170,11 @@ unsigned int get_free_diff_buffer_pool_size(void)
 sector_t get_diff_storage_minimum(void)
 {
 	return (sector_t)diff_storage_minimum;
+}
+
+bool blksnap_queue_work(struct work_struct *work)
+{
+	return queue_work(blksnap_wq, work);
 }
 
 static int ioctl_version(struct blksnap_version __user *user_version)
@@ -407,6 +414,13 @@ static int __init blksnap_init(void)
 	if (ret)
 		goto fail_chunk_init;
 
+	blksnap_wq = alloc_workqueue("blksnap",
+				      WQ_UNBOUND | WQ_HIGHPRI | WQ_SYSFS, 0);
+	if (!blksnap_wq) {
+		ret = -ENOMEM;
+		goto fail_wq_init;
+	}
+
 	ret = tracker_init();
 	if (ret)
 		goto fail_tracker_init;
@@ -420,6 +434,8 @@ static int __init blksnap_init(void)
 fail_misc_register:
 	tracker_done();
 fail_tracker_init:
+	destroy_workqueue(blksnap_wq);
+fail_wq_init:
 	chunk_done();
 fail_chunk_init:
 
@@ -432,9 +448,10 @@ static void __exit blksnap_exit(void)
 
 	misc_deregister(&blksnap_ctrl_misc);
 
-	chunk_done();
 	snapshot_done();
 	tracker_done();
+	destroy_workqueue(blksnap_wq);
+	chunk_done();
 
 	pr_debug("Module was unloaded\n");
 }
