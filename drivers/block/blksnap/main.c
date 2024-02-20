@@ -349,7 +349,7 @@ static struct miscdevice blksnap_ctrl_misc = {
 static inline sector_t chunk_minimum_sectors(void)
 {
 	return (1ull << (chunk_minimum_shift - SECTOR_SHIFT));
-};
+}
 
 static int __init parameters_init(void)
 {
@@ -375,15 +375,15 @@ static int __init parameters_init(void)
 			 tracking_block_maximum_shift);
 	}
 
+	if (chunk_minimum_shift > chunk_maximum_shift) {
+		chunk_minimum_shift = chunk_maximum_shift;
+		pr_warn("fixed chunk_minimum_shift: %d\n",
+			 chunk_minimum_shift);
+	}
 	if (chunk_minimum_shift < PAGE_SHIFT) {
 		chunk_minimum_shift = PAGE_SHIFT;
 		pr_warn("fixed chunk_minimum_shift: %d\n",
 			 chunk_minimum_shift);
-	}
-	if (chunk_maximum_shift < chunk_minimum_shift) {
-		chunk_maximum_shift = chunk_minimum_shift;
-		pr_warn("fixed chunk_maximum_shift: %d\n",
-			 chunk_maximum_shift);
 	}
 	if (diff_storage_minimum < (chunk_minimum_sectors() * 2)) {
 		diff_storage_minimum = chunk_minimum_sectors() * 2;
@@ -395,6 +395,11 @@ static int __init parameters_init(void)
 		pr_warn("fixed diff_storage_minimum: %d\n",
 			 diff_storage_minimum);
 	}
+
+	if (sizeof(unsigned long) < 8)
+		chunk_maximum_count_shift = min(32, chunk_maximum_count_shift);
+	else
+		chunk_maximum_count_shift = min(40, chunk_maximum_count_shift);
 
 	return 0;
 }
