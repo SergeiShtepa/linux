@@ -202,6 +202,7 @@ Code  Seq#    Include File                                           Comments
 'V'   C0     linux/ivtvfb.h                                          conflict!
 'V'   C0     linux/ivtv.h                                            conflict!
 'V'   C0     media/si4713.h                                          conflict!
+'V'   00-1F  uapi/linux/blksnap.h                                    conflict!
 'W'   00-1F  linux/watchdog.h                                        conflict!
 'W'   00-1F  linux/wanrouter.h                                       conflict! (pre 3.9)
 'W'   00-3F  sound/asound.h                                          conflict!

@@ -7,6 +7,8 @@
 #include <xen/xen.h>
 #include "blk-crypto-internal.h"
 
+struct blkfilter_ctl;
+struct blkfilter_name;
 struct elevator_type;
 
 /* Max future timer expiry for timeouts */
@@ -471,6 +473,15 @@ long blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg);
 long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg);
 
 extern const struct address_space_operations def_blk_aops;
+
+int blkfilter_ioctl_attach(struct block_device *bdev,
+		    struct blkfilter_name __user *argp);
+int blkfilter_ioctl_detach(struct block_device *bdev,
+		    struct blkfilter_name __user *argp);
+int blkfilter_ioctl_ctl(struct block_device *bdev,
+		    struct blkfilter_ctl __user *argp);
+void blkfilter_detach(struct block_device *bdev);
+ssize_t blkfilter_show(struct block_device *bdev, char *buf);
 
 int disk_register_independent_access_ranges(struct gendisk *disk);
 void disk_unregister_independent_access_ranges(struct gendisk *disk);
