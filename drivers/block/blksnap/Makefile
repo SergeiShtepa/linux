@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2023 Veeam Software Group GmbH
 
 # EXTRA_CFLAGS += "-D DEBUG"
 # EXTRA_CFLAGS += "-D CONFIG_BLKSNAP_CHUNK_DBG"
