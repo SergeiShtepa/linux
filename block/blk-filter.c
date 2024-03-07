@@ -20,13 +20,12 @@ static inline struct blkfilter_operations *__blkfilter_find(const char *name)
 	return NULL;
 }
 
-static inline int is_disk_alive(struct gendisk *disk)
+static inline bool is_disk_alive(struct gendisk *disk)
 {
-	int ret = 0;
+	bool ret;
 
 	mutex_lock(&disk->open_mutex);
-	if (!disk_live(disk))
-		ret = -ENODEV;
+	ret = disk_live(disk);
 	mutex_unlock(&disk->open_mutex);
 	return ret;
 }
@@ -50,9 +49,10 @@ int blkfilter_ioctl_attach(struct block_device *bdev,
 	if (!ops)
 		return -ENOENT;
 
-	ret = is_disk_alive(bdev->bd_disk);
-	if (ret)
+	if (!is_disk_alive(bdev->bd_disk)) {
+		ret = -ENODEV;
 		goto out_module_put;
+	}
 
 	ret = bdev_freeze(bdev);
 	if (ret)
@@ -135,9 +135,8 @@ int blkfilter_ioctl_detach(struct block_device *bdev,
 	if (copy_from_user(&name, argp, sizeof(name)))
 		return -EFAULT;
 
-	ret = is_disk_alive(bdev->bd_disk);
-	if (ret)
-		return ret;
+	if (!is_disk_alive(bdev->bd_disk))
+		return -ENODEV;
 
 	blk_mq_freeze_queue(bdev->bd_queue);
 
@@ -169,9 +168,8 @@ int blkfilter_ioctl_ctl(struct block_device *bdev,
 	if (copy_from_user(&ctl, argp, sizeof(ctl)))
 		return -EFAULT;
 
-	ret = is_disk_alive(bdev->bd_disk);
-	if (ret)
-		return ret;
+	if (!is_disk_alive(bdev->bd_disk))
+		return -ENODEV;
 
 	ret = blk_queue_enter(bdev_get_queue(bdev), 0);
 	if (ret)
@@ -194,11 +192,9 @@ int blkfilter_ioctl_ctl(struct block_device *bdev,
 
 ssize_t blkfilter_show(struct block_device *bdev, char *buf)
 {
-	int ret = 0;
 	const char *name = NULL;
 
-	ret = is_disk_alive(bdev->bd_disk);
-	if (ret)
+	if (!is_disk_alive(bdev->bd_disk))
 		goto out;
 
 	blk_mq_freeze_queue(bdev->bd_queue);
