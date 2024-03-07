@@ -296,10 +296,8 @@ int tracker_take_snapshot(struct tracker *tracker)
 	bool cbt_reset_needed = false;
 	struct block_device *orig_bdev = tracker->orig_bdev;
 	sector_t capacity;
-	unsigned int current_flag;
 
 	blk_mq_freeze_queue(orig_bdev->bd_queue);
-	current_flag = memalloc_noio_save();
 
 	if (tracker->cbt_map->is_corrupted) {
 		cbt_reset_needed = true;
@@ -324,7 +322,6 @@ int tracker_take_snapshot(struct tracker *tracker)
 	cbt_map_switch(tracker->cbt_map);
 	atomic_set(&tracker->snapshot_is_taken, true);
 
-	memalloc_noio_restore(current_flag);
 	blk_mq_unfreeze_queue(orig_bdev->bd_queue);
 
 	return 0;
