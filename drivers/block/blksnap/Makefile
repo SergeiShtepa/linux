@@ -3,6 +3,7 @@
 
 # EXTRA_CFLAGS += "-D DEBUG"
 # EXTRA_CFLAGS += "-D CONFIG_BLKSNAP_CHUNK_DBG"
+EXTRA_CFLAGS += "-D CONFIG_BLKSNAP_COW_SCHEDULE"
 
 blksnap-y := 		\
 	cbt_map.o	\
