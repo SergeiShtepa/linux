@@ -91,7 +91,7 @@ int snapimage_create(struct tracker *tracker)
 	pr_info("Create snapshot image device for original device [%u:%u]\n",
 		MAJOR(dev_id), MINOR(dev_id));
 
-	disk = blk_alloc_disk(NUMA_NO_NODE);
+	disk = blk_alloc_disk(NULL, NUMA_NO_NODE);
 	if (!disk) {
 		pr_err("Failed to allocate disk\n");
 		return -ENOMEM;

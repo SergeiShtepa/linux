@@ -115,8 +115,8 @@ void diff_storage_free(struct kref *kref)
 	diff_storage = container_of(kref, struct diff_storage, kref);
 	flush_work(&diff_storage->reallocate_work);
 
-	if (diff_storage->bdev_handle)
-		bdev_release(diff_storage->bdev_handle);
+	if (diff_storage->bdev_file)
+		bdev_fput(diff_storage->bdev_file);
 	if (diff_storage->file)
 		filp_close(diff_storage->file, NULL);
 	event_queue_done(&diff_storage->event_queue);
@@ -126,21 +126,23 @@ void diff_storage_free(struct kref *kref)
 static inline int diff_storage_set_bdev(struct diff_storage *diff_storage,
 					const char *devpath)
 {
-	struct bdev_handle *bdev_handle;
+	struct file *bdev_file;
+	struct block_device *bdev;
 
-	bdev_handle = bdev_open_by_path(devpath,
+	bdev_file = bdev_file_open_by_path(devpath,
 				BLK_OPEN_EXCL | BLK_OPEN_READ | BLK_OPEN_WRITE,
 				diff_storage, NULL);
-	if (IS_ERR(bdev_handle)) {
+	if (IS_ERR(bdev_file)) {
 		pr_err("Failed to open a block device '%s'\n", devpath);
-		return PTR_ERR(bdev_handle);
+		return PTR_ERR(bdev_file);
 	}
+	bdev = file_bdev(bdev_file);
 
 	pr_debug("A block device is selected for difference storage\n");
-	diff_storage->bdev_handle = bdev_handle;
-	diff_storage->dev_id = bdev_handle->bdev->bd_dev;
-	diff_storage->capacity = bdev_nr_sectors(bdev_handle->bdev);
-	diff_storage->bdev = bdev_handle->bdev;
+	diff_storage->bdev_file = bdev_file;
+	diff_storage->dev_id = bdev->bd_dev;
+	diff_storage->capacity = bdev_nr_sectors(bdev);
+	diff_storage->bdev = bdev;
 	return 0;
 }
 
