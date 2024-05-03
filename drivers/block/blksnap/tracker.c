@@ -99,7 +99,6 @@ static struct blkfilter *tracker_attach(struct block_device *bdev)
 	}
 
 	tracker->orig_bdev = bdev;
-	mutex_init(&tracker->ctl_lock);
 	INIT_LIST_HEAD(&tracker->link);
 	kref_init(&tracker->kref);
 	tracker->dev_id = bdev->bd_dev;
@@ -134,11 +133,13 @@ static int ctl_cbtinfo(struct tracker *tracker, __u8 __user *buf, __u32 *plen)
 	if (*plen < sizeof(arg))
 		return -EINVAL;
 
+	spin_lock(cbt_map->locker);
 	arg.device_capacity = (__u64)(cbt_map->device_capacity << SECTOR_SHIFT);
 	arg.block_size = (__u32)(1 << cbt_map->blk_size_shift);
 	arg.block_count = (__u32)cbt_map->blk_count;
 	export_uuid(arg.generation_id.b, &cbt_map->generation_id);
 	arg.changes_number = (__u8)cbt_map->snap_number_previous;
+	spin_unlock(cbt_map->locker);
 
 	if (copy_to_user(buf, &arg, sizeof(arg)))
 		return -ENODATA;
@@ -256,7 +257,6 @@ static int tracker_ctl(struct blkfilter *flt, const unsigned int cmd,
 	int ret = 0;
 	struct tracker *tracker = container_of(flt, struct tracker, filter);
 
-	mutex_lock(&tracker->ctl_lock);
 	switch (cmd) {
 	case BLKFILTER_CTL_BLKSNAP_CBTINFO:
 		ret = ctl_cbtinfo(tracker, buf, plen);
@@ -276,7 +276,6 @@ static int tracker_ctl(struct blkfilter *flt, const unsigned int cmd,
 	default:
 		ret = -ENOTTY;
 	};
-	mutex_unlock(&tracker->ctl_lock);
 
 	return ret;
 }
