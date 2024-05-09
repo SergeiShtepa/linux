@@ -263,6 +263,7 @@ static int snapshot_take_trackers(struct snapshot *snapshot)
 	/*
 	 * Try to flush and freeze file system on each original block device.
 	 */
+	pr_debug("Freezing block devices to create a snapshot\n");
 	list_for_each_entry(tracker, &snapshot->trackers, link) {
 		if (bdev_freeze(tracker->diff_area->orig_bdev))
 			pr_warn("Failed to freeze device [%u:%u]\n",
@@ -301,8 +302,8 @@ static int snapshot_take_trackers(struct snapshot *snapshot)
 			pr_debug("Device [%u:%u] was unfrozen\n",
 				MAJOR(tracker->dev_id), MINOR(tracker->dev_id));
 	}
-fail:
 	if (ret) {
+fail:
 		list_for_each_entry(tracker, &snapshot->trackers, link) {
 			if (tracker->diff_area) {
 				diff_area_put(tracker->diff_area);

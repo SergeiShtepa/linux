@@ -11,6 +11,8 @@ struct blkfilter_operations;
 /**
  * struct blkfilter - Block device filter.
  *
+ * @kref:	The reference counter allows to control the lifetime of this
+ * 		structure.
  * @ops:	Block device filter operations.
  *
  * For each filtered block device, the filter creates a data structure
@@ -18,6 +20,7 @@ struct blkfilter_operations;
  * filter, but it must contain a pointer to the block device filter account.
  */
 struct blkfilter {
+	struct kref kref;
 	const struct blkfilter_operations *ops;
 };
 
@@ -46,6 +49,38 @@ struct blkfilter_operations {
 
 int blkfilter_register(struct blkfilter_operations *ops);
 void blkfilter_unregister(struct blkfilter_operations *ops);
+
+/**
+ * blkfilter_get() - Acquire the block device filters object.
+ * The function guarantees that the object will be available, and the module
+ * associated with this filter will not be unloaded, until the object is
+ * released.
+ * @flt:	The block device filter object.
+ *
+ * Returns true if the reference count was successfully incremented.
+ */
+static inline bool blkfilter_get(struct blkfilter *flt)
+{
+	if (!try_module_get(flt->ops->owner))
+		return false;
+
+	kref_get(&flt->kref);
+	return true;
+}
+
+void blkfilter_release(struct kref *kref);
+
+/**
+ * blkfilter_put() - Releases the block device filters object.
+ * @flt:	The block device filter object.
+ */
+static inline void blkfilter_put(struct blkfilter *flt)
+{
+	if (likely(flt)) {
+		module_put(flt->ops->owner);
+		kref_put(&flt->kref, blkfilter_release);
+	}
+}
 
 /*
  * The internal function for the block layer.

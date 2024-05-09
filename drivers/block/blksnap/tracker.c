@@ -27,8 +27,7 @@ void tracker_free(struct kref *kref)
 		diff_area_put(tracker->diff_area);
 	if (tracker->cbt_map)
 		cbt_map_destroy(tracker->cbt_map);
-
-	kfree(tracker);
+	blkfilter_put(&tracker->filter);
 }
 
 static bool tracker_submit_bio(struct bio *bio)
@@ -116,6 +115,9 @@ static void tracker_detach(struct blkfilter *flt)
 {
 	struct tracker *tracker = container_of(flt, struct tracker, filter);
 
+	/*
+	 * The queue already frozen by blk_mq_freeze_queue().
+	 */
 	pr_debug("Detach tracker from device [%u:%u]\n",
 		 MAJOR(tracker->dev_id), MINOR(tracker->dev_id));
 

@@ -30,6 +30,14 @@ static inline bool is_disk_alive(struct gendisk *disk)
 	return ret;
 }
 
+void blkfilter_release(struct kref *kref)
+{
+	struct blkfilter *flt = container_of(kref, struct blkfilter, kref);
+
+	kfree(flt);
+}
+EXPORT_SYMBOL_GPL(blkfilter_release);
+
 int blkfilter_ioctl_attach(struct block_device *bdev,
 		    struct blkfilter_name __user *argp)
 {
@@ -57,72 +65,55 @@ int blkfilter_ioctl_attach(struct block_device *bdev,
 	ret = bdev_freeze(bdev);
 	if (ret)
 		goto out_module_put;
-	blk_mq_freeze_queue(bdev->bd_queue);
+	blk_mq_freeze_queue(bdev_get_queue(bdev));
 
-	spin_lock(&blkfilters_lock);
 	if (bdev->bd_filter) {
-		if (bdev->bd_filter->ops == ops)
-			ret = -EALREADY;
-		else
-			ret = -EBUSY;
-	}
-	spin_unlock(&blkfilters_lock);
-	if (ret)
+		ret = (bdev->bd_filter->ops == ops) ? -EALREADY : -EBUSY;
 		goto out_unfreeze;
+	}
 
 	flt = ops->attach(bdev);
 	if (IS_ERR(flt)) {
 		ret = PTR_ERR(flt);
 		goto out_unfreeze;
 	}
+	kref_init(&flt->kref);
 	flt->ops = ops;
 
-	spin_lock(&blkfilters_lock);
-	if (bdev->bd_filter)
-		if (bdev->bd_filter->ops == ops)
-			ret = -EALREADY;
-		else
-			ret = -EBUSY;
-	else
-		bdev->bd_filter = flt;
-	spin_unlock(&blkfilters_lock);
+	if (bdev->bd_filter) {
+		ret = (bdev->bd_filter->ops == ops) ? -EALREADY : -EBUSY;
+		flt->ops->detach(flt);
+		goto out_unfreeze;
+	}
 
-	if (ret)
-		ops->detach(flt);
+	bdev->bd_filter = flt;
+	ops = NULL;
 
 out_unfreeze:
-	blk_mq_unfreeze_queue(bdev->bd_queue);
+	blk_mq_unfreeze_queue(bdev_get_queue(bdev));
 	bdev_thaw(bdev);
-	if (ret)
 out_module_put:
+	if (ops)
 		module_put(ops->owner);
 	return ret;
 }
 
-static inline void __blkfilter_detach(struct blkfilter *flt)
-{
-	if (flt) {
-		const struct blkfilter_operations *ops = flt->ops;
-
-		ops->detach(flt);
-		module_put(ops->owner);
-	}
-}
-
 void blkfilter_detach(struct block_device *bdev)
 {
-	struct blkfilter *flt;
+	struct blkfilter *flt = NULL;
 
-	blk_mq_freeze_queue(bdev->bd_queue);
-
-	spin_lock(&blkfilters_lock);
-	if ((flt = bdev->bd_filter))
-		bdev->bd_filter = NULL;
-	spin_unlock(&blkfilters_lock);
-
-	__blkfilter_detach(flt);
-
-	blk_mq_unfreeze_queue(bdev->bd_queue);
+	blk_mq_freeze_queue(bdev_get_queue(bdev));
+	flt = bdev->bd_filter;
+	if (flt) {
+		if (blkfilter_get(flt))
+			bdev->bd_filter = NULL;
+		else
+			flt = NULL;
+	}
+	if (flt && flt->ops->detach)
+		flt->ops->detach(flt);
+	blk_mq_unfreeze_queue(bdev_get_queue(bdev));
+	blkfilter_put(flt);
 }
 
 int blkfilter_ioctl_detach(struct block_device *bdev,
@@ -138,23 +129,28 @@ int blkfilter_ioctl_detach(struct block_device *bdev,
 	if (!is_disk_alive(bdev->bd_disk))
 		return -ENODEV;
 
-	blk_mq_freeze_queue(bdev->bd_queue);
+	blk_mq_freeze_queue(bdev_get_queue(bdev));
 
-	spin_lock(&blkfilters_lock);
-	if (bdev->bd_filter) {
-		if (strncmp(bdev->bd_filter->ops->name,
-			    name.name, BLKFILTER_NAME_LENGTH))
-			ret = -EINVAL;
-		else {
-			flt = bdev->bd_filter;
-			bdev->bd_filter = NULL;
-		}
-	} else
+	flt = bdev->bd_filter;
+	if (!flt) {
 		ret = -ENOENT;
-	spin_unlock(&blkfilters_lock);
+		goto out;
+	}
 
-	__blkfilter_detach(flt);
-	blk_mq_unfreeze_queue(bdev->bd_queue);
+	if (strncmp(flt->ops->name, name.name, BLKFILTER_NAME_LENGTH)) {
+		ret = -EINVAL;
+		goto out;
+	}
+	if (!blkfilter_get(flt)) {
+		ret = -ENOENT;
+		goto out;
+	}
+
+	bdev->bd_filter = NULL;
+	flt->ops->detach(flt);
+	blkfilter_put(flt);
+out:
+	blk_mq_unfreeze_queue(bdev_get_queue(bdev));
 	return ret;
 }
 
@@ -163,7 +159,7 @@ int blkfilter_ioctl_ctl(struct block_device *bdev,
 {
 	struct blkfilter_ctl ctl;
 	struct blkfilter *flt;
-	int ret;
+	int ret = 0;
 
 	if (copy_from_user(&ctl, argp, sizeof(ctl)))
 		return -EFAULT;
@@ -175,37 +171,52 @@ int blkfilter_ioctl_ctl(struct block_device *bdev,
 	if (ret)
 		return ret;
 
-	spin_lock(&blkfilters_lock);
 	flt = bdev->bd_filter;
-	if (!flt || strncmp(flt->ops->name, ctl.name, BLKFILTER_NAME_LENGTH))
+	if (!flt)
 		ret = -ENOENT;
-	else if (!flt->ops->ctl)
-		ret = -ENOTTY;
-	spin_unlock(&blkfilters_lock);
+	else if (strncmp(flt->ops->name, ctl.name, BLKFILTER_NAME_LENGTH))
+		ret = -EINVAL;
+	else if (!blkfilter_get(flt))
+		ret = -ENOENT;
 
-	if (!ret)
+	blk_queue_exit(bdev_get_queue(bdev));
+
+	if (ret)
+		return ret;
+
+	if (flt->ops->ctl)
 		ret = flt->ops->ctl(flt, ctl.cmd, u64_to_user_ptr(ctl.opt),
 								&ctl.optlen);
-	blk_queue_exit(bdev_get_queue(bdev));
+	else
+		ret = -ENOTTY;
+
+	blkfilter_put(flt);
 	return ret;
 }
 
 ssize_t blkfilter_show(struct block_device *bdev, char *buf)
 {
-	const char *name = NULL;
+	struct blkfilter *flt = NULL;
 
 	if (!is_disk_alive(bdev->bd_disk))
 		goto out;
 
-	blk_mq_freeze_queue(bdev->bd_queue);
-	spin_lock(&blkfilters_lock);
-	if (bdev->bd_filter)
-		name = bdev->bd_filter->ops->name;
-	spin_unlock(&blkfilters_lock);
-	blk_mq_unfreeze_queue(bdev->bd_queue);
+	if (blk_queue_enter(bdev_get_queue(bdev), 0))
+		goto out;
 
-	if (name)
-		return sprintf(buf, "%s\n", name);
+	if ((bdev->bd_filter) && blkfilter_get(bdev->bd_filter))
+		flt = bdev->bd_filter;
+
+	blk_queue_exit(bdev_get_queue(bdev));
+
+	if (flt) {
+		ssize_t ret;
+
+		ret = sprintf(buf, "%s\n", flt->ops->name);
+		blkfilter_put(flt);
+		return ret;
+
+	}
 out:
 	return sprintf(buf, "\n");
 }
