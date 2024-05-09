@@ -356,9 +356,6 @@ void tracker_release_snapshot(struct tracker *tracker)
 	pr_debug("Device [%d:%d] have thawed out\n",
 		MAJOR(orig_bdev->bd_dev), MINOR(orig_bdev->bd_dev));
 
-#ifdef CONFIG_BLKSNAP_COW_SCHEDULE
-	flush_work(&diff_area->cow_queue_work);
-#endif
 	flush_work(&diff_area->image_io_work);
 	flush_work(&diff_area->store_queue_work);
 
