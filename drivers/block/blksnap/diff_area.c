@@ -76,10 +76,6 @@ static inline struct chunk *chunk_alloc(struct diff_area *diff_area,
 	if (unlikely((number + 1) == diff_area->chunk_count))
 		chunk->sector_count = bdev_nr_sectors(diff_area->orig_bdev) -
 						(chunk->sector_count * number);
-#ifdef CONFIG_BLKSNAP_CHUNK_DBG
-	chunk->holder_func = NULL;
-	chunk->holder_sector = 0;
-#endif
 	return chunk;
 }
 
@@ -364,27 +360,9 @@ bool diff_area_cow_process_bio(struct diff_area *diff_area, struct bio *bio)
 				goto fail;
 			}
 		} else {
-#ifdef CONFIG_BLKSNAP_CHUNK_DBG
-			ret = down_timeout(&chunk->lock, HZ * 15);
-			if (unlikely(ret)) {
-				if (ret == -ETIME) {
-					pr_err("%s: Hang on chunk #%lu\n", __func__, nr);
-					pr_err("state %d\n", chunk->state);
-					if (chunk->holder_func) {
-						pr_err("holder %s\n", chunk->holder_func);
-						pr_err("holder sector: %llu\n", chunk->holder_sector);
-						pr_err("current sector: %llu\n", iter.bi_sector);
-					}
-				}
-				goto fail;
-			}
-			chunk->holder_func = __func__;
-			chunk->holder_sector = iter.bi_sector;
-#else
 			ret = down_killable(&chunk->lock);
 			if (unlikely(ret))
 				goto fail;
-#endif
 		}
 		chunk->diff_area = diff_area_get(diff_area);
 
@@ -543,26 +521,9 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 			return false;
 		}
 	}
-#ifdef CONFIG_BLKSNAP_CHUNK_DBG
-	ret = down_timeout(&chunk->lock, HZ * 15);
-	if (unlikely(ret)) {
-		if (ret == -ETIME) {
-			pr_err("%s: Hang on chunk #%lu\n", __func__, nr);
-			pr_err("state %d\n", chunk->state);
-			if (chunk->holder_func) {
-				pr_err("holder %s\n", chunk->holder_func);
-				pr_err("holder sector: %llu\n", chunk->holder_sector);
-				pr_err("current sector: %llu\n", bio->bi_iter.bi_sector);
-			}
-		}
-		return false;
-	}
-	chunk->holder_func = __func__;
-	chunk->holder_sector = bio->bi_iter.bi_sector;
-#else
 	if (down_killable(&chunk->lock))
 		return false;
-#endif
+
 	chunk->diff_area = diff_area_get(diff_area);
 
 	switch (chunk->state) {
