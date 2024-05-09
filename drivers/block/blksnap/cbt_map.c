@@ -83,20 +83,6 @@ out:
 	return ret;
 }
 
-int cbt_map_reset(struct cbt_map *cbt_map, sector_t device_capacity)
-{
-	cbt_map->is_corrupted = false;
-	vfree(cbt_map->read_map);
-	cbt_map->read_map = NULL;
-	vfree(cbt_map->write_map);
-	cbt_map->write_map = NULL;
-
-	cbt_map->device_capacity = device_capacity;
-	cbt_map_calculate_block_size(cbt_map);
-
-	return cbt_map_allocate(cbt_map);
-}
-
 void cbt_map_destroy(struct cbt_map *cbt_map)
 {
 	pr_debug("CBT map destroy\n");

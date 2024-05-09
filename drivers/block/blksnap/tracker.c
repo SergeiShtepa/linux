@@ -133,13 +133,13 @@ static int ctl_cbtinfo(struct tracker *tracker, __u8 __user *buf, __u32 *plen)
 	if (*plen < sizeof(arg))
 		return -EINVAL;
 
-	spin_lock(cbt_map->locker);
+	spin_lock(&cbt_map->locker);
 	arg.device_capacity = (__u64)(cbt_map->device_capacity << SECTOR_SHIFT);
 	arg.block_size = (__u32)(1 << cbt_map->blk_size_shift);
 	arg.block_count = (__u32)cbt_map->blk_count;
 	export_uuid(arg.generation_id.b, &cbt_map->generation_id);
 	arg.changes_number = (__u8)cbt_map->snap_number_previous;
-	spin_unlock(cbt_map->locker);
+	spin_unlock(&cbt_map->locker);
 
 	if (copy_to_user(buf, &arg, sizeof(arg)))
 		return -ENODATA;
@@ -291,59 +291,69 @@ static struct blkfilter_operations tracker_ops = {
 
 int tracker_take_snapshot(struct tracker *tracker)
 {
-	int ret = 0;
 	bool cbt_reset_needed = false;
 	struct block_device *orig_bdev = tracker->orig_bdev;
-	sector_t capacity;
+	struct cbt_map *new_cbt_map = NULL;
+	struct cbt_map *old_cbt_map = NULL;
 
-	blk_mq_freeze_queue(orig_bdev->bd_queue);
+	pr_debug("Freezing the [%d:%d] to take snapshot\n",
+		MAJOR(orig_bdev->bd_dev), MINOR(orig_bdev->bd_dev));
 
-	if (tracker->cbt_map->is_corrupted) {
-		cbt_reset_needed = true;
-		pr_warn("Corrupted CBT table detected. CBT fault\n");
-	}
+	blk_mq_freeze_queue(bdev_get_queue(orig_bdev));
 
-	capacity = bdev_nr_sectors(orig_bdev);
-	if (tracker->cbt_map->device_capacity != capacity) {
-		cbt_reset_needed = true;
-		pr_warn("Device resize detected. CBT fault\n");
-	}
+	spin_lock(&tracker->cbt_map->locker);
+	cbt_reset_needed = tracker->cbt_map->is_corrupted ||
+		(tracker->cbt_map->device_capacity != bdev_nr_sectors(orig_bdev));
+	spin_unlock(&tracker->cbt_map->locker);
 
 	if (cbt_reset_needed) {
-		ret = cbt_map_reset(tracker->cbt_map, capacity);
-		if (ret) {
-			pr_err("Failed to create tracker. errno=%d\n",
-			       abs(ret));
-			return ret;
+		blk_mq_unfreeze_queue(bdev_get_queue(orig_bdev));
+
+		new_cbt_map = cbt_map_create(orig_bdev);
+		if (!new_cbt_map) {
+			pr_err("Failed to recreate CBT\n");
+			return -ENOMEM;
 		}
+
+		blk_mq_freeze_queue(bdev_get_queue(orig_bdev));
+		old_cbt_map = tracker->cbt_map;
+		tracker->cbt_map = new_cbt_map;
 	}
 
 	cbt_map_switch(tracker->cbt_map);
 	atomic_set(&tracker->snapshot_is_taken, true);
 
-	blk_mq_unfreeze_queue(orig_bdev->bd_queue);
+	blk_mq_unfreeze_queue(bdev_get_queue(orig_bdev));
 
+	pr_debug("[%d:%d] have thawed out\n",
+		MAJOR(orig_bdev->bd_dev), MINOR(orig_bdev->bd_dev));
+
+	if (old_cbt_map)
+		cbt_map_destroy(old_cbt_map);
 	return 0;
 }
 
 void tracker_release_snapshot(struct tracker *tracker)
 {
 	struct diff_area *diff_area = tracker->diff_area;
+	struct block_device *orig_bdev = tracker->orig_bdev;
 
 	if (unlikely(!diff_area))
 		return;
 
 	snapimage_free(tracker);
 
-	blk_mq_freeze_queue(tracker->orig_bdev->bd_queue);
+	pr_debug("Freezing the device [%d:%d] to release snapshot\n",
+		MAJOR(orig_bdev->bd_dev), MINOR(orig_bdev->bd_dev));
 
-	pr_debug("Tracker for device [%u:%u] release snapshot\n",
-		 MAJOR(tracker->dev_id), MINOR(tracker->dev_id));
-
+	blk_mq_freeze_queue(bdev_get_queue(orig_bdev));
 	atomic_set(&tracker->snapshot_is_taken, false);
 	tracker->diff_area = NULL;
+	blk_mq_unfreeze_queue(bdev_get_queue(orig_bdev));
 
-	blk_mq_unfreeze_queue(tracker->orig_bdev->bd_queue);
+	pr_debug("Device [%d:%d] have thawed out\n",
+		MAJOR(orig_bdev->bd_dev), MINOR(orig_bdev->bd_dev));
+
 #ifdef CONFIG_BLKSNAP_COW_SCHEDULE
 	flush_work(&diff_area->cow_queue_work);
 #endif

@@ -77,7 +77,6 @@ struct cbt_map {
 };
 
 struct cbt_map *cbt_map_create(struct block_device *bdev);
-int cbt_map_reset(struct cbt_map *cbt_map, sector_t device_capacity);
 
 void cbt_map_destroy(struct cbt_map *cbt_map);
 
