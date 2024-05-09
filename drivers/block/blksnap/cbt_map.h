@@ -64,7 +64,7 @@ struct cbt_map {
 
 	size_t blk_size_shift;
 	size_t blk_count;
-	sector_t device_capacity;
+	sector_t bdev_capacity;
 
 	unsigned char *read_map;
 	unsigned char *write_map;

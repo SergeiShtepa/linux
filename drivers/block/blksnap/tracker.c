@@ -136,7 +136,7 @@ static int ctl_cbtinfo(struct tracker *tracker, __u8 __user *buf, __u32 *plen)
 		return -EINVAL;
 
 	spin_lock(&cbt_map->locker);
-	arg.device_capacity = (__u64)(cbt_map->device_capacity << SECTOR_SHIFT);
+	arg.device_capacity = (__u64)(cbt_map->bdev_capacity << SECTOR_SHIFT);
 	arg.block_size = (__u32)(1 << cbt_map->blk_size_shift);
 	arg.block_count = (__u32)cbt_map->blk_count;
 	export_uuid(arg.generation_id.b, &cbt_map->generation_id);
@@ -305,7 +305,7 @@ int tracker_take_snapshot(struct tracker *tracker)
 
 	spin_lock(&tracker->cbt_map->locker);
 	cbt_reset_needed = tracker->cbt_map->is_corrupted ||
-		(tracker->cbt_map->device_capacity != bdev_nr_sectors(orig_bdev));
+		(tracker->cbt_map->bdev_capacity != bdev_nr_sectors(orig_bdev));
 	spin_unlock(&tracker->cbt_map->locker);
 
 	if (cbt_reset_needed) {

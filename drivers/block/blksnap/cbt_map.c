@@ -21,12 +21,12 @@ static void cbt_map_calculate_block_size(struct cbt_map *cbt_map)
 	unsigned long long count;
 	unsigned long long shift = get_tracking_block_minimum_shift();
 
-	pr_debug("Device capacity %llu sectors\n", cbt_map->device_capacity);
+	pr_debug("Device capacity %llu sectors\n", cbt_map->bdev_capacity);
 	/*
 	 * The size of the tracking block is calculated based on the size of
 	 * the disk so that the CBT table does not exceed a reasonable size.
 	 */
-	count = count_by_shift(cbt_map->device_capacity, shift);
+	count = count_by_shift(cbt_map->bdev_capacity, shift);
 	pr_debug("Blocks count %llu\n", count);
 	while (count > get_tracking_block_maximum_count()) {
 		if (shift >= get_tracking_block_maximum_shift()) {
@@ -34,7 +34,7 @@ static void cbt_map_calculate_block_size(struct cbt_map *cbt_map)
 			break;
 		}
 		shift = shift + 1ull;
-		count = count_by_shift(cbt_map->device_capacity, shift);
+		count = count_by_shift(cbt_map->bdev_capacity, shift);
 		pr_debug("Blocks count %llu\n", count);
 	}
 
@@ -103,7 +103,7 @@ struct cbt_map *cbt_map_create(struct block_device *bdev)
 	if (cbt_map == NULL)
 		return NULL;
 
-	cbt_map->device_capacity = bdev_nr_sectors(bdev);
+	cbt_map->bdev_capacity = bdev_nr_sectors(bdev);
 	cbt_map_calculate_block_size(cbt_map);
 
 	ret = cbt_map_allocate(cbt_map);

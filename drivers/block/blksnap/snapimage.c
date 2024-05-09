@@ -100,7 +100,7 @@ int snapimage_create(struct tracker *tracker)
 	disk->flags = GENHD_FL_NO_PART;
 	disk->fops = &bd_ops;
 	disk->private_data = tracker;
-	set_capacity(disk, tracker->cbt_map->device_capacity);
+	set_capacity(disk, tracker->cbt_map->bdev_capacity);
 	ret = snprintf(disk->disk_name, DISK_NAME_LEN, "%s_%d:%d",
 		       BLKSNAP_IMAGE_NAME, MAJOR(dev_id), MINOR(dev_id));
 	if (ret < 0) {
