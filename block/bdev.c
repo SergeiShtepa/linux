@@ -1169,7 +1169,6 @@ void bdev_mark_dead(struct block_device *bdev, bool surprise)
 	}
 
 	invalidate_bdev(bdev);
-	blkfilter_detach(bdev);
 }
 /*
  * New drivers should not use this directly.  There are some drivers however

@@ -577,11 +577,13 @@ static void blk_report_disk_dead(struct gendisk *disk, bool surprise)
 		rcu_read_unlock();
 
 		bdev_mark_dead(bdev, surprise);
+		blkfilter_detach(bdev);
 
 		put_device(&bdev->bd_device);
 		rcu_read_lock();
 	}
 	rcu_read_unlock();
+	blkfilter_detach(disk->part0);
 }
 
 static void __blk_mark_disk_dead(struct gendisk *disk)
@@ -658,7 +660,6 @@ void del_gendisk(struct gendisk *disk)
 	mutex_lock(&disk->open_mutex);
 	xa_for_each(&disk->part_tbl, idx, part)
 		remove_inode_hash(part->bd_inode);
-	blkfilter_detach(disk->part0);
 	mutex_unlock(&disk->open_mutex);
 
 	/*
