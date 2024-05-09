@@ -54,13 +54,13 @@ void blkfilter_unregister(struct blkfilter_operations *ops);
 static inline bool blkfilter_bio(struct bio *bio)
 {
 	bool skip_bio = false;
+	struct blkfilter *flt = bio->bi_bdev->bd_filter;
 
-	if (bio->bi_bdev->bd_filter &&
-	    bio->bi_bdev->bd_filter != current->blk_filter) {
+	if (flt && flt != current->blk_filter) {
 		struct blkfilter *prev = current->blk_filter;
 
-		current->blk_filter = bio->bi_bdev->bd_filter;
-		skip_bio = bio->bi_bdev->bd_filter->ops->submit_bio(bio);
+		current->blk_filter = flt;
+		skip_bio = flt->ops->submit_bio(bio);
 		current->blk_filter = prev;
 	}
 
