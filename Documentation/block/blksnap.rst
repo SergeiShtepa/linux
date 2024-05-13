@@ -339,11 +339,11 @@ are implemented in C++.
 References
 ==========
 
-.. [#userspace_libs] https://github.com/veeam/blksnap/tree/stable-v2.0/lib
+.. [#userspace_libs] https://github.com/veeam/blksnap/tree/master/lib
 
-.. [#userspace_tools] https://github.com/veeam/blksnap/tree/stable-v2.0/tools
+.. [#userspace_tools] https://github.com/veeam/blksnap/tree/master/tools
 
-.. [#userspace_tests] https://github.com/veeam/blksnap/tree/stable-v2.0/tests
+.. [#userspace_tests] https://github.com/veeam/blksnap/tree/master/tests
 
 Module interface description
 ============================
