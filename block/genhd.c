@@ -26,6 +26,7 @@
 #include <linux/badblocks.h>
 #include <linux/part_stat.h>
 #include <linux/blktrace_api.h>
+#include <linux/blk-filter.h>
 
 #include "blk-throttle.h"
 #include "blk.h"
@@ -576,11 +577,13 @@ static void blk_report_disk_dead(struct gendisk *disk, bool surprise)
 		rcu_read_unlock();
 
 		bdev_mark_dead(bdev, surprise);
+		blkfilter_detach(bdev);
 
 		put_device(&bdev->bd_device);
 		rcu_read_lock();
 	}
 	rcu_read_unlock();
+	blkfilter_detach(disk->part0);
 }
 
 static void __blk_mark_disk_dead(struct gendisk *disk)
@@ -1047,6 +1050,12 @@ static ssize_t diskseq_show(struct device *dev,
 	return sprintf(buf, "%llu\n", disk->diskseq);
 }
 
+static ssize_t disk_filter_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	return blkfilter_show(dev_to_bdev(dev), buf);
+}
+
 static DEVICE_ATTR(range, 0444, disk_range_show, NULL);
 static DEVICE_ATTR(ext_range, 0444, disk_ext_range_show, NULL);
 static DEVICE_ATTR(removable, 0444, disk_removable_show, NULL);
@@ -1060,6 +1069,7 @@ static DEVICE_ATTR(stat, 0444, part_stat_show, NULL);
 static DEVICE_ATTR(inflight, 0444, part_inflight_show, NULL);
 static DEVICE_ATTR(badblocks, 0644, disk_badblocks_show, disk_badblocks_store);
 static DEVICE_ATTR(diskseq, 0444, diskseq_show, NULL);
+static DEVICE_ATTR(filter, 0444, disk_filter_show, NULL);
 
 #ifdef CONFIG_FAIL_MAKE_REQUEST
 ssize_t part_fail_show(struct device *dev,
@@ -1106,6 +1116,7 @@ static struct attribute *disk_attrs[] = {
 	&dev_attr_events_async.attr,
 	&dev_attr_events_poll_msecs.attr,
 	&dev_attr_diskseq.attr,
+	&dev_attr_filter.attr,
 #ifdef CONFIG_FAIL_MAKE_REQUEST
 	&dev_attr_fail.attr,
 #endif
