@@ -12,7 +12,7 @@ struct blkfilter_operations;
  * struct blkfilter - Block device filter.
  *
  * @kref:	The reference counter allows to control the lifetime of this
- * 		structure.
+ *		structure.
  * @ops:	Block device filter operations.
  *
  * For each filtered block device, the filter creates a data structure

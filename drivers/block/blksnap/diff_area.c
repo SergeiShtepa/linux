@@ -505,7 +505,7 @@ bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio)
 		if (unlikely(!chunk))
 			return false;
 
-		ret = xa_insert(&diff_area->chunk_map, nr, chunk,GFP_KERNEL);
+		ret = xa_insert(&diff_area->chunk_map, nr, chunk, GFP_KERNEL);
 		if (likely(!ret)) {
 			/* new chunk has been added */
 		} else if (ret == -EBUSY) {
