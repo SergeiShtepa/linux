@@ -200,7 +200,7 @@ int diff_storage_set_diff_storage(struct diff_storage *diff_storage,
 	umode_t mode;
 	sector_t req_sect;
 
-	file = filp_open(filename, O_RDONLY, 00400);
+	file = filp_open(filename, O_RDONLY | O_LARGEFILE | O_NOATIME, 00400);
 	if (IS_ERR(file)) {
 		pr_err("Failed to open '%s'\n", filename);
 		return PTR_ERR(file);
