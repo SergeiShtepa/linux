@@ -1279,6 +1279,7 @@ struct task_struct {
 
 	/* Stack plugging: */
 	struct blk_plug			*plug;
+	struct blkfilter		*blk_filter;
 
 	/* VM state: */
 	struct reclaim_state		*reclaim_state;

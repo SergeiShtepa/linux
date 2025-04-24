@@ -18,6 +18,7 @@
 #include <linux/blkdev.h>
 #include <linux/blk-pm.h>
 #include <linux/blk-integrity.h>
+#include <linux/blk-filter.h>
 #include <linux/highmem.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
@@ -621,6 +622,26 @@ static inline blk_status_t blk_check_zone_append(struct request_queue *q,
 	return BLK_STS_OK;
 }
 
+/**
+ * resubmit_filtered_bio() - Resubmit the bio after processing by the filter.
+ * @bio:	The I/O unit.
+ *
+ * The filter can skip or postpone the processing of the I/O unit.
+ * This function allows to return the I/O unit for processing again.
+ */
+void resubmit_filtered_bio(struct bio *bio)
+{
+	if (!bdev_test_flag(bio->bi_bdev, BD_HAS_SUBMIT_BIO)) {
+		blk_mq_submit_bio(bio, true);
+	} else if (likely(bio_queue_enter(bio) == 0)) {
+		struct gendisk *disk = bio->bi_bdev->bd_disk;
+
+		disk->fops->submit_bio(bio);
+		blk_queue_exit(disk->queue);
+	}
+}
+EXPORT_SYMBOL_GPL(resubmit_filtered_bio);
+
 static void __submit_bio(struct bio *bio)
 {
 	/* If plug is not used, add new plug here to cache nsecs time. */
@@ -632,7 +653,7 @@ static void __submit_bio(struct bio *bio)
 	blk_start_plug(&plug);
 
 	if (!bdev_test_flag(bio->bi_bdev, BD_HAS_SUBMIT_BIO)) {
-		blk_mq_submit_bio(bio);
+		blk_mq_submit_bio(bio, false);
 	} else if (likely(bio_queue_enter(bio) == 0)) {
 		struct gendisk *disk = bio->bi_bdev->bd_disk;
 	
@@ -641,7 +662,8 @@ static void __submit_bio(struct bio *bio)
 			bio->bi_status = BLK_STS_NOTSUPP;
 			bio_endio(bio);
 		} else {
-			disk->fops->submit_bio(bio);
+			if (!blkfilter_bio(bio))
+				disk->fops->submit_bio(bio);
 		}
 		blk_queue_exit(disk->queue);
 	}

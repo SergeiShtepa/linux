@@ -214,6 +214,9 @@ struct fsxattr {
 #define BLKGETDISKSEQ _IOR(0x12,128,__u64)
 /* 130-136 are used by zoned block device ioctls (uapi/linux/blkzoned.h) */
 /* 137-141 are used by blk-crypto ioctls (uapi/linux/blk-crypto.h) */
+#define BLKFILTER_ATTACH	_IOWR(0x12, 142, struct blkfilter_name)
+#define BLKFILTER_DETACH	_IOWR(0x12, 143, struct blkfilter_name)
+#define BLKFILTER_CTL		_IOWR(0x12, 144, struct blkfilter_ctl)
 
 #define BMAP_IOCTL 1		/* obsolete - kept for compatibility */
 #define FIBMAP	   _IO(0x00,1)	/* bmap access */
