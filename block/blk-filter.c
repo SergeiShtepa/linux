@@ -44,6 +44,7 @@ int blkfilter_ioctl_attach(struct block_device *bdev,
 	struct blkfilter_name name;
 	struct blkfilter_operations *ops;
 	struct blkfilter *flt;
+	unsigned int memflags;
 	int ret = 0;
 
 	if (copy_from_user(&name, argp, sizeof(name)))
@@ -65,7 +66,7 @@ int blkfilter_ioctl_attach(struct block_device *bdev,
 	ret = bdev_freeze(bdev);
 	if (ret)
 		goto out_module_put;
-	blk_mq_freeze_queue(bdev_get_queue(bdev));
+	memflags = blk_mq_freeze_queue(bdev_get_queue(bdev));
 
 	if (bdev->bd_filter) {
 		ret = (bdev->bd_filter->ops == ops) ? -EALREADY : -EBUSY;
@@ -90,7 +91,7 @@ int blkfilter_ioctl_attach(struct block_device *bdev,
 	ops = NULL;
 
 out_unfreeze:
-	blk_mq_unfreeze_queue(bdev_get_queue(bdev));
+	blk_mq_unfreeze_queue(bdev_get_queue(bdev), memflags);
 	bdev_thaw(bdev);
 out_module_put:
 	if (ops)
@@ -101,8 +102,9 @@ out_module_put:
 void blkfilter_detach(struct block_device *bdev)
 {
 	struct blkfilter *flt = NULL;
+	unsigned int memflags;
 
-	blk_mq_freeze_queue(bdev_get_queue(bdev));
+	memflags = blk_mq_freeze_queue(bdev_get_queue(bdev));
 	flt = bdev->bd_filter;
 	if (flt) {
 		if (blkfilter_get(flt))
@@ -112,7 +114,7 @@ void blkfilter_detach(struct block_device *bdev)
 	}
 	if (flt && flt->ops->detach)
 		flt->ops->detach(flt);
-	blk_mq_unfreeze_queue(bdev_get_queue(bdev));
+	blk_mq_unfreeze_queue(bdev_get_queue(bdev), memflags);
 	blkfilter_put(flt);
 }
 
@@ -121,6 +123,7 @@ int blkfilter_ioctl_detach(struct block_device *bdev,
 {
 	struct blkfilter_name name;
 	struct blkfilter *flt = NULL;
+	unsigned int memflags;
 	int ret = 0;
 
 	if (copy_from_user(&name, argp, sizeof(name)))
@@ -129,7 +132,7 @@ int blkfilter_ioctl_detach(struct block_device *bdev,
 	if (!is_disk_alive(bdev->bd_disk))
 		return -ENODEV;
 
-	blk_mq_freeze_queue(bdev_get_queue(bdev));
+	memflags = blk_mq_freeze_queue(bdev_get_queue(bdev));
 
 	flt = bdev->bd_filter;
 	if (!flt) {
@@ -150,7 +153,7 @@ int blkfilter_ioctl_detach(struct block_device *bdev,
 	flt->ops->detach(flt);
 	blkfilter_put(flt);
 out:
-	blk_mq_unfreeze_queue(bdev_get_queue(bdev));
+	blk_mq_unfreeze_queue(bdev_get_queue(bdev), memflags);
 	return ret;
 }
 

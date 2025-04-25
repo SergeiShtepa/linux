@@ -299,11 +299,12 @@ int tracker_take_snapshot(struct tracker *tracker)
 	struct block_device *orig_bdev = tracker->orig_bdev;
 	struct cbt_map *new_cbt_map = NULL;
 	struct cbt_map *old_cbt_map = NULL;
+	unsigned int memflags;
 
 	pr_debug("Freezing the [%d:%d] to take snapshot\n",
 		MAJOR(orig_bdev->bd_dev), MINOR(orig_bdev->bd_dev));
 
-	blk_mq_freeze_queue(bdev_get_queue(orig_bdev));
+	memflags = blk_mq_freeze_queue(bdev_get_queue(orig_bdev));
 
 	spin_lock(&tracker->cbt_map->locker);
 	cbt_reset_needed = tracker->cbt_map->is_corrupted ||
@@ -311,7 +312,7 @@ int tracker_take_snapshot(struct tracker *tracker)
 	spin_unlock(&tracker->cbt_map->locker);
 
 	if (cbt_reset_needed) {
-		blk_mq_unfreeze_queue(bdev_get_queue(orig_bdev));
+		blk_mq_unfreeze_queue(bdev_get_queue(orig_bdev), memflags);
 
 		new_cbt_map = cbt_map_create(orig_bdev);
 		if (!new_cbt_map) {
@@ -319,7 +320,7 @@ int tracker_take_snapshot(struct tracker *tracker)
 			return -ENOMEM;
 		}
 
-		blk_mq_freeze_queue(bdev_get_queue(orig_bdev));
+		memflags = blk_mq_freeze_queue(bdev_get_queue(orig_bdev));
 		old_cbt_map = tracker->cbt_map;
 		tracker->cbt_map = new_cbt_map;
 	}
@@ -327,7 +328,7 @@ int tracker_take_snapshot(struct tracker *tracker)
 	cbt_map_switch(tracker->cbt_map);
 	atomic_set(&tracker->snapshot_is_taken, true);
 
-	blk_mq_unfreeze_queue(bdev_get_queue(orig_bdev));
+	blk_mq_unfreeze_queue(bdev_get_queue(orig_bdev), memflags);
 
 	pr_debug("[%d:%d] have thawed out\n",
 		MAJOR(orig_bdev->bd_dev), MINOR(orig_bdev->bd_dev));
@@ -341,6 +342,7 @@ void tracker_release_snapshot(struct tracker *tracker)
 {
 	struct diff_area *diff_area = tracker->diff_area;
 	struct block_device *orig_bdev = tracker->orig_bdev;
+	unsigned int memflags;
 
 	if (unlikely(!diff_area))
 		return;
@@ -350,10 +352,10 @@ void tracker_release_snapshot(struct tracker *tracker)
 	pr_debug("Freezing the device [%d:%d] to release snapshot\n",
 		MAJOR(orig_bdev->bd_dev), MINOR(orig_bdev->bd_dev));
 
-	blk_mq_freeze_queue(bdev_get_queue(orig_bdev));
+	memflags = blk_mq_freeze_queue(bdev_get_queue(orig_bdev));
 	atomic_set(&tracker->snapshot_is_taken, false);
 	tracker->diff_area = NULL;
-	blk_mq_unfreeze_queue(bdev_get_queue(orig_bdev));
+	blk_mq_unfreeze_queue(bdev_get_queue(orig_bdev), memflags);
 
 	pr_debug("Device [%d:%d] have thawed out\n",
 		MAJOR(orig_bdev->bd_dev), MINOR(orig_bdev->bd_dev));
