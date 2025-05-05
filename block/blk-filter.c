@@ -39,19 +39,19 @@ void blkfilter_release(struct kref *kref)
 EXPORT_SYMBOL_GPL(blkfilter_release);
 
 int blkfilter_ioctl_attach(struct block_device *bdev,
-		    struct blkfilter_name __user *argp)
+		    struct blkfilter_attach __user *argp)
 {
-	struct blkfilter_name name;
+	struct blkfilter_attach arg;
 	struct blkfilter_operations *ops;
 	struct blkfilter *flt;
 	unsigned int memflags;
 	int ret = 0;
 
-	if (copy_from_user(&name, argp, sizeof(name)))
+	if (copy_from_user(&arg, argp, sizeof(arg)))
 		return -EFAULT;
 
 	spin_lock(&blkfilters_lock);
-	ops = __blkfilter_find(name.name);
+	ops = __blkfilter_find(arg.name);
 	if (ops && !try_module_get(ops->owner))
 		ops = NULL;
 	spin_unlock(&blkfilters_lock);
@@ -73,7 +73,7 @@ int blkfilter_ioctl_attach(struct block_device *bdev,
 		goto out_unfreeze;
 	}
 
-	flt = ops->attach(bdev);
+	flt = ops->attach(bdev, u64_to_user_ptr(arg.opt),  arg.optlen);
 	if (IS_ERR(flt)) {
 		ret = PTR_ERR(flt);
 		goto out_unfreeze;
@@ -119,14 +119,14 @@ void blkfilter_detach(struct block_device *bdev)
 }
 
 int blkfilter_ioctl_detach(struct block_device *bdev,
-		    struct blkfilter_name __user *argp)
+		    struct blkfilter_detach __user *argp)
 {
-	struct blkfilter_name name;
+	struct blkfilter_detach arg;
 	struct blkfilter *flt = NULL;
 	unsigned int memflags;
 	int ret = 0;
 
-	if (copy_from_user(&name, argp, sizeof(name)))
+	if (copy_from_user(&arg, argp, sizeof(name)))
 		return -EFAULT;
 
 	if (!is_disk_alive(bdev->bd_disk))
@@ -140,7 +140,7 @@ int blkfilter_ioctl_detach(struct block_device *bdev,
 		goto out;
 	}
 
-	if (strncmp(flt->ops->name, name.name, BLKFILTER_NAME_LENGTH)) {
+	if (strncmp(flt->ops->name, arg.name, BLKFILTER_NAME_LENGTH)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -160,11 +160,11 @@ out:
 int blkfilter_ioctl_ctl(struct block_device *bdev,
 		    struct blkfilter_ctl __user *argp)
 {
-	struct blkfilter_ctl ctl;
+	struct blkfilter_ctl arg;
 	struct blkfilter *flt;
 	int ret = 0;
 
-	if (copy_from_user(&ctl, argp, sizeof(ctl)))
+	if (copy_from_user(&arg, argp, sizeof(arg)))
 		return -EFAULT;
 
 	if (!is_disk_alive(bdev->bd_disk))
@@ -177,7 +177,7 @@ int blkfilter_ioctl_ctl(struct block_device *bdev,
 	flt = bdev->bd_filter;
 	if (!flt)
 		ret = -ENOENT;
-	else if (strncmp(flt->ops->name, ctl.name, BLKFILTER_NAME_LENGTH))
+	else if (strncmp(flt->ops->name, arg.name, BLKFILTER_NAME_LENGTH))
 		ret = -EINVAL;
 	else if (!blkfilter_get(flt))
 		ret = -ENOENT;
@@ -188,8 +188,8 @@ int blkfilter_ioctl_ctl(struct block_device *bdev,
 		return ret;
 
 	if (flt->ops->ctl)
-		ret = flt->ops->ctl(flt, ctl.cmd, u64_to_user_ptr(ctl.opt),
-								&ctl.optlen);
+		ret = flt->ops->ctl(flt, arg.cmd, u64_to_user_ptr(arg.opt),
+								&arg.optlen);
 	else
 		ret = -ENOTTY;
 

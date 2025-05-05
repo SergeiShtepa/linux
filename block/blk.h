@@ -12,7 +12,8 @@
 #include "blk-crypto-internal.h"
 
 struct blkfilter_ctl;
-struct blkfilter_name;
+struct blkfilter_attach;
+struct blkfilter_detach;
 struct elevator_type;
 
 #define	BLK_DEV_MAX_SECTORS	(LLONG_MAX >> 9)
@@ -605,9 +606,9 @@ long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg);
 extern const struct address_space_operations def_blk_aops;
 
 int blkfilter_ioctl_attach(struct block_device *bdev,
-		    struct blkfilter_name __user *argp);
+		    struct blkfilter_attach __user *argp);
 int blkfilter_ioctl_detach(struct block_device *bdev,
-		    struct blkfilter_name __user *argp);
+		    struct blkfilter_detach __user *argp);
 int blkfilter_ioctl_ctl(struct block_device *bdev,
 		    struct blkfilter_ctl __user *argp);
 void blkfilter_detach(struct block_device *bdev);

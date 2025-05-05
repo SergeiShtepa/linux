@@ -48,9 +48,9 @@ Interface description
 
 The ioctl BLKFILTER_ATTACH allows user-space programs to attach a block device
 filter to a block device. The ioctl BLKFILTER_DETACH allows user-space programs
-to detach it. Both ioctls use &struct blkfilter_name. The ioctl BLKFILTER_CTL
-allows user-space programs to send a filter-specific command. It use &struct
-blkfilter_ctl.
+to detach it. Ioctls use &struct blkfilter_attach and &struct blkfilter_detach.
+The ioctl BLKFILTER_CTL allows user-space programs to send a filter-specific
+command. It use &struct blkfilter_ctl.
 
 .. kernel-doc:: include/uapi/linux/blk-filter.h
 

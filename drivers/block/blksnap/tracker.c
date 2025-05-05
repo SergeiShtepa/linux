@@ -76,10 +76,18 @@ static bool tracker_submit_bio(struct bio *bio)
 	return diff_area_cow(tracker->diff_area, bio);
 }
 
-static struct blkfilter *tracker_attach(struct block_device *bdev)
+static struct blkfilter *tracker_attach(struct block_device *bdev,
+					__u8 __user *opt, __u32 optlen)
 {
 	struct tracker *tracker = NULL;
 	struct cbt_map *cbt_map;
+
+	/*
+	 * Options for tracker is not implemented yet.
+	 * Reserved for specifying the change tracking block size.
+	 */
+	(void)opt;
+	(void)optlen;
 
 	pr_debug("Creating tracker for device [%u:%u]\n",
 		 MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
