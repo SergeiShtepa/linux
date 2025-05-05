@@ -462,7 +462,7 @@ void chunk_diff_write(struct chunk *chunk)
 		len = vfs_iter_write(chunk->diff_file, &iov_iter, &pos, 0);
 		if (len < 0) {
 			err = (int)len;
-			pr_debug("vfs_iter_write complete with error code %zd",
+			pr_debug("vfs_iter_write complete with error code %zd\n",
 				 len);
 			break;
 		}
