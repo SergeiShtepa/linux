@@ -116,6 +116,7 @@ int snapimage_create(struct tracker *tracker)
 	}
 	pr_debug("Snapshot image disk name [%s]\n", disk->disk_name);
 
+	blk_set_queue_depth(disk->queue, 64);
 	ret = add_disk(disk);
 	if (ret) {
 		pr_err("Failed to add disk [%s] for snapshot image device\n",
