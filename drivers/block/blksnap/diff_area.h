@@ -44,16 +44,12 @@ struct tracker;
  *	queue.
  * @store_queue:
  *	The queue of chunks waiting to be stored to the difference storage.
- * @store_queue_count:
- *	The number of chunks in the store queue.
  * @free_diff_buffers_lock:
  *	The spinlock guarantees consistency of the linked lists of free
  *	difference buffers.
  * @free_diff_buffers:
  *	Linked list of free difference buffers allows to reduce the number
  *	of buffer allocation and release operations.
- * @free_diff_buffers_count:
- *	The number of free difference buffers in the linked list.
  * @image_io_queue_lock:
  *	The spinlock guarantees consistency of the linked lists of I/O
  *	requests to image.
@@ -118,11 +114,9 @@ struct diff_area {
 
 	spinlock_t store_queue_lock;
 	struct list_head store_queue;
-	atomic_t store_queue_count;
 
 	spinlock_t free_diff_buffers_lock;
 	struct list_head free_diff_buffers;
-	atomic_t free_diff_buffers_count;
 
 	spinlock_t image_io_queue_lock;
 	struct list_head image_io_queue;

@@ -141,10 +141,8 @@ static void diff_area_skip_store_queue(struct diff_area *diff_area)
 		spin_lock(&diff_area->store_queue_lock);
 		chunk = list_first_entry_or_null(&diff_area->store_queue,
 						 struct chunk, link);
-		if (chunk) {
-			atomic_dec(&diff_area->store_queue_count);
+		if (chunk)
 			list_del_init(&chunk->link);
-		}
 		spin_unlock(&diff_area->store_queue_lock);
 
 		if (likely(chunk && chunk->diff_buffer)) {
@@ -185,7 +183,6 @@ static inline bool diff_area_store_one(struct diff_area *diff_area)
 	list_for_each_entry(iter, &diff_area->store_queue, link) {
 		if (!down_trylock(&iter->lock)) {
 			chunk = iter;
-			atomic_dec(&diff_area->store_queue_count);
 			list_del_init(&chunk->link);
 			chunk->diff_area = diff_area_get(diff_area);
 			break;
@@ -305,11 +302,9 @@ struct diff_area *diff_area_new(struct tracker *tracker,
 	diff_area->tracker = tracker;
 	spin_lock_init(&diff_area->store_queue_lock);
 	INIT_LIST_HEAD(&diff_area->store_queue);
-	atomic_set(&diff_area->store_queue_count, 0);
 
 	spin_lock_init(&diff_area->free_diff_buffers_lock);
 	INIT_LIST_HEAD(&diff_area->free_diff_buffers);
-	atomic_set(&diff_area->free_diff_buffers_count, 0);
 
 	spin_lock_init(&diff_area->image_io_queue_lock);
 	INIT_LIST_HEAD(&diff_area->image_io_queue);
