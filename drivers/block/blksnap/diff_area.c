@@ -133,25 +133,6 @@ out:
 
 }
 
-static void diff_area_skip_store_queue(struct diff_area *diff_area)
-{
-	struct chunk *chunk = NULL;
-
-	do {
-		spin_lock(&diff_area->store_queue_lock);
-		chunk = list_first_entry_or_null(&diff_area->store_queue,
-						 struct chunk, link);
-		if (chunk)
-			list_del_init(&chunk->link);
-		spin_unlock(&diff_area->store_queue_lock);
-
-		if (likely(chunk && chunk->diff_buffer)) {
-			diff_buffer_release(diff_area, chunk->diff_buffer);
-			chunk->diff_buffer = NULL;
-		}
-	} while (chunk);
-}
-
 void diff_area_free(struct kref *kref)
 {
 	unsigned long inx = 0;
@@ -160,8 +141,6 @@ void diff_area_free(struct kref *kref)
 
 	might_sleep();
 	diff_area = container_of(kref, struct diff_area, kref);
-
-	diff_area_skip_store_queue(diff_area);
 
 	xa_for_each(&diff_area->chunk_map, inx, chunk) {
 		if (chunk)
@@ -175,27 +154,8 @@ void diff_area_free(struct kref *kref)
 	kfree(diff_area);
 }
 
-static inline bool diff_area_store_one(struct diff_area *diff_area)
+void diff_area_store_chunk(struct diff_area *diff_area, struct chunk *chunk)
 {
-	struct chunk *iter, *chunk = NULL;
-
-	spin_lock(&diff_area->store_queue_lock);
-	list_for_each_entry(iter, &diff_area->store_queue, link) {
-		if (!down_trylock(&iter->lock)) {
-			chunk = iter;
-			list_del_init(&chunk->link);
-			chunk->diff_area = diff_area_get(diff_area);
-			break;
-		}
-		/*
-		 * If it is not possible to lock a chunk for writing, then it is
-		 * currently in use, and we try to clean up the next chunk.
-		 */
-	}
-	spin_unlock(&diff_area->store_queue_lock);
-	if (!chunk)
-		return false;
-
 	if (chunk->state != CHUNK_ST_IN_MEMORY) {
 		/*
 		 * There cannot be a chunk in the store queue whose buffer has
@@ -204,13 +164,14 @@ static inline bool diff_area_store_one(struct diff_area *diff_area)
 		chunk_up(chunk);
 		pr_warn("Cannot release empty buffer for chunk #%ld",
 			chunk->number);
-		return true;
+		return;
 	}
 
 	if (diff_area_is_corrupted(diff_area)) {
 		chunk_store_failed(chunk, 0);
-		return true;
+		return;
 	}
+
 	if (!chunk->diff_file && !chunk->diff_bdev) {
 		int ret;
 
@@ -223,28 +184,14 @@ static inline bool diff_area_store_one(struct diff_area *diff_area)
 			pr_debug("Cannot get store for chunk #%ld\n",
 				 chunk->number);
 			chunk_store_failed(chunk, ret);
-			return true;
+			return;
 		}
 	}
-	if (chunk->diff_bdev) {
+	if (chunk->diff_bdev)
 		chunk_store_tobdev(chunk);
-		return true;
-	}
-	chunk_diff_write(chunk);
-	return true;
-}
-
-void diff_area_store_queue(struct diff_area *diff_area)
-{
-	unsigned int old_nofs;
-	struct blkfilter *prev_filter = current->blk_filter;
-
-	current->blk_filter = &diff_area->tracker->filter;
-	old_nofs = memalloc_nofs_save();
-	while (diff_area_store_one(diff_area))
-		;
-	memalloc_nofs_restore(old_nofs);
-	current->blk_filter = prev_filter;
+	else
+		chunk_diff_write(chunk);
+	return;
 }
 
 static inline struct chunk_io_ctx *chunk_io_ctx_take(
@@ -300,8 +247,6 @@ struct diff_area *diff_area_new(struct tracker *tracker,
 
 	tracker_get(tracker);
 	diff_area->tracker = tracker;
-	spin_lock_init(&diff_area->store_queue_lock);
-	INIT_LIST_HEAD(&diff_area->store_queue);
 
 	spin_lock_init(&diff_area->free_diff_buffers_lock);
 	INIT_LIST_HEAD(&diff_area->free_diff_buffers);

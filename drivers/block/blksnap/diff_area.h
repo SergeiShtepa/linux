@@ -39,11 +39,6 @@ struct tracker;
  *	device, or was overwritten on the snapshot. If there is no chunk in the
  *	map, then when accessing the snapshot, I/O units are redirected to the
  *	original device.
- * @store_queue_lock:
- *	The spinlock guarantees consistency of the linked lists of chunks
- *	queue.
- * @store_queue:
- *	The queue of chunks waiting to be stored to the difference storage.
  * @free_diff_buffers_lock:
  *	The spinlock guarantees consistency of the linked lists of free
  *	difference buffers.
@@ -112,9 +107,6 @@ struct diff_area {
 	unsigned long chunk_count;
 	struct xarray chunk_map;
 
-	spinlock_t store_queue_lock;
-	struct list_head store_queue;
-
 	spinlock_t free_diff_buffers_lock;
 	struct list_head free_diff_buffers;
 
@@ -153,7 +145,7 @@ static inline sector_t diff_area_chunk_sectors(struct diff_area *diff_area)
 	return (sector_t)(1ull << (diff_area->chunk_shift - SECTOR_SHIFT));
 };
 bool diff_area_cow(struct diff_area *diff_area, struct bio *bio);
-void diff_area_store_queue(struct diff_area *diff_area);
+void diff_area_store_chunk(struct diff_area *diff_area, struct chunk *chunk);
 bool diff_area_submit_chunk(struct diff_area *diff_area, struct bio *bio);
 void diff_area_rw_chunk(struct kref *kref);
 bool diff_area_cow_process_bio(struct diff_area *diff_area, struct bio *bio);
