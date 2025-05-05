@@ -40,7 +40,8 @@ struct blkfilter_operations {
 	struct list_head link;
 	struct module *owner;
 	const char *name;
-	struct blkfilter *(*attach)(struct block_device *bdev);
+	struct blkfilter *(*attach)(struct block_device *bdev,
+				    __u8 __user *opt, __u32 optlen);
 	void (*detach)(struct blkfilter *flt);
 	int (*ctl)(struct blkfilter *flt, const unsigned int cmd,
 		   __u8 __user *buf, __u32 *plen);

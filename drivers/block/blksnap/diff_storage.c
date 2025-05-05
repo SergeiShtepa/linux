@@ -22,12 +22,10 @@ static inline void diff_storage_event_nospace(struct diff_storage *diff_storage)
 	};
 
 	pr_info("The limit size of the difference storage has been reached\n");
-
 	event_gen(&diff_storage->event_queue,
 		  blksnap_event_code_no_space,
 		  &data, sizeof(data));
 }
-
 
 static void diff_storage_reallocate_work(struct work_struct *work)
 {

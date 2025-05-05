@@ -126,7 +126,7 @@ int blkfilter_ioctl_detach(struct block_device *bdev,
 	unsigned int memflags;
 	int ret = 0;
 
-	if (copy_from_user(&arg, argp, sizeof(name)))
+	if (copy_from_user(&arg, argp, sizeof(arg)))
 		return -EFAULT;
 
 	if (!is_disk_alive(bdev->bd_disk))

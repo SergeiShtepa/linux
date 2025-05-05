@@ -8,6 +8,7 @@
 #include "chunk.h"
 #include "diff_buffer.h"
 #include "diff_storage.h"
+#include "tracker.h"
 #include "params.h"
 
 struct chunk_bio {
@@ -65,17 +66,17 @@ static void chunk_store(struct chunk *chunk)
 {
 	struct diff_area *diff_area = diff_area_get(chunk->diff_area);
 	unsigned int old_nofs;
+	struct blkfilter* prev_filter;
 
 	WARN_ON_ONCE(chunk->state != CHUNK_ST_NEW &&
 		     chunk->state != CHUNK_ST_STORED);
 	chunk->state = CHUNK_ST_IN_MEMORY;
 
-	current->blk_filter = &diff_area->tracker->filter;
-
+	prev_filter = tracker_current_filter_set(diff_area->tracker);
 	old_nofs = memalloc_nofs_save();
 	diff_area_store_chunk(diff_area, chunk);
 	memalloc_nofs_restore(old_nofs);
-	current->blk_filter = prev_filter;
+	tracker_current_filter_restore(prev_filter);
 
 	diff_area_put(diff_area);
 }

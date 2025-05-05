@@ -71,4 +71,20 @@ static inline void tracker_get(struct tracker *tracker)
 int tracker_take_snapshot(struct tracker *tracker);
 void tracker_release_snapshot(struct tracker *tracker);
 
+static inline struct blkfilter* tracker_current_filter_set(
+						struct tracker *tracker)
+{
+	struct blkfilter* flt;
+
+	flt = current->blk_filter;
+	current->blk_filter = &tracker->filter;
+
+	return flt;
+};
+
+static inline void tracker_current_filter_restore(struct blkfilter* flt)
+{
+	current->blk_filter = flt;
+};
+
 #endif /* __BLKSNAP_TRACKER_H */
