@@ -10,7 +10,6 @@ unsigned int get_chunk_minimum_shift(void);
 unsigned int get_chunk_maximum_shift(void);
 unsigned long get_chunk_maximum_count(void);
 unsigned int get_chunk_maximum_in_queue(void);
-unsigned int get_free_diff_buffer_pool_size(void);
 sector_t get_diff_storage_minimum(void);
 
 bool blksnap_queue_work(struct work_struct *work);

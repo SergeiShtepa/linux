@@ -90,16 +90,6 @@ static unsigned int chunk_maximum_shift = 26;
 static unsigned int chunk_maximum_in_queue = 256;
 
 /*
- * The size of the pool of preallocated difference buffers.
- *
- * A buffer can be allocated for each chunk. After use, this buffer is not
- * released immediately, but is sent to the pool of free buffers. However, if
- * there are too many free buffers in the pool, then these free buffers will
- * be released immediately.
- */
-static unsigned int free_diff_buffer_pool_size = 128;
-
-/*
  * The minimum allowable size of the difference storage in sectors.
  *
  * The difference storage is a part of the disk space allocated for storing
@@ -160,11 +150,6 @@ unsigned long get_chunk_maximum_count(void)
 unsigned int get_chunk_maximum_in_queue(void)
 {
 	return chunk_maximum_in_queue;
-}
-
-unsigned int get_free_diff_buffer_pool_size(void)
-{
-	return free_diff_buffer_pool_size;
 }
 
 sector_t get_diff_storage_minimum(void)
@@ -365,8 +350,6 @@ static int __init parameters_init(void)
 	pr_debug("chunk_maximum_count_shift: %u\n", chunk_maximum_count_shift);
 
 	pr_debug("chunk_maximum_in_queue: %d\n", chunk_maximum_in_queue);
-	pr_debug("free_diff_buffer_pool_size: %d\n",
-		 free_diff_buffer_pool_size);
 	pr_debug("diff_storage_minimum: %d\n", diff_storage_minimum);
 
 	if (tracking_block_maximum_shift < tracking_block_minimum_shift) {
@@ -488,10 +471,6 @@ MODULE_PARM_DESC(chunk_maximum_shift,
 module_param_named(chunk_maximum_in_queue, chunk_maximum_in_queue, uint, 0644);
 MODULE_PARM_DESC(chunk_maximum_in_queue,
 		 "The maximum number of chunks in store queue");
-module_param_named(free_diff_buffer_pool_size, free_diff_buffer_pool_size,
-		   uint, 0644);
-MODULE_PARM_DESC(free_diff_buffer_pool_size,
-		 "The size of the pool of preallocated difference buffers");
 module_param_named(diff_storage_minimum, diff_storage_minimum, uint, 0644);
 MODULE_PARM_DESC(diff_storage_minimum,
 	"The minimum allowable size of the difference storage in sectors");
