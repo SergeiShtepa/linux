@@ -66,7 +66,7 @@ static void chunk_store(struct chunk *chunk)
 {
 	struct diff_area *diff_area = diff_area_get(chunk->diff_area);
 	unsigned int old_nofs;
-	struct blkfilter* prev_filter;
+	struct blkfilter *prev_filter;
 
 	WARN_ON_ONCE(chunk->state != CHUNK_ST_NEW &&
 		     chunk->state != CHUNK_ST_STORED);

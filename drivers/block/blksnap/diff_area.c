@@ -191,7 +191,6 @@ void diff_area_store_chunk(struct diff_area *diff_area, struct chunk *chunk)
 		chunk_store_tobdev(chunk);
 	else
 		chunk_diff_write(chunk);
-	return;
 }
 
 static inline struct chunk_io_ctx *chunk_io_ctx_take(
