@@ -185,7 +185,7 @@ static int ioctl_snapshot_create(struct blksnap_snapshot_create __user *uarg)
 		pr_err("Unable to create snapshot: invalid user buffer\n");
 		return -ENODATA;
 	}
-	fname = strndup_user((const char __user *)karg.diff_storage_filename,
+	fname = strndup_user(u64_to_user_ptr(karg.diff_storage_filename),
 			     PATH_MAX);
 	if (IS_ERR(fname))
 		return PTR_ERR(fname);
